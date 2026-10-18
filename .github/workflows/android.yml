@@ -2,18 +2,18 @@ name: Android CI
 
 concurrency:
   # A push and its matching pull-request event share the head branch name.
-  group: android-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: android-ci-\${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 on:
   push:
     branches: [main, work/android-foundation]
     paths-ignore:
-      - 'docs/CI_PERFORMANCE.md'
+      - docs/CI_PERFORMANCE.md
   pull_request:
     branches: [main, work/android-foundation]
     paths-ignore:
-      - 'docs/CI_PERFORMANCE.md'
+      - docs/CI_PERFORMANCE.md
 
 permissions:
   contents: read
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDK_ROOT="\${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
           if [ -z "$SDKMANAGER" ]; then
             echo "sdkmanager not found under $SDK_ROOT/cmdline-tools" >&2
@@ -60,22 +60,16 @@ jobs:
         run: |
           set -euo pipefail
           for _ in {1..100}; do printf 'y\n'; done > /tmp/android-sdk-licenses.txt
-          "${{ steps.android-sdk.outputs.sdkmanager }}" --licenses < /tmp/android-sdk-licenses.txt
+          "\${{ steps.android-sdk.outputs.sdkmanager }}" --licenses < /tmp/android-sdk-licenses.txt
 
-      - name: Install Android platform and build tools
+      - name: Install Android platform, build tools, pinned NDK and CMake
         shell: bash
         run: |
           set -euo pipefail
-          "${{ steps.android-sdk.outputs.sdkmanager }}" --install \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Install pinned NDK and CMake
-        shell: bash
-        run: |
-          set -euo pipefail
-          "${{ steps.android-sdk.outputs.sdkmanager }}" --install \
-            "ndk;26.3.11579264" \
+          "\${{ steps.android-sdk.outputs.sdkmanager }}" --install \\
+            "platforms;android-35" \\
+            "build-tools;35.0.0" \\
+            "ndk;26.3.11579264" \\
             "cmake;3.22.1"
 
       - name: Prepare pinned Snes9x source and license assets
@@ -90,18 +84,10 @@ jobs:
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           unzip -l "$APK" | tee /tmp/apk-contents.txt
-          grep -Eq 'lib/arm64-v8a/libnative-lib\.so$' /tmp/apk-contents.txt
+          grep -Eq 'lib/arm64-v8a/libnative-lib\\.so$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
- /tmp/apk-contents.txt; then
+          if grep -Eq 'lib/arm64-v8a/libc\\+\\+_shared\\.so$' /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
             exit 1
           fi
