@@ -1,5 +1,11 @@
 {
   "version": 1,
   "description": "Only MaizoSNES-compatible, operator-authorized public relays belong here. Deploy and verify an HTTPS directory + a reachable TCP relay before registering it.",
-  "servers": []
+  "servers": [
+    {
+      "name": "MaizoSNES Brasil",
+      "region": "BR",
+      "url": "https://maizosnes-relay-production.up.railway.app"
+    }
+  ]
 }
