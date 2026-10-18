@@ -5,6 +5,7 @@ package com.maizon.maizosnes
  * NOT the established MZNP v2 wire protocol. Save-state/ROM progress is intact.
  */
 internal enum class NetworkMode(val label: String, val hint: String) {
+    AUTO("Automático (recomendado)", "Encontra LAN e servidores MaizoSNES online sem inserir IP ou URL"),
     LOCAL("Offline local", "Dois controles no mesmo Android, sem rede"),
     LAN_AUTO("LAN automática", "Descobre salas na mesma rede Wi-Fi"),
     LAN_MANUAL("LAN por IP", "Conecta a um IPv4 e porta na mesma rede"),

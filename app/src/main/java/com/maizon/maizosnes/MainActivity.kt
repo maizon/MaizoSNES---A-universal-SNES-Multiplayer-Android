@@ -57,12 +57,16 @@ class MainActivity : ComponentActivity() {
     private var coverJob: Job? = null
     private var perfJob: Job? = null
     private val performanceText = androidx.compose.runtime.mutableStateOf("Aguardando métricas…")
-    private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.LAN_AUTO)
+    private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.AUTO)
     private val savedHost = androidx.compose.runtime.mutableStateOf("")
     private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
     private val relayAddress = androidx.compose.runtime.mutableStateOf("")
     private val relayRooms = androidx.compose.runtime.mutableStateOf<List<InternetRoom>>(emptyList())
     private val scanningRelay = androidx.compose.runtime.mutableStateOf(false)
+    private val autoRooms = androidx.compose.runtime.mutableStateOf<List<AutoRoom>>(emptyList())
+    private val autoServers = androidx.compose.runtime.mutableStateOf<List<AutoServerStatus>>(emptyList())
+    private val autoScanActive = androidx.compose.runtime.mutableStateOf(false)
+    private val autoNetworkStatus = androidx.compose.runtime.mutableStateOf("Buscando servidores disponíveis…")
     private val devUnlocked = androidx.compose.runtime.mutableStateOf(false)
     private val devShareEnabled = androidx.compose.runtime.mutableStateOf(false)
     private val lastNetworkMetrics = androidx.compose.runtime.mutableStateOf<NetworkMetrics?>(null)
@@ -138,10 +142,10 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Falha na inicialização do núcleo: " + initResult
         }
         appSettings.value = readSettings("profile_global_")
-        val restoredMode = prefs.getString("network_mode", NetworkMode.LAN_AUTO.name)
+        val restoredMode = prefs.getString("network_mode", NetworkMode.AUTO.name)
         connectionMode.value = runCatching {
-            NetworkMode.valueOf(restoredMode ?: NetworkMode.LAN_AUTO.name)
-        }.getOrDefault(NetworkMode.LAN_AUTO)
+            NetworkMode.valueOf(restoredMode ?: NetworkMode.AUTO.name)
+        }.getOrDefault(NetworkMode.AUTO)
         loadConnectionTarget()
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
@@ -190,6 +194,13 @@ class MainActivity : ComponentActivity() {
                     onRefreshRelayRooms = ::refreshRelayRooms,
                     onHostRelay = ::hostRelay,
                     onJoinRelay = ::joinRelay,
+                    autoRooms = autoRooms.value,
+                    autoServers = autoServers.value,
+                    autoStatus = autoNetworkStatus.value,
+                    autoScanActive = autoScanActive.value,
+                    onRefreshAutoRooms = ::refreshAutoRooms,
+                    onHostAutomatic = ::hostAutomatic,
+                    onJoinAutomatic = ::joinAutomatic,
                     shareRomAllowed = shareRomAllowed.value,
                     receiveRomAllowed = receiveRomAllowed.value,
                     onShareRomAllowedChanged = { shareRomAllowed.value = it },
@@ -320,6 +331,7 @@ class MainActivity : ComponentActivity() {
         connectionMode.value = next
         prefs.edit().putString("network_mode", next.name).apply()
         loadConnectionTarget()
+        if (next == NetworkMode.AUTO) refreshAutoRooms()
         if (next == NetworkMode.LOCAL) {
             setLocalMultiplayer(true)
         } else if (localPlayer2Enabled.value) {
@@ -905,6 +917,55 @@ class MainActivity : ComponentActivity() {
         }
     }.getOrNull()
 
+    private fun refreshAutoRooms() {
+        if (autoScanActive.value || netplaySession != null) return
+        autoScanActive.value = true
+        autoNetworkStatus.value = "Descobrindo servidores online…"
+        lifecycleScope.launch {
+            try {
+                val result = OnlineRegistry.scan()
+                autoRooms.value = result.rooms
+                autoServers.value = result.servers
+                autoNetworkStatus.value = result.error ?: (
+                    "${result.rooms.size} sala(s) • ${result.servers.size} servidor(es) online. " +
+                        "O MaizoSNES prioriza o menor tempo de resposta HTTP.")
+            } catch (error: Exception) {
+                autoRooms.value = emptyList()
+                autoServers.value = emptyList()
+                autoNetworkStatus.value = "Falha na busca automática: " +
+                    (error.message ?: "sem conexão")
+            } finally {
+                autoScanActive.value = false
+            }
+        }
+    }
+
+    private fun hostAutomatic() {
+        if (netplaySession != null) return
+        if (!hasLoadedRom || currentRomFile.value == null) {
+            autoNetworkStatus.value = "Abra uma ROM para criar sala online."
+            return
+        }
+        val fastest = autoServers.value.minByOrNull { it.latencyMs }
+        if (fastest == null) {
+            autoNetworkStatus.value =
+                "Nenhum servidor público MaizoSNES está disponível. " +
+                    "Use LAN ou configure um servidor próprio no modo avançado."
+            refreshAutoRooms()
+            return
+        }
+        startRelayRoom(null, fastest.relay.endpoint)
+    }
+
+    private fun joinAutomatic(room: AutoRoom) {
+        if (netplaySession != null) return
+        if (!hasLoadedRom) {
+            autoNetworkStatus.value = "Abra a mesma ROM para entrar na sala online."
+            return
+        }
+        startRelayRoom(room.id, room.endpoint)
+    }
+
     private fun changeRelayAddress(value: String) {
         if (netplaySession != null) return
         relayAddress.value = value.take(300)
@@ -947,8 +1008,9 @@ class MainActivity : ComponentActivity() {
         startRelayRoom(roomId)
     }
 
-    private fun startRelayRoom(joinRoomId: String?) {
-        if (relayAddress.value.isBlank()) {
+    private fun startRelayRoom(joinRoomId: String?,
+        serverEndpoint: String = relayAddress.value) {
+        if (serverEndpoint.isBlank()) {
             lanStatus.value = "Informe primeiro o IP ou URL do servidor."
             return
         }
@@ -956,7 +1018,7 @@ class MainActivity : ComponentActivity() {
             try {
                 lanStatus.value = "Consultando servidor de salas…"
                 val listing = withContext(Dispatchers.IO) {
-                    RelayDirectory.list(relayAddress.value)
+                    RelayDirectory.list(serverEndpoint)
                 }
                 val roomId = joinRoomId ?: java.util.UUID.randomUUID()
                     .toString().replace("-", "").take(16)

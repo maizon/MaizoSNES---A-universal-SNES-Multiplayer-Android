@@ -197,6 +197,13 @@ internal fun MaizoEmulatorApp(
     onRefreshRelayRooms: () -> Unit,
     onHostRelay: () -> Unit,
     onJoinRelay: (String) -> Unit,
+    autoRooms: List<AutoRoom>,
+    autoServers: List<AutoServerStatus>,
+    autoStatus: String,
+    autoScanActive: Boolean,
+    onRefreshAutoRooms: () -> Unit,
+    onHostAutomatic: () -> Unit,
+    onJoinAutomatic: (AutoRoom) -> Unit,
     shareRomAllowed: Boolean,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
@@ -304,6 +311,8 @@ internal fun MaizoEmulatorApp(
                 relayAddress, relayRooms, scanningRelay,
                 onRelayAddressChanged, onRefreshRelayRooms,
                 onHostRelay, onJoinRelay,
+                autoRooms, autoServers, autoStatus, autoScanActive,
+                onRefreshAutoRooms, onHostAutomatic, onJoinAutomatic,
                 shareRomAllowed, receiveRomAllowed,
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
                 onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
@@ -572,6 +581,13 @@ private fun MultiplayerScreen(
     onRefreshRelayRooms: () -> Unit,
     onHostRelay: () -> Unit,
     onJoinRelay: (String) -> Unit,
+    autoRooms: List<AutoRoom>,
+    autoServers: List<AutoServerStatus>,
+    autoStatus: String,
+    autoScanActive: Boolean,
+    onRefreshAutoRooms: () -> Unit,
+    onHostAutomatic: () -> Unit,
+    onJoinAutomatic: (AutoRoom) -> Unit,
     shareRomAllowed: Boolean,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
@@ -581,11 +597,14 @@ private fun MultiplayerScreen(
     onStop: () -> Unit,
     onLocalMode: (Boolean) -> Unit
 ) {
+    var advancedNetwork by remember { mutableStateOf(false) }
     var remoteHost by remember(connectionMode) { mutableStateOf(savedConnectionHost) }
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
     LaunchedEffect(connectionMode) {
-        if (connectionMode == NetworkMode.LAN_AUTO) onScanLan()
+        if (connectionMode == NetworkMode.LAN_AUTO ||
+            connectionMode == NetworkMode.AUTO) onScanLan()
+        if (connectionMode == NetworkMode.AUTO) onRefreshAutoRooms()
         if (connectionMode == NetworkMode.RELAY && relayAddress.isNotBlank()) onRefreshRelayRooms()
     }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
@@ -594,7 +613,7 @@ private fun MultiplayerScreen(
             fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Text("Jogue junto, onde estiver.", fontSize = 25.sp,
             lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold)
-        Text("LAN local • IP manual • salas pela internet com relay • 2 controles locais",
+        Text("Online com descoberta automática • LAN • opções avançadas de rede",
             color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
 
         Card(colors = CardDefaults.cardColors(containerColor = Panel),
@@ -605,7 +624,10 @@ private fun MultiplayerScreen(
                     fontWeight = FontWeight.Bold)
                 Text("Troque sem apagar saves, ROMs, configurações ou seus perfis de rede.",
                     color = Muted, fontSize = 11.sp)
-                NetworkMode.values().forEach { choice ->
+                NetworkMode.values().filter { choice ->
+                    advancedNetwork || choice == NetworkMode.AUTO ||
+                        choice == NetworkMode.LOCAL || choice == connectionMode
+                }.forEach { choice ->
                     Card(
                         modifier = Modifier.fillMaxWidth().clickable(enabled = !active) {
                             onConnectionModeChanged(choice)
@@ -626,6 +648,11 @@ private fun MultiplayerScreen(
                         }
                     }
                 }
+                TextButton(onClick = { advancedNetwork = !advancedNetwork },
+                    enabled = !active, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (advancedNetwork) "OCULTAR OPÇÕES AVANÇADAS"
+                        else "CONFIGURAÇÕES AVANÇADAS DE REDE ›", fontSize = 12.sp)
+                }
             }
         }
         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
@@ -637,7 +664,86 @@ private fun MultiplayerScreen(
             }
         }
 
-        if (connectionMode == NetworkMode.LAN_AUTO) Card(
+        if (connectionMode == NetworkMode.AUTO) Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("SALAS ONLINE", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Lista automática dos servidores oficiais MaizoSNES cadastrados. " +
+                    "Sem IP, URLs ou configurações para o jogador.", color = Muted,
+                    fontSize = 12.sp, lineHeight = 17.sp)
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        onRefreshAutoRooms()
+                        onScanLan()
+                    }, enabled = !autoScanActive && !active,
+                        modifier = Modifier.weight(1f)) {
+                        Text(if (autoScanActive) "BUSCANDO…" else "ATUALIZAR SALAS",
+                            fontSize = 11.sp)
+                    }
+                    Button(onClick = onHostAutomatic,
+                        enabled = ready && !active && autoServers.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                        Text("CRIAR SALA", fontSize = 11.sp)
+                    }
+                }
+                Surface(color = PanelRaised, shape = RoundedCornerShape(12.dp)) {
+                    Text(autoStatus, color = if (autoServers.isEmpty()) Muted else Mint,
+                        fontSize = 12.sp, lineHeight = 18.sp,
+                        modifier = Modifier.fillMaxWidth().padding(12.dp))
+                }
+                if (autoServers.isNotEmpty()) {
+                    Text("SERVIDORES ONLINE", color = Mint,
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    autoServers.forEach { server ->
+                        Row(Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(server.relay.name + " • " + server.relay.region,
+                                color = Color.White, fontSize = 12.sp)
+                            Text("Resposta HTTP " + server.latencyMs + " ms",
+                                color = Muted, fontSize = 10.sp)
+                        }
+                    }
+                }
+                if (autoRooms.isEmpty()) {
+                    Text("Nenhuma sala online disponível neste momento.",
+                        color = Muted, fontSize = 12.sp)
+                } else {
+                    autoRooms.forEach { room ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !active && ready) {
+                                onJoinAutomatic(room)
+                            },
+                            colors = CardDefaults.cardColors(containerColor = PanelRaised),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(room.game, fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold)
+                                    Text(room.serverName + " • " + room.region +
+                                        " • resposta " + room.latencyMs + " ms",
+                                        color = Muted, fontSize = 10.sp)
+                                }
+                                Text("ENTRAR ›", color = Mint,
+                                    fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+                Text("Servidores precisam ser publicados pelo administrador. " +
+                    "Se não houver servidor disponível, use LAN ou o modo avançado.",
+                    color = Muted, fontSize = 10.sp)
+            }
+        }
+
+        if (connectionMode == NetworkMode.LAN_AUTO ||
+            connectionMode == NetworkMode.AUTO) Card(
             colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)
         ) {
@@ -650,6 +756,12 @@ private fun MultiplayerScreen(
                     }
                     OutlinedButton(onClick = onScanLan, enabled = !active && !scanningLan) {
                         Text("BUSCAR", fontSize = 11.sp)
+                    }
+                }
+                if (connectionMode == NetworkMode.AUTO && !active) {
+                    OutlinedButton(onClick = { onHost(55435) },
+                        enabled = ready, modifier = Modifier.fillMaxWidth()) {
+                        Text("CRIAR SALA LAN SEM INTERNET")
                     }
                 }
                 if (lanRooms.isEmpty()) {
@@ -743,7 +855,9 @@ private fun MultiplayerScreen(
             }
         }
 
-        if (connectionMode != NetworkMode.LOCAL && connectionMode != NetworkMode.RELAY) Card(
+        if (connectionMode != NetworkMode.LOCAL &&
+            connectionMode != NetworkMode.RELAY &&
+            connectionMode != NetworkMode.AUTO) Card(
             colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)
         ) {
