@@ -1,9 +1,11 @@
 package com.maizon.maizosnes
 
+import android.graphics.Bitmap
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +36,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -75,9 +80,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -104,14 +112,20 @@ internal data class TouchLayout(
     val buttonsX: Float = 0.02f,
     val buttonsY: Float = 0.025f,
     val scale: Float = 1f,
-    val opacity: Float = 0.62f
+    val opacity: Float = 0.62f,
+    val preset: TouchPreset = TouchPreset.MAIZO,
+    val buttonShifts: Map<Int, ButtonShift> = emptyMap()
 )
 
 internal data class AppSettings(
     val aspect: AspectMode = AspectMode.CRT,
     val touch: TouchLayout = TouchLayout(),
     val audioEnabled: Boolean = true,
-    val volume: Float = 1f
+    val volume: Float = 1f,
+    val filter: VideoFilter = VideoFilter.ORIGINAL,
+    val performanceHud: Boolean = false,
+    val automaticCovers: Boolean = true,
+    val automaticBackup: Boolean = true
 )
 
 private val Bg = Color(0xFF080B13)
@@ -135,6 +149,7 @@ internal fun MaizoTheme(content: @Composable () -> Unit) {
 @Composable
 internal fun MaizoEmulatorApp(
     romNames: List<String>,
+    coverBitmaps: Map<String, Bitmap>,
     screen: AppScreen,
     statusMessage: String,
     currentRomName: String?,
@@ -142,6 +157,17 @@ internal fun MaizoEmulatorApp(
     paused: Boolean,
     settings: AppSettings,
     coreOptions: Map<String, String>,
+    performanceText: String,
+    onSelectTouchPreset: (TouchPreset) -> Unit,
+    connectionMode: NetworkMode,
+    onConnectionModeChanged: (NetworkMode) -> Unit,
+    savedConnectionHost: String,
+    savedConnectionPort: Int,
+    onSaveConnectionTarget: (String, Int) -> Unit,
+    devUnlocked: Boolean,
+    devShareEnabled: Boolean,
+    onDevUnlock: (String) -> Boolean,
+    onDevShareChanged: (Boolean) -> Unit,
     cheats: List<CheatEntry>,
     enabledCheatIds: Set<String>,
     cheatStatus: String,
@@ -172,6 +198,7 @@ internal fun MaizoEmulatorApp(
     onCoreOptionChanged: (String, String) -> Unit,
     onSaveSlot: (Int) -> Unit,
     onLoadSlot: (Int) -> Unit,
+    onRestoreMultiplayerBackup: (String) -> Unit,
     onExportState: () -> Unit,
     onImportState: () -> Unit,
     onResetGame: () -> Unit,
@@ -189,6 +216,7 @@ internal fun MaizoEmulatorApp(
             romName = currentRomName ?: "SNES",
             paused = paused,
             settings = settings,
+            performanceText = performanceText,
             editingControls = editingControls,
             onEditControls = { editingControls = !editingControls },
             onSettingsChanged = onSettingsChanged,
@@ -212,7 +240,9 @@ internal fun MaizoEmulatorApp(
                             }
                             TextButton(onClick = { showGameMenu = false }) { Text("FECHAR") }
                         }
-                        EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive)
+                        EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
+                            onSelectTouchPreset, connectionMode, onConnectionModeChanged,
+                            devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)
                     }
                 }
             }
@@ -233,12 +263,15 @@ internal fun MaizoEmulatorApp(
     ) { padding ->
         when (screen) {
             AppScreen.LIBRARY -> LibraryScreen(
-                Modifier.fillMaxSize().padding(padding), romNames, statusMessage, currentRomName,
-                hasLoadedRom, onChooseAddRom, onOpenRom, onContinueGame, onRenameRom
+                Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
+                statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
+                onOpenRom, onContinueGame, onRenameRom
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
+                connectionMode, onConnectionModeChanged,
+                savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
                 lanRooms, scanningLan, onScanLan,
                 shareRomAllowed, receiveRomAllowed,
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
@@ -248,7 +281,9 @@ internal fun MaizoEmulatorApp(
             AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("AJUSTES", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Text("Configure o emulador", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 14.dp))
-                EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive)
+                EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
+                    onSelectTouchPreset, connectionMode, onConnectionModeChanged,
+                    devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)
             }
             AppScreen.GAME -> Unit
         }
@@ -259,6 +294,7 @@ internal fun MaizoEmulatorApp(
 private fun LibraryScreen(
     modifier: Modifier,
     romNames: List<String>,
+    coverBitmaps: Map<String, Bitmap>,
     statusMessage: String,
     currentRomName: String?,
     hasLoadedRom: Boolean,
@@ -268,6 +304,10 @@ private fun LibraryScreen(
     onRenameRom: (String, String) -> Unit
 ) {
     var renameTarget by remember { mutableStateOf<String?>(null) }
+    var libraryQuery by remember { mutableStateOf("") }
+    val visibleRoms = remember(romNames, libraryQuery) {
+        romNames.filter { it.contains(libraryQuery.trim(), ignoreCase = true) }
+    }
     Column(modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Color(0xFF4540A1)))), contentAlignment = Alignment.Center) {
@@ -305,22 +345,38 @@ private fun LibraryScreen(
             }
             if (currentRomName != null) Text("Em memória: " + File(currentRomName).nameWithoutExtension, color = Mint, fontSize = 10.sp)
         }
-        if (romNames.isEmpty()) {
+        if (romNames.isNotEmpty()) {
+            TextField(
+                value = libraryQuery,
+                onValueChange = { libraryQuery = it.take(80) },
+                label = { Text("Pesquisar na biblioteca") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            )
+        }
+        if (visibleRoms.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Gamepad, null, tint = Accent, modifier = Modifier.size(54.dp))
+                    Icon(Icons.Default.Gamepad, null, tint = Accent, modifier = Modifier.size(50.dp))
                     Spacer(Modifier.height(12.dp))
-                    Text("Sua biblioteca está vazia", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Spacer(Modifier.height(5.dp))
-                    Text("Toque em Adicionar ROM para importar .sfc ou .smc.", color = Muted, fontSize = 12.sp)
+                    Text(if (romNames.isEmpty()) "Sua biblioteca está vazia"
+                        else "Nenhum jogo corresponde à pesquisa",
+                        fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("Adicione .sfc, .smc ou ZIP com sua ROM.",
+                        color = Muted, fontSize = 12.sp)
                 }
             }
         } else {
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                items(romNames, key = { it }) { name ->
-                    RomCard(name, currentRomName == name, { onOpenRom(name) }, { renameTarget = name })
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 165.dp),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                gridItems(visibleRoms, key = { it }) { name ->
+                    RomCard(name, currentRomName == name, coverBitmaps[name],
+                        { onOpenRom(name) }, { renameTarget = name })
                 }
-                item { Spacer(Modifier.height(8.dp)) }
             }
         }
         Text(statusMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 8.dp, bottom = 3.dp))
@@ -343,22 +399,63 @@ private fun LibraryScreen(
 }
 
 @Composable
-private fun RomCard(fileName: String, current: Boolean, onOpen: () -> Unit, onRename: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF28244A)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Gamepad, null, tint = Accent)
+private fun RomCard(
+    fileName: String,
+    current: Boolean,
+    cover: Bitmap?,
+    onOpen: () -> Unit,
+    onRename: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Panel)
+    ) {
+        Column {
+            Box(
+                Modifier.fillMaxWidth().height(150.dp)
+                    .background(Brush.linearGradient(
+                        listOf(Color(0xFF35305F), Color(0xFF141C30), Color(0xFF0A2D36))
+                    )),
+                contentAlignment = Alignment.Center
+            ) {
+                if (cover != null) {
+                    Image(
+                        bitmap = cover.asImageBitmap(),
+                        contentDescription = "Capa de " + File(fileName).nameWithoutExtension,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    Icon(Icons.Default.Gamepad, null, tint = Accent,
+                        modifier = Modifier.size(48.dp))
+                }
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(7.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xC5101523)
+                ) {
+                    Text(if (current) "EM MEMÓRIA" else "SNES",
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        color = if (current) Mint else Color.White,
+                        fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
             }
-            Spacer(Modifier.width(11.dp))
-            Column(Modifier.weight(1f)) {
-                Text(File(fileName).nameWithoutExtension, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
-                Text(File(fileName).extension.uppercase() + if (current) " • ABERTO" else " • ROM LOCAL", color = if (current) Mint else Muted, fontSize = 10.sp)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Button(onClick = onOpen, colors = ButtonDefaults.buttonColors(containerColor = Accent), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 5.dp)) {
+            Text(File(fileName).nameWithoutExtension,
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp),
+                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                maxLines = 2, lineHeight = 16.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onRename, contentPadding = PaddingValues(4.dp),
+                    modifier = Modifier.weight(1f)) { Text("EDITAR", fontSize = 10.sp) }
+                Button(onClick = onOpen,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 5.dp)) {
                     Text("JOGAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-                TextButton(onClick = onRename, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) { Text("Renomear", fontSize = 10.sp) }
             }
         }
     }
@@ -373,6 +470,11 @@ private fun MultiplayerScreen(
     localIpAddress: String,
     active: Boolean,
     localMultiplayer: Boolean,
+    connectionMode: NetworkMode,
+    onConnectionModeChanged: (NetworkMode) -> Unit,
+    savedConnectionHost: String,
+    savedConnectionPort: Int,
+    onSaveConnectionTarget: (String, Int) -> Unit,
     lanRooms: List<LanRoom>,
     scanningLan: Boolean,
     onScanLan: () -> Unit,
@@ -385,10 +487,12 @@ private fun MultiplayerScreen(
     onStop: () -> Unit,
     onLocalMode: (Boolean) -> Unit
 ) {
-    var remoteHost by remember { mutableStateOf("") }
-    var portText by remember { mutableStateOf("55435") }
+    var remoteHost by remember(connectionMode) { mutableStateOf(savedConnectionHost) }
+    var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
-    LaunchedEffect(Unit) { onScanLan() }
+    LaunchedEffect(connectionMode) {
+        if (connectionMode == NetworkMode.LAN_AUTO) onScanLan()
+    }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("MULTIPLAYER", color = Mint, fontSize = 11.sp,
@@ -398,6 +502,37 @@ private fun MultiplayerScreen(
         Text("LAN sem internet • Descoberta automática • IP manual • 2 controles locais",
             color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
 
+        Card(colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("MODO DE CONEXÃO", color = Mint, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold)
+                Text("Troque sem apagar saves, ROMs, configurações ou seus perfis de rede.",
+                    color = Muted, fontSize = 11.sp)
+                NetworkMode.values().forEach { choice ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !active) {
+                            onConnectionModeChanged(choice)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (choice == connectionMode)
+                                Color(0xFF2B2851) else PanelRaised)
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(choice.label, fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp)
+                                Text(choice.hint, color = Muted, fontSize = 10.sp)
+                            }
+                            if (choice == connectionMode) Text("✓", color = Mint)
+                        }
+                    }
+                }
+            }
+        }
         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("2 jogadores no mesmo aparelho", fontWeight = FontWeight.Bold)
@@ -407,7 +542,10 @@ private fun MultiplayerScreen(
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+        if (connectionMode == NetworkMode.LAN_AUTO) Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -444,19 +582,33 @@ private fun MultiplayerScreen(
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+        if (connectionMode != NetworkMode.LOCAL) Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Text("Sala por IP/porta — experimental", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text("Seu endereço IPv4 local: $localIpAddress", color = Mint, fontSize = 12.sp)
+                if (connectionMode == NetworkMode.INTERNET) {
+                    Text("MODO INTERNET: use VPN privada ou conexão confiável. " +
+                        "Não existe NAT traversal nem criptografia nativa; não exponha " +
+                        "a porta publicamente.", color = Color(0xFFFFBD85), fontSize = 11.sp)
+                }
                 Text(if (ready) "Jogo aberto: ${romName ?: "SNES"}"
                     else "Nenhum jogo aberto. Para criar sala, abra uma ROM. Para entrar sem a ROM, autorize o recebimento abaixo.",
                     color = if (ready) Mint else Muted, fontSize = 12.sp)
                 TextField(value = portText,
-                    onValueChange = { portText = it.filter(Char::isDigit).take(5) },
+                    onValueChange = {
+                        portText = it.filter(Char::isDigit).take(5)
+                        portText.toIntOrNull()?.let { p -> onSaveConnectionTarget(remoteHost, p) }
+                    },
                     label = { Text("Porta TCP (1024–65535)") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active)
                 TextField(value = remoteHost,
-                    onValueChange = { remoteHost = it.take(253) },
+                    onValueChange = {
+                        remoteHost = it.take(253)
+                        portText.toIntOrNull()?.let { p -> onSaveConnectionTarget(remoteHost, p) }
+                    },
                     label = { Text("IP ou domínio do anfitrião") },
                     placeholder = { Text("192.168.1.20") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active)
@@ -502,6 +654,7 @@ private fun GameScreen(
     romName: String,
     paused: Boolean,
     settings: AppSettings,
+    performanceText: String,
     editingControls: Boolean,
     onEditControls: () -> Unit,
     onSettingsChanged: (AppSettings) -> Unit,
@@ -512,10 +665,11 @@ private fun GameScreen(
     onInputChanged: (Int, Boolean) -> Unit
 ) {
     var toolbarExpanded by remember(romName) { mutableStateOf(false) }
+    var editIndividual by remember(romName) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         VideoSurface(settings.aspect, onSurfaceChanged)
         if (settings.touch.enabled) TouchOverlay(
-            settings.touch, onInputChanged, editingControls,
+            settings.touch, onInputChanged, editingControls, editIndividual,
             onLayoutChanged = { onSettingsChanged(settings.copy(touch = it)) }
         )
         if (!toolbarExpanded && !editingControls) {
@@ -548,6 +702,12 @@ private fun GameScreen(
                         fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                     if (paused) Text("PAUSADO", color = Mint, fontSize = 9.sp)
                 }
+                if (editingControls) TextButton(onClick = {
+                    editIndividual = !editIndividual
+                }) {
+                    Text(if (editIndividual) "BOTÕES" else "GRUPOS",
+                        fontSize = 10.sp, color = Mint)
+                }
                 if (settings.touch.enabled) TextButton(onClick = onEditControls) {
                     Text(if (editingControls) "SALVAR" else "EDITAR",
                         fontSize = 11.sp, color = Mint)
@@ -569,9 +729,21 @@ private fun GameScreen(
                 modifier = Modifier.align(Alignment.Center).padding(top = 45.dp),
                 color = Color(0xC91A2030), shape = RoundedCornerShape(16.dp)
             ) {
-                Text("ARRASTE O D-PAD OU OS BOTÕES • SALVAR AO TERMINAR",
+                Text(if (editIndividual)
+                    "ARRASTE OS BOTÕES INDIVIDUALMENTE • SALVAR"
+                    else "ARRASTE OS GRUPOS DE CONTROLE • SALVAR",
                     modifier = Modifier.padding(12.dp), color = Mint,
                     fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (settings.performanceHud && !editingControls) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                color = Color(0xA4131B28),
+                shape = RoundedCornerShape(9.dp)
+            ) {
+                Text(performanceText, modifier = Modifier.padding(8.dp),
+                    color = Mint, fontSize = 10.sp, lineHeight = 14.sp)
             }
         }
         if (paused && !editingControls) {
@@ -637,6 +809,7 @@ private fun TouchOverlay(
     layout: TouchLayout,
     onInputChanged: (Int, Boolean) -> Unit,
     editing: Boolean,
+    editIndividual: Boolean,
     onLayoutChanged: (TouchLayout) -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -652,6 +825,24 @@ private fun TouchOverlay(
         val yButtons = -(maxHeight * layout.buttonsY.coerceIn(0f, 0.65f))
         val xButtons = -(maxWidth * layout.buttonsX.coerceIn(0f, 0.65f))
 
+        fun positionFor(bit: Int): Modifier {
+            val shift = layout.buttonShifts[bit] ?: ButtonShift()
+            val placement = Modifier.offset(
+                x = maxWidth * shift.x.coerceIn(-0.30f, 0.30f),
+                y = maxHeight * shift.y.coerceIn(-0.30f, 0.30f)
+            )
+            val edit = if (editing && editIndividual) Modifier.pointerInput(bit) {
+                detectDragGestures { change, amount ->
+                    change.consume()
+                    val current = liveLayout.buttonShifts[bit] ?: ButtonShift()
+                    val updated = ButtonShift(current.x + amount.x / widthPx,
+                        current.y + amount.y / heightPx).sanitized()
+                    liveUpdate(liveLayout.copy(
+                        buttonShifts = liveLayout.buttonShifts + (bit to updated)))
+                }
+            } else Modifier
+            return placement.then(edit)
+        }
         val editDpad = if (editing) Modifier.pointerInput(editing) {
             detectDragGestures { change, dragAmount ->
                 change.consume()
@@ -661,7 +852,7 @@ private fun TouchOverlay(
                 ))
             }
         } else Modifier
-        val editButtons = if (editing) Modifier.pointerInput(editing) {
+        val editButtons = if (editing && !editIndividual) Modifier.pointerInput(editing) {
             detectDragGestures { change, dragAmount ->
                 change.consume()
                 liveUpdate(liveLayout.copy(
@@ -675,7 +866,7 @@ private fun TouchOverlay(
             modifier = Modifier.align(Alignment.BottomStart).offset(x = xDpad, y = yDpad)
                 .then(editDpad).padding(3.dp)
         ) {
-            GestureDpad(dpadSize, layout.opacity, onInputChanged, enabled = !editing)
+            GestureDpad(dpadSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset)
         }
         Column(
             modifier = Modifier.align(Alignment.BottomEnd).offset(x = xButtons, y = yButtons)
@@ -684,22 +875,22 @@ private fun TouchOverlay(
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("Y", 1, actionSize, layout.opacity, onInputChanged, enabled = !editing)
-                TouchButton("X", 9, actionSize, layout.opacity, onInputChanged, enabled = !editing)
+                TouchButton("Y", 1, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(1))
+                TouchButton("X", 9, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(9))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("B", 0, actionSize, layout.opacity, onInputChanged, enabled = !editing)
-                TouchButton("A", 8, actionSize, layout.opacity, onInputChanged, enabled = !editing)
+                TouchButton("B", 0, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(0))
+                TouchButton("A", 8, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(8))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("L", 10, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing)
-                TouchButton("R", 11, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing)
+                TouchButton("L", 10, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(10))
+                TouchButton("R", 11, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(11))
             }
         }
         Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            TouchButton("SELECT", 2, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing)
-            TouchButton("START", 3, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing)
+            TouchButton("SELECT", 2, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(2))
+            TouchButton("START", 3, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(3))
         }
     }
 }
@@ -714,7 +905,8 @@ private fun GestureDpad(
     cellSize: Float,
     opacity: Float,
     onInputChanged: (Int, Boolean) -> Unit,
-    enabled: Boolean
+    enabled: Boolean,
+    skin: TouchPreset = TouchPreset.MAIZO
 ) {
     val currentInput by rememberUpdatedState(onInputChanged)
     val gap = 2.dp
@@ -761,14 +953,14 @@ private fun GestureDpad(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(gap)
         ) {
-            TouchButton("↑", 4, cellSize, opacity, onInputChanged, enabled = false)
+            TouchButton("↑", 4, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
             Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                TouchButton("←", 6, cellSize, opacity, onInputChanged, enabled = false)
+                TouchButton("←", 6, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
                 Box(Modifier.size(cellSize.dp).clip(CircleShape)
                     .background(Color.White.copy(alpha = opacity * 0.22f)))
-                TouchButton("→", 7, cellSize, opacity, onInputChanged, enabled = false)
+                TouchButton("→", 7, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
             }
-            TouchButton("↓", 5, cellSize, opacity, onInputChanged, enabled = false)
+            TouchButton("↓", 5, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
         }
     }
 }
@@ -778,13 +970,28 @@ private fun TouchButton(
     label: String, bit: Int, size: Float, opacity: Float,
     onInputChanged: (Int, Boolean) -> Unit,
     isPill: Boolean = false,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    skin: TouchPreset = TouchPreset.MAIZO,
+    positionModifier: Modifier = Modifier
 ) {
-    val shape = if (isPill) RoundedCornerShape(18.dp) else CircleShape
+    val shape = if (isPill) RoundedCornerShape(18.dp)
+        else if (skin == TouchPreset.CTR) RoundedCornerShape(13.dp) else CircleShape
+    val baseColor = when (skin) {
+        TouchPreset.MAIZO -> Color(0xFFE4E8F2)
+        TouchPreset.CTR -> Color(0xFFFFD75E)
+        TouchPreset.ARMS -> Color(0xFF161C2B)
+        TouchPreset.PPSSPP -> Color(0xFF3F64A3)
+    }
+    val glyphColor = when (skin) {
+        TouchPreset.MAIZO, TouchPreset.CTR -> Color(0xFF0B1020)
+        TouchPreset.ARMS -> Color(0xFF7FFFE3)
+        TouchPreset.PPSSPP -> Color.White
+    }
     Box(
         modifier = (if (isPill) Modifier.width((size * 2f).dp).height(size.dp) else Modifier.size(size.dp))
+            .then(positionModifier)
             .clip(shape)
-            .background(Color(0xFFE4E8F2).copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.68f))
+            .background(baseColor.copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.68f))
             .border(1.dp, Color.White.copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.65f), shape)
             .then(if (enabled) Modifier.pointerInput(bit) {
                 awaitEachGesture {
@@ -795,7 +1002,7 @@ private fun TouchButton(
             } else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = Color(0xFF0B1020), fontWeight = FontWeight.Black,
+        Text(label, color = glyphColor, fontWeight = FontWeight.Black,
             fontSize = if (label.length > 3) 8.sp else 15.sp)
     }
 }
@@ -809,6 +1016,7 @@ private fun EmulatorSettings(
     onCoreOptionChanged: (String, String) -> Unit,
     onSaveSlot: (Int) -> Unit,
     onLoadSlot: (Int) -> Unit,
+    onRestoreMultiplayerBackup: (String) -> Unit,
     onExportState: () -> Unit,
     onImportState: () -> Unit,
     onResetGame: () -> Unit,
@@ -817,11 +1025,21 @@ private fun EmulatorSettings(
     cheatStatus: String,
     onToggleCheat: (String, Boolean) -> Unit,
     onRefreshCheats: () -> Unit,
-    cheatsLocked: Boolean
+    cheatsLocked: Boolean,
+    onSelectTouchPreset: (TouchPreset) -> Unit,
+    connectionMode: NetworkMode,
+    onConnectionModeChanged: (NetworkMode) -> Unit,
+    devUnlocked: Boolean,
+    devShareEnabled: Boolean,
+    onDevUnlock: (String) -> Boolean,
+    onDevShareChanged: (Boolean) -> Unit
 ) {
     var category by remember { mutableStateOf("Vídeo") }
+    var devCode by remember { mutableStateOf("") }
+    var devError by remember { mutableStateOf(false) }
+    var confirmBackup by remember { mutableStateOf<String?>(null) }
     var cheatFilter by remember { mutableStateOf("") }
-    val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Núcleo", "Estados")
+    val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Rede", "Núcleo", "Estados", "DEV")
     Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -852,6 +1070,23 @@ private fun EmulatorSettings(
                         }
                         ChoiceRow(mode.label, description, settings.aspect == mode) { onSettingsChanged(settings.copy(aspect = mode)) }
                     }
+                    SettingSectionTitle("Filtros leves", "Sem Vulkan/OpenGL adicional. Desative para desempenho máximo.")
+                    VideoFilter.values().forEach { filter ->
+                        ChoiceRow(filter.label, filter.description,
+                            settings.filter == filter) {
+                            onSettingsChanged(settings.copy(filter = filter))
+                        }
+                    }
+                    ToggleSettingRow("HUD de FPS e latência",
+                        "Mede quadros realmente executados, tempo de emulação e custo de apresentação.",
+                        settings.performanceHud) {
+                        onSettingsChanged(settings.copy(performanceHud = it))
+                    }
+                    ToggleSettingRow("Capas automáticas",
+                        "Baixa miniaturas opcionais via libretro para o cache do aplicativo.",
+                        settings.automaticCovers) {
+                        onSettingsChanged(settings.copy(automaticCovers = it))
+                    }
                     CoreOptionDefinitions.all.filter { it.category == "Vídeo" }.forEach { option ->
                         CoreOptionRow(option, coreOptions[option.key] ?: option.defaultValue, onCoreOptionChanged)
                     }
@@ -870,14 +1105,28 @@ private fun EmulatorSettings(
                     ToggleSettingRow("Controles na tela", "Exibe os comandos sobrepostos ao vídeo.", settings.touch.enabled) {
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
-                    SettingSectionTitle("Editor de layout", "Arraste os grupos no jogo em EDITAR ou use os sliders; posição, tamanho e transparência são salvos por perfil.")
+                    SettingSectionTitle("Layouts de controle",
+                        "Presets originais inspirados na ergonomia de CTR, ARMSX1 e PPSSPP; " +
+                            "totalmente ajustáveis, sem copiar imagens ou código dos projetos.")
+                    TouchPreset.values().forEach { preset ->
+                        ChoiceRow(preset.label, preset.hint,
+                            settings.touch.preset == preset) { onSelectTouchPreset(preset) }
+                    }
+                    SettingSectionTitle("Editor de layout",
+                        "No jogo: EDITAR → GRUPOS/BOTÕES. " +
+                            "Arraste D-pad/grupos ou ABXY, L/R, Start/Select individualmente.")
                     SliderSetting("D-pad: horizontal", settings.touch.dpadX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadX = it))) }, (settings.touch.dpadX * 100).toInt().toString() + "%")
                     SliderSetting("D-pad: subir", settings.touch.dpadY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadY = it))) }, (settings.touch.dpadY * 100).toInt().toString() + "%")
                     SliderSetting("Botões: horizontal", settings.touch.buttonsX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsX = it))) }, (settings.touch.buttonsX * 100).toInt().toString() + "%")
                     SliderSetting("Botões: subir", settings.touch.buttonsY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsY = it))) }, (settings.touch.buttonsY * 100).toInt().toString() + "%")
                     SliderSetting("Tamanho", settings.touch.scale, 0.70f..1.45f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(scale = it))) }, (settings.touch.scale * 100).toInt().toString() + "%")
                     SliderSetting("Opacidade", settings.touch.opacity, 0.20f..0.90f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(opacity = it))) }, (settings.touch.opacity * 100).toInt().toString() + "%")
-                    OutlinedButton(onClick = { onSettingsChanged(settings.copy(touch = TouchLayout())) }, modifier = Modifier.fillMaxWidth()) { Text("RESTAURAR LAYOUT PADRÃO") }
+                    OutlinedButton(onClick = {
+                        onSettingsChanged(settings.copy(
+                            touch = settings.touch.preset.defaultLayout()))
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("RESTAURAR O PRESET SELECIONADO")
+                    }
                 }
                 "Cheats" -> {
                     SettingSectionTitle("Cheats para o jogo aberto",
@@ -941,6 +1190,23 @@ private fun EmulatorSettings(
                         "podem falhar e afetar saves; use backup.",
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
                 }
+                "Rede" -> {
+                    SettingSectionTitle("Perfil de conexão",
+                        "Alternar modos não apaga ROMs, save states nem preferências; " +
+                            "as salas usam o protocolo MZNP v2 existente.")
+                    NetworkMode.values().forEach { mode ->
+                        ChoiceRow(mode.label, mode.hint, connectionMode == mode) {
+                            if (!cheatsLocked) onConnectionModeChanged(mode)
+                        }
+                    }
+                    if (cheatsLocked) Text("Para trocar modo, encerre a sessão ativa.",
+                        color = Color(0xFFFFC47E), fontSize = 11.sp)
+                    Text("LAN usa descoberta automática ou endereço manual. Internet " +
+                        "continua em lockstep, por isso o RTT real limita o FPS e a resposta. " +
+                        "O perfil Internet aumenta tolerância a jitter, sem desativar os " +
+                        "testes de hash ou corromper a sincronização.",
+                        color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+                }
                 "Núcleo" -> {
                     SettingSectionTitle("Snes9x 1.63", "Opções reais do núcleo. Alterações são consultadas no caminho de atualização do core.")
                     CoreOptionDefinitions.all.filter { it.category == "Núcleo" }.forEach { option ->
@@ -948,8 +1214,66 @@ private fun EmulatorSettings(
                     }
                     Text("Overclock e hacks podem causar incompatibilidades. Os valores padrão são recomendados.", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
                 }
+                "DEV" -> {
+                    SettingSectionTitle("Desenvolvedor",
+                        "Opções avançadas. O PIN de conveniência não concede permissões legais.")
+                    if (!devUnlocked) {
+                        TextField(
+                            value = devCode,
+                            onValueChange = { devCode = it.filter(Char::isDigit).take(8) },
+                            label = { Text("Código DEV") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(onClick = {
+                            devError = !onDevUnlock(devCode)
+                            if (!devError) devCode = ""
+                        }) { Text("DESBLOQUEAR") }
+                        if (devError) Text("Código incorreto.",
+                            color = Color(0xFFFFAA88), fontSize = 11.sp)
+                    } else {
+                        Text("DEV DESBLOQUEADO", color = Mint, fontWeight = FontWeight.Bold)
+                        ToggleSettingRow(
+                            "Compartilhamento geral (homebrew e comercial autorizado)",
+                            "Libera a opção avançada de enviar qualquer arquivo ROM " +
+                                "cuja redistribuição seja autorizada pelo titular. " +
+                                "O código 9090 não autoriza copiar jogos comerciais " +
+                                "protegidos; ambas as pessoas precisam concordar.",
+                            devShareEnabled,
+                            onDevShareChanged
+                        )
+                        Text("A transferência continua limitada a LAN privada, " +
+                            "com consentimento bilateral e verificação SHA-256. " +
+                            "Sem autenticação ou criptografia nativa: não exponha " +
+                            "portas à internet pública.",
+                            color = Color(0xFFFFC47E), fontSize = 11.sp)
+                    }
+                }
                 "Estados" -> {
                     SettingSectionTitle("Save states", "Slots privados do app e arquivos externos. O núcleo rejeita estados de outra ROM.")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(onClick = { confirmBackup = "before" },
+                            modifier = Modifier.weight(1f), enabled = !cheatsLocked) {
+                            Text("ANTES", fontSize = 11.sp)
+                        }
+                        OutlinedButton(onClick = { confirmBackup = "after" },
+                            modifier = Modifier.weight(1f), enabled = !cheatsLocked) {
+                            Text("DEPOIS", fontSize = 11.sp)
+                        }
+                    }
+                    Text("Restaurar cópia da última sessão multiplayer. " +
+                        "Isso substitui o estado em memória, mas não apaga slots manuais.",
+                        fontSize = 10.sp, color = Muted)
+                    ToggleSettingRow("Backup automático no multiplayer",
+                        "Cria snapshots de segurança antes e depois da sessão; " +
+                            "não sobrescreve os slots manuais.",
+                        settings.automaticBackup) {
+                        onSettingsChanged(settings.copy(automaticBackup = it))
+                    }
                     (1..3).forEach { slot ->
                         Card(colors = CardDefaults.cardColors(containerColor = PanelRaised), shape = RoundedCornerShape(15.dp)) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -970,6 +1294,23 @@ private fun EmulatorSettings(
                 }
             }
         }
+    }
+    confirmBackup?.let { stage ->
+        AlertDialog(
+            onDismissRequest = { confirmBackup = null },
+            title = { Text("Restaurar backup multiplayer?") },
+            text = { Text("O estado atual em memória será substituído pela " +
+                "cópia de " + (if (stage == "before") "ANTES da partida." else "DEPOIS da partida.")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRestoreMultiplayerBackup(stage)
+                    confirmBackup = null
+                }) { Text("RESTAURAR") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmBackup = null }) { Text("CANCELAR") }
+            }
+        )
     }
 }
 

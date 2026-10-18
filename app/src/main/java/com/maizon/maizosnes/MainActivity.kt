@@ -1,5 +1,6 @@
 package com.maizon.maizosnes
 
+import android.graphics.Bitmap
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -16,6 +17,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -42,6 +46,16 @@ class MainActivity : ComponentActivity() {
     private val coreSettings = androidx.compose.runtime.mutableStateMapOf<String, String>()
     private val paused = androidx.compose.runtime.mutableStateOf(false)
     private val pressedInputs = AtomicInteger(0)
+    private val coverBitmaps = androidx.compose.runtime.mutableStateMapOf<String, Bitmap>()
+    private var coverJob: Job? = null
+    private var perfJob: Job? = null
+    private val performanceText = androidx.compose.runtime.mutableStateOf("Aguardando métricas…")
+    private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.LAN_AUTO)
+    private val savedHost = androidx.compose.runtime.mutableStateOf("")
+    private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
+    private val devUnlocked = androidx.compose.runtime.mutableStateOf(false)
+    private val devShareEnabled = androidx.compose.runtime.mutableStateOf(false)
+    private val lastNetworkMetrics = androidx.compose.runtime.mutableStateOf<NetworkMetrics?>(null)
     private val lanStatus = androidx.compose.runtime.mutableStateOf("Sem sessão ativa.")
     private val availableLanRooms = androidx.compose.runtime.mutableStateOf<List<LanRoom>>(emptyList())
     private val scanningLan = androidx.compose.runtime.mutableStateOf(false)
@@ -96,12 +110,24 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Falha na inicialização do núcleo: " + initResult
         }
         appSettings.value = readSettings("profile_global_")
+        val restoredMode = prefs.getString("network_mode", NetworkMode.LAN_AUTO.name)
+        connectionMode.value = runCatching {
+            NetworkMode.valueOf(restoredMode ?: NetworkMode.LAN_AUTO.name)
+        }.getOrDefault(NetworkMode.LAN_AUTO)
+        loadConnectionTarget()
+        devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
+        devShareEnabled.value = prefs.getBoolean("dev_share_advanced", false) && devUnlocked.value
+        if (devShareEnabled.value) shareRomAllowed.value = true
+        runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
+        refreshCovers()
+        startPerformanceSampler()
         val localIp = getLocalIpv4()
 
         setContent {
             MaizoTheme {
                 MaizoEmulatorApp(
                     romNames = romFiles.value,
+                    coverBitmaps = coverBitmaps.toMap(),
                     screen = activeScreen.value,
                     statusMessage = statusMessage.value,
                     currentRomName = currentRomName.value,
@@ -109,6 +135,17 @@ class MainActivity : ComponentActivity() {
                     paused = paused.value,
                     settings = appSettings.value,
                     coreOptions = coreSettings.toMap(),
+                    performanceText = performanceText.value,
+                    onSelectTouchPreset = ::selectTouchPreset,
+                    connectionMode = connectionMode.value,
+                    onConnectionModeChanged = ::changeConnectionMode,
+                    savedConnectionHost = savedHost.value,
+                    savedConnectionPort = savedPort.value,
+                    onSaveConnectionTarget = ::saveConnectionTarget,
+                    devUnlocked = devUnlocked.value,
+                    devShareEnabled = devShareEnabled.value,
+                    onDevUnlock = ::unlockDev,
+                    onDevShareChanged = ::setAdvancedSharing,
                     multiplayerStatus = lanStatus.value,
                     lanRooms = availableLanRooms.value,
                     scanningLan = scanningLan.value,
@@ -139,6 +176,7 @@ class MainActivity : ComponentActivity() {
                     onCoreOptionChanged = ::changeCoreOption,
                     onSaveSlot = ::saveSlot,
                     onLoadSlot = ::loadSlot,
+                    onRestoreMultiplayerBackup = ::restoreMultiplayerBackup,
                     onExportState = { exportStateLauncher.launch(defaultStateName()) },
                     onImportState = { importStateLauncher.launch(arrayOf("*/*")) },
                     onResetGame = ::resetGame,
@@ -149,6 +187,129 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun refreshCovers() {
+        if (!appSettings.value.automaticCovers) {
+            coverJob?.cancel()
+            coverBitmaps.clear()
+            return
+        }
+        coverJob?.cancel()
+        val names = romFiles.value.take(48)
+        coverJob = lifecycleScope.launch {
+            for (name in names) {
+                if (!isActive || !appSettings.value.automaticCovers) break
+                if (coverBitmaps.containsKey(name)) continue
+                val file = File(romDirectory, name)
+                if (!file.isFile) continue
+                val bitmap = withContext(Dispatchers.IO) {
+                    runCatching { CoverArt.load(this@MainActivity, file) }.getOrNull()
+                }
+                if (bitmap != null && name in romFiles.value) {
+                    coverBitmaps[name] = bitmap
+                }
+            }
+        }
+    }
+
+    private fun startPerformanceSampler() {
+        perfJob?.cancel()
+        perfJob = lifecycleScope.launch {
+            var previous: LongArray? = null
+            var previousAt = System.nanoTime()
+            while (isActive) {
+                delay(1000)
+                if (!hasLoadedRom) {
+                    previous = null
+                    continue
+                }
+                val counters = runCatching {
+                    NativeBridge.nativeGetPerfCounters()
+                }.getOrNull() ?: continue
+                if (counters.size < 6) continue
+                val now = System.nanoTime()
+                val past = previous
+                if (past != null && appSettings.value.performanceHud) {
+                    val seconds = ((now - previousAt).toDouble() / 1e9).coerceAtLeast(0.01)
+                    val frames = (counters[0] - past[0]).coerceAtLeast(0L)
+                    val presented = (counters[2] - past[2]).coerceAtLeast(0L)
+                    val fps = frames / seconds
+                    val emuMs = if (frames > 0) (counters[1] - past[1]) / 1e6 / frames else 0.0
+                    val videoMs = if (presented > 0)
+                        (counters[3] - past[3]) / 1e6 / presented else 0.0
+                    val nominal = if (counters[4] > 0) 1e9 / counters[4] else 0.0
+                    val network = lastNetworkMetrics.value
+                    val base = String.format(java.util.Locale.US,
+                        "Emu %.1f / %.1f FPS • Núcleo %.2f ms\n" +
+                            "Vídeo %.2f ms • Áudio %d quadros", fps, nominal,
+                        emuMs, videoMs, counters[5])
+                    performanceText.value = if (network == null) base else base +
+                        String.format(java.util.Locale.US,
+                            "\nPeer espera %.1f / pico %.1f ms • %d travamentos/s",
+                            network.peerWaitMs, network.maxPeerWaitMs,
+                            network.stalledFrames)
+                }
+                previous = counters
+                previousAt = now
+            }
+        }
+    }
+
+    private fun loadConnectionTarget() {
+        val prefix = "network_" + connectionMode.value.name + "_"
+        savedHost.value = prefs.getString(prefix + "host", "") ?: ""
+        savedPort.value = prefs.getInt(prefix + "port", 55435).coerceIn(1024, 65535)
+    }
+
+    private fun changeConnectionMode(next: NetworkMode) {
+        if (netplaySession != null) {
+            lanStatus.value = "Encerre a partida antes de trocar o modo de conexão."
+            return
+        }
+        if (connectionMode.value == next) return
+        connectionMode.value = next
+        prefs.edit().putString("network_mode", next.name).apply()
+        loadConnectionTarget()
+        if (next == NetworkMode.LOCAL) {
+            setLocalMultiplayer(true)
+        } else if (localPlayer2Enabled.value) {
+            setLocalMultiplayer(false)
+        }
+        lanStatus.value = "Modo alterado sem apagar progresso: " + next.label
+    }
+
+    private fun saveConnectionTarget(host: String, port: Int) {
+        if (netplaySession != null || port !in 1024..65535) return
+        savedHost.value = host.take(253)
+        savedPort.value = port
+        val prefix = "network_" + connectionMode.value.name + "_"
+        prefs.edit().putString(prefix + "host", savedHost.value)
+            .putInt(prefix + "port", port).apply()
+    }
+
+    private fun unlockDev(code: String): Boolean {
+        if (code != "9090") return false
+        devUnlocked.value = true
+        prefs.edit().putBoolean("dev_unlocked", true).apply()
+        return true
+    }
+
+    private fun setAdvancedSharing(enabled: Boolean) {
+        if (!devUnlocked.value || netplaySession != null) return
+        devShareEnabled.value = enabled
+        shareRomAllowed.value = enabled
+        prefs.edit().putBoolean("dev_share_advanced", enabled).apply()
+    }
+
+    private fun selectTouchPreset(preset: TouchPreset) {
+        val prefix = profilePrefix(
+            if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
+        val saved = prefs.getString(prefix + "touch_preset_" + preset.name, null)
+            ?: prefs.getString("profile_global_touch_preset_" + preset.name, null)
+        val chosen = (TouchLayoutCodec.decode(saved, preset) ?: preset.defaultLayout())
+            .copy(enabled = appSettings.value.touch.enabled)
+        persistSettings(appSettings.value.copy(touch = chosen))
     }
 
     private fun getLocalIpv4(): String = runCatching {
@@ -263,6 +424,7 @@ class MainActivity : ComponentActivity() {
             ?.sortedBy { it.name.lowercase() }
             ?.map { it.name }
             ?: emptyList()
+        refreshCovers()
     }
 
     private fun renameRom(oldName: String, requestedName: String) {
@@ -311,6 +473,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         appSettings.value = readSettings(profilePrefix(file))
+        runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
         loadRomFile(file)
     }
 
@@ -495,6 +658,7 @@ class MainActivity : ComponentActivity() {
                 currentRomFile.value = installed
                 currentRomName.value = installed.name
                 appSettings.value = readSettings(profilePrefix(installed))
+                runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
                 cheatEntries.value = emptyList()
                 activeCheatIds.value = emptySet()
                 cheatRomKey = null
@@ -535,6 +699,7 @@ class MainActivity : ComponentActivity() {
         paused.value = true
         activeScreen.value = AppScreen.LIBRARY
         appSettings.value = readSettings("profile_global_")
+        runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
@@ -564,28 +729,51 @@ class MainActivity : ComponentActivity() {
             else prefix + suffix
         val aspectName = prefs.getString(key("aspect"), AspectMode.CRT.name) ?: AspectMode.CRT.name
         val aspect = runCatching { AspectMode.valueOf(aspectName) }.getOrDefault(AspectMode.CRT)
-        val touch = TouchLayout(
+        val selectedName = prefs.getString(key("touch_preset"), TouchPreset.MAIZO.name)
+            ?: TouchPreset.MAIZO.name
+        val preset = runCatching { TouchPreset.valueOf(selectedName) }
+            .getOrDefault(TouchPreset.MAIZO)
+        val legacy = TouchLayout(
             enabled = prefs.getBoolean(key("touch_enabled"), true),
             dpadX = prefs.getFloat(key("dpad_x"), 0.02f),
             dpadY = prefs.getFloat(key("dpad_y"), 0.025f),
             buttonsX = prefs.getFloat(key("buttons_x"), 0.02f),
             buttonsY = prefs.getFloat(key("buttons_y"), 0.025f),
             scale = prefs.getFloat(key("touch_scale"), 1f),
-            opacity = prefs.getFloat(key("touch_opacity"), 0.62f)
+            opacity = prefs.getFloat(key("touch_opacity"), 0.62f),
+            preset = preset
         )
+        val touch = TouchLayoutCodec.decode(
+            prefs.getString(key("touch_preset_" + preset.name), null), preset) ?: legacy
+        val filterName = prefs.getString(key("video_filter"), VideoFilter.ORIGINAL.name)
+            ?: VideoFilter.ORIGINAL.name
+        val filter = runCatching { VideoFilter.valueOf(filterName) }
+            .getOrDefault(VideoFilter.ORIGINAL)
         return AppSettings(
             aspect = aspect,
             touch = touch,
             audioEnabled = prefs.getBoolean(key("audio_enabled"), true),
-            volume = prefs.getFloat(key("audio_volume"), 1f)
+            volume = prefs.getFloat(key("audio_volume"), 1f),
+            filter = filter,
+            performanceHud = prefs.getBoolean(key("performance_hud"), false),
+            automaticCovers = prefs.getBoolean("library_covers_enabled", true),
+            automaticBackup = prefs.getBoolean("automatic_netplay_backups", true)
         )
     }
 
     private fun persistSettings(next: AppSettings) {
         appSettings.value = next
         val prefix = profilePrefix(if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
+        val coversChanged = next.automaticCovers != prefs.getBoolean("library_covers_enabled", true)
         prefs.edit()
             .putString(prefix + "aspect", next.aspect.name)
+            .putString(prefix + "video_filter", next.filter.name)
+            .putBoolean(prefix + "performance_hud", next.performanceHud)
+            .putString(prefix + "touch_preset", next.touch.preset.name)
+            .putString(prefix + "touch_preset_" + next.touch.preset.name,
+                TouchLayoutCodec.encode(next.touch))
+            .putBoolean("library_covers_enabled", next.automaticCovers)
+            .putBoolean("automatic_netplay_backups", next.automaticBackup)
             .putBoolean(prefix + "touch_enabled", next.touch.enabled)
             .putFloat(prefix + "dpad_x", next.touch.dpadX)
             .putFloat(prefix + "dpad_y", next.touch.dpadY)
@@ -598,6 +786,8 @@ class MainActivity : ComponentActivity() {
             .apply()
         audioOutput?.setEnabled(next.audioEnabled)
         audioOutput?.setVolume(next.volume)
+        runCatching { NativeBridge.nativeSetVideoFilter(next.filter.nativeId) }
+        if (coversChanged) refreshCovers()
     }
 
     private fun changeCoreOption(key: String, value: String) {
@@ -862,6 +1052,62 @@ class MainActivity : ComponentActivity() {
 
     private fun joinMultiplayer(host: String, port: Int) = startNetplay(host, port)
 
+    private fun restoreMultiplayerBackup(stage: String) {
+        if (stage !in setOf("before", "after") || netplaySession != null || !hasLoadedRom) {
+            statusMessage.value = "Encerre a sessão multiplayer e carregue a ROM correta."
+            return
+        }
+        val rom = currentRomFile.value ?: return
+        lifecycleScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    val hash = romSha256(rom).take(22)
+                    val name = "multiplayer_" + hash + "_" + stage + ".mzstate"
+                    val snapshot = File(stateDirectory, name)
+                    require(snapshot.isFile) { "Backup não encontrado para esta ROM." }
+                    require(snapshot.length() in 29L..(64L * 1024 * 1024 + 28)) {
+                        "Tamanho do backup inválido."
+                    }
+                    snapshot.readBytes()
+                }
+                if (currentRomFile.value?.absolutePath != rom.absolutePath) return@launch
+                applyState(bytes, if (stage == "before") "antes do multiplayer"
+                    else "depois do multiplayer")
+            } catch (error: Exception) {
+                statusMessage.value = "Backup não restaurado: " + (error.message ?: "arquivo ausente")
+            }
+        }
+    }
+
+    private fun createMultiplayerBackup(stage: String) {
+        if (!appSettings.value.automaticBackup || !hasLoadedRom) return
+        val rom = currentRomFile.value ?: return
+        // Snapshot is captured before switching clocks, or immediately after
+        // the network session stops. Writes are independent of manual slots.
+        val snapshot = runCatching { NativeBridge.nativeSerializeState() }.getOrNull()
+            ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                val hash = romSha256(rom).take(22)
+                val destination = File(stateDirectory, "multiplayer_" + hash +
+                    "_" + stage + ".mzstate")
+                val partial = File(stateDirectory, destination.name + ".partial")
+                partial.writeBytes(snapshot)
+                if (!partial.renameTo(destination)) {
+                    destination.delete()
+                    check(partial.renameTo(destination)) {
+                        "Falha ao gravar cópia de segurança."
+                    }
+                }
+            }.onFailure { error ->
+                runOnUiThread {
+                    statusMessage.value = "Aviso: backup multiplayer não salvo: " +
+                        (error.message ?: "erro de armazenamento")
+                }
+            }
+        }
+    }
+
     private fun startNetplay(host: String?, port: Int) {
         if (netplaySession != null) return
         if (host == null && (!hasLoadedRom || currentRomFile.value == null)) {
@@ -878,6 +1124,8 @@ class MainActivity : ComponentActivity() {
         }
         userPaused = true
         syncPlaybackState()
+        createMultiplayerBackup("before")
+        lastNetworkMetrics.value = null
         val current = currentRomFile.value
         lateinit var session: NetplaySession
         session = NetplaySession(
@@ -890,6 +1138,20 @@ class MainActivity : ComponentActivity() {
             step = { player1, player2 -> NativeBridge.nativeNetplayStep(player1, player2) },
             stateHash = { NativeBridge.nativeNetplayStateHash() },
             framePeriodNs = { NativeBridge.nativeGetFramePeriodNs() },
+            mode = connectionMode.value,
+            onMetrics = { metrics ->
+                runOnUiThread {
+                    if (netplaySession === session) {
+                        lastNetworkMetrics.value = metrics
+                        lanStatus.value = String.format(java.util.Locale.US,
+                            "Quadro %d • espera peer %.1f ms (pico %.1f ms) • " +
+                                "%.1f FPS • atrasos %d/s",
+                            metrics.frame, metrics.peerWaitMs,
+                            metrics.maxPeerWaitMs, metrics.effectiveFps,
+                            metrics.stalledFrames)
+                    }
+                }
+            },
             shareAllowedByHost = shareRomAllowed.value && host == null,
             receiveAllowedByClient = receiveRomAllowed.value && host != null,
             onReceiveRom = ::installReceivedRom,
@@ -911,6 +1173,9 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (netplaySession === session) {
                         netplaySession = null
+                        runCatching { NativeBridge.nativeSetPaused(true) }
+                        createMultiplayerBackup("after")
+                        lastNetworkMetrics.value = null
                         runCatching { hostWifiLock?.release() }
                         hostWifiLock = null
                         lanStatus.value = message
@@ -973,6 +1238,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        coverJob?.cancel()
+        perfJob?.cancel()
         netplaySession?.stop()
         runCatching { hostWifiLock?.release() }
         hostWifiLock = null

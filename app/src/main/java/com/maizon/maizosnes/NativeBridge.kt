@@ -17,6 +17,10 @@ object NativeBridge {
     external fun nativeGetFramePeriodNs(): Long
     external fun nativeNetplayStateHash(): Long
     external fun nativeSetPaused(paused: Boolean)
+    /** Cheap optional RGB565 filters (0 original, 1 scanline, 2 soft, 3 combined). */
+    external fun nativeSetVideoFilter(mode: Int)
+    /** Cumulative counters: frames, emuNs, presentedFrames, presentNs, targetFrameNs, audioFramesQueued. */
+    external fun nativeGetPerfCounters(): LongArray
     /** Applies an actual Snes9x libretro option through the frontend bridge. */
     external fun nativeSetCoreOption(key: String, value: String)
     /** Copies interleaved stereo PCM16 values into buffer. Returns the number of values written. */

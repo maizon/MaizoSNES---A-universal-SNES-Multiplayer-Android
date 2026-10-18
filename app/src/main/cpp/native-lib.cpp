@@ -48,6 +48,11 @@ int g_surfaceWidth = 0;
 int g_surfaceHeight = 0;
 std::thread g_frameThread;
 std::atomic<int64_t> g_frameDurationNs{16683333};
+std::atomic<int> g_videoFilter{0}; // 0=original, 1=scanlines, 2=soft, 3=soft+scanlines
+std::atomic<uint64_t> g_emuFrames{0};
+std::atomic<uint64_t> g_emuNs{0};
+std::atomic<uint64_t> g_presentFrames{0};
+std::atomic<uint64_t> g_presentNs{0};
 std::atomic<bool> g_coreOptionsDirty{false};
 
 // Defaults use option values from the pinned Snes9x 1.63 libretro_core_options.h.
@@ -268,20 +273,45 @@ void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned heig
         return;
     }
 
+    const int filter = g_videoFilter.load(std::memory_order_relaxed);
+    const auto presentBegin = std::chrono::steady_clock::now();
     for (unsigned y = 0; y < copyHeight; ++y) {
         uint16_t* dst = destination + static_cast<size_t>(y) * buffer.stride;
         const uint8_t* src = sourceBytes + static_cast<size_t>(y) * pitch;
-        if (g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
+        if (filter == 0 && g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
+            // Fast path: no extra per-pixel work or intermediate buffer.
             std::memcpy(dst, src, static_cast<size_t>(copyWidth) * sizeof(uint16_t));
-        } else if (g_pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555) {
-            const auto* src16 = reinterpret_cast<const uint16_t*>(src);
-            for (unsigned x = 0; x < copyWidth; ++x) dst[x] = convert1555(src16[x]);
-        } else {
-            const auto* src32 = reinterpret_cast<const uint32_t*>(src);
-            for (unsigned x = 0; x < copyWidth; ++x) dst[x] = convertXrgb8888(src32[x]);
+            continue;
+        }
+        uint16_t previous = 0;
+        for (unsigned x = 0; x < copyWidth; ++x) {
+            uint16_t pixel;
+            if (g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
+                pixel = reinterpret_cast<const uint16_t*>(src)[x];
+            } else if (g_pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555) {
+                pixel = convert1555(reinterpret_cast<const uint16_t*>(src)[x]);
+            } else {
+                pixel = convertXrgb8888(reinterpret_cast<const uint32_t*>(src)[x]);
+            }
+            uint16_t result = pixel;
+            if ((filter & 2) != 0 && x > 0) {
+                result = static_cast<uint16_t>(((pixel & 0xF7DEu) >> 1) +
+                                               ((previous & 0xF7DEu) >> 1));
+            }
+            previous = pixel;
+            if ((filter & 1) != 0 && (y & 1u) != 0) {
+                // Lightweight scanline darkening, no OpenGL shaders or allocations.
+                result = static_cast<uint16_t>(((result & 0xF7DEu) >> 1) +
+                                               ((result & 0xE79Cu) >> 2));
+            }
+            dst[x] = result;
         }
     }
     ANativeWindow_unlockAndPost(g_window);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - presentBegin).count();
+    g_presentNs.fetch_add(static_cast<uint64_t>(std::max<int64_t>(elapsed, 0)), std::memory_order_relaxed);
+    g_presentFrames.fetch_add(1, std::memory_order_relaxed);
 }
 
 void stopFrameThread() {
@@ -294,20 +324,28 @@ void startFrameThread() {
     g_runFrames.store(true, std::memory_order_release);
     g_frameThread = std::thread([] {
         using clock = std::chrono::steady_clock;
-        const auto frameDuration = std::chrono::nanoseconds(
-            g_frameDurationNs.load(std::memory_order_acquire));
+        auto deadline = clock::now();
         while (g_runFrames.load(std::memory_order_acquire)) {
             if (g_paused.load(std::memory_order_acquire)) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                deadline = clock::now();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
-            const auto frameStart = clock::now();
+            const auto begin = clock::now();
             {
                 std::lock_guard<std::mutex> lock(g_coreMutex);
                 if (!g_gameLoaded.load(std::memory_order_acquire)) break;
                 retro_run();
             }
-            std::this_thread::sleep_until(frameStart + frameDuration);
+            const auto after = clock::now();
+            g_emuFrames.fetch_add(1, std::memory_order_relaxed);
+            g_emuNs.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<
+                std::chrono::nanoseconds>(after - begin).count()), std::memory_order_relaxed);
+            const auto duration = std::chrono::nanoseconds(
+                g_frameDurationNs.load(std::memory_order_acquire));
+            deadline += duration;
+            if (after > deadline + duration * 2) deadline = after;
+            if (deadline > after) std::this_thread::sleep_until(deadline);
         }
         g_runFrames.store(false, std::memory_order_release);
     });
@@ -457,7 +495,12 @@ Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStep(
     if (!g_gameLoaded.load(std::memory_order_acquire)) return -2;
     g_inputMask.store(static_cast<uint32_t>(player1) & 0xffffu, std::memory_order_release);
     g_player2InputMask.store(static_cast<uint32_t>(player2) & 0xffffu, std::memory_order_release);
+    const auto begin = std::chrono::steady_clock::now();
     retro_run();
+    const auto after = std::chrono::steady_clock::now();
+    g_emuFrames.fetch_add(1, std::memory_order_relaxed);
+    g_emuNs.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<
+        std::chrono::nanoseconds>(after - begin).count()), std::memory_order_relaxed);
     return 0;
 }
 
@@ -475,6 +518,29 @@ Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStateHash(JNIEnv*, jobject) 
     std::vector<uint8_t> bytes(size);
     if (!retro_serialize(bytes.data(), bytes.size())) return 0;
     return static_cast<jlong>(fingerprintBytes(bytes.data(), bytes.size()));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetVideoFilter(
+    JNIEnv*, jobject, jint filter) {
+    g_videoFilter.store(std::max(0, std::min(3, static_cast<int>(filter))),
+                        std::memory_order_release);
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeGetPerfCounters(JNIEnv* env, jobject) {
+    const jlong stats[6] = {
+        static_cast<jlong>(g_emuFrames.load(std::memory_order_relaxed)),
+        static_cast<jlong>(g_emuNs.load(std::memory_order_relaxed)),
+        static_cast<jlong>(g_presentFrames.load(std::memory_order_relaxed)),
+        static_cast<jlong>(g_presentNs.load(std::memory_order_relaxed)),
+        static_cast<jlong>(g_frameDurationNs.load(std::memory_order_relaxed)),
+        static_cast<jlong>((g_audioWrite.load(std::memory_order_acquire) -
+                            g_audioRead.load(std::memory_order_acquire)) / 2u)
+    };
+    jlongArray result = env->NewLongArray(6);
+    if (result) env->SetLongArrayRegion(result, 0, 6, stats);
+    return result;
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -725,5 +791,9 @@ Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
     g_netplayMode.store(false, std::memory_order_release);
     g_audioWrite.store(0, std::memory_order_release);
     g_audioRead.store(0, std::memory_order_release);
+    g_emuFrames.store(0, std::memory_order_release);
+    g_emuNs.store(0, std::memory_order_release);
+    g_presentFrames.store(0, std::memory_order_release);
+    g_presentNs.store(0, std::memory_order_release);
     logMessage(ANDROID_LOG_INFO, "Snes9x native bridge shut down");
 }

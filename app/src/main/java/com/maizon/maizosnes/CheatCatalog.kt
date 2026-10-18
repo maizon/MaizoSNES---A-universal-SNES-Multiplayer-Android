@@ -42,8 +42,10 @@ internal object CheatCatalog {
 
     fun find(context: Context, romFile: File, refresh: Boolean = false): CheatSearchResult {
         val name = romFile.nameWithoutExtension
+        val verified = runCatching { RomDatabase.lookup(context, romFile, refresh) }.getOrNull()
         val headerTitle = readSnesHeaderTitle(romFile)
-        val keys = listOfNotNull(normalize(name), headerTitle?.let(::normalize))
+        val keys = (if (verified != null) listOf(normalize(verified.title))
+            else listOfNotNull(normalize(name), headerTitle?.let(::normalize)))
             .filter { it.length >= 4 }.toSet()
         if (keys.isEmpty()) return CheatSearchResult(emptyList(),
             "ROM sem nome ou título interno suficiente para identificar cheats.")
@@ -58,13 +60,19 @@ internal object CheatCatalog {
             if (!candidate.endsWith(".cht", ignoreCase = true)) continue
             if (normalize(candidate.removeSuffix(".cht")) !in keys) continue
             if (excludeVariants.containsMatchIn(candidate) &&
-                !excludeVariants.containsMatchIn(name)) continue
+                !excludeVariants.containsMatchIn(verified?.title ?: name)) continue
+            if (verified?.region != null) {
+                val regionTag = Regex("\\((USA|Europe|Japan|World|Brazil)(?:, [^)]*)?\\)",
+                    RegexOption.IGNORE_CASE).find(candidate)?.groupValues?.get(1)
+                if (regionTag != null && !regionTag.equals("World", true) &&
+                    !candidate.contains(verified.region, ignoreCase = true)) continue
+            }
             candidates.add(candidate)
         }
         if (candidates.isEmpty()) return CheatSearchResult(emptyList(),
             "Nenhum cheat encontrado para '$name'. A busca usa o nome da ROM; renomeações e hacks podem dificultar a identificação.")
-        val region = Regex("\\((USA|Europe|Japan|World|Brazil)\\)", RegexOption.IGNORE_CASE)
-            .find(name)?.groupValues?.get(1)?.lowercase()
+        val region = verified?.region?.lowercase() ?: Regex("\\((USA|Europe|Japan|World|Brazil)\\)",
+            RegexOption.IGNORE_CASE).find(name)?.groupValues?.get(1)?.lowercase()
         val ranked = candidates.sortedWith(
             compareByDescending<String> { file ->
                 var score = 0
@@ -88,9 +96,13 @@ internal object CheatCatalog {
         }
         val limited = result.take(1200)
         val message = when {
-            limited.isNotEmpty() ->
-                "${limited.size} cheats encontrados em ${ranked.size} arquivo(s) da libretro-database. " +
-                    "Conferir região e revisão: correspondência por nome, não por hash da ROM."
+            limited.isNotEmpty() -> {
+                val confidence = if (verified != null)
+                    "CRC32 + tamanho + SHA-1 confirmados: ${verified.title}. " +
+                        "Cheats ainda exigem teste por versão."
+                else "Sem checksum identificado: resultados por nome/título, não verificados."
+                "${limited.size} cheats encontrados. $confidence"
+            }
             failures.isNotEmpty() -> "Falha ao baixar códigos: ${failures.first()}"
             else -> "Foram encontrados arquivos de cheats, mas não havia códigos compatíveis."
         }

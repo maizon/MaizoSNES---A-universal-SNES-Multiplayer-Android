@@ -28,3 +28,12 @@ No ROMs or copyrighted game assets are bundled.
 - Licença do repositório: **Creative Commons Attribution–ShareAlike 4.0 International** (CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/ e https://github.com/libretro/libretro-database/blob/master/LICENSE
 - Arquivos `.cht` **não são incluídos no APK**. Somente códigos do jogo consultado são baixados pela interface e armazenados em cache interno do aparelho. O MaizoSNES modifica a apresentação dos arquivos (filtra códigos e oferece toggles de habilitação).
 - Créditos pela compilação da base: equipe e contribuidores libretro-database. As descrições de cheats são mantidas com atribuição de origem do arquivo para o usuário.
+
+## Inspiração de controles e biblioteca (nenhum código/arte importados)
+
+- [CTR Native Android](https://github.com/igawa6/ctr-native-android): referência pública do layout/ergonomia, código sob GPLv3; não copiamos componentes dele.
+- [ARMSX1](https://github.com/ARMSX2/ARMSX1): referência de UX, contém partes sob direitos reservados/licenças específicas; nenhuma implementação ou asset do ARMSX1 foi copiada.
+- [PPSSPP](https://github.com/hrydgard/ppsspp): referência de editor de controles e experiência de baixo lag; GPLv2+; não incorporamos código.
+- [Daijishou](https://github.com/TapiocaFox/Daijishou): referência de navegação, carrosséis e coleção; o repositório público é primordialmente de assets e declara MIT para o próprio conteúdo licenciado. Nenhum asset foi importado.
+- [Libretro No-Intro DAT](https://github.com/libretro/libretro-database): checksum de jogo CRC32 + tamanho + SHA-1, baixado sob demanda e armazenado em cache privado. O repositório da base declara CC BY-SA 4.0; revisão fixada `12c21cf79f1e20eff6ac68b80875816c717d0a7a`.
+- [Libretro Thumbnails](https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/Named_Boxarts/): serviço de capas requisitadas pela pessoa no aparelho. As artes dos jogos podem possuir direitos distintos; não estão no APK, repositório ou distribuição do MaizoSNES.

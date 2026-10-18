@@ -5,13 +5,13 @@ Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.6
 ## Funcionalidades implementadas no código
 
 - Biblioteca privada: importar ROMs `.sfc`, `.smc` ou ZIP com uma ROM, listar, renomear e abrir sem picker repetitivo.
-- Tela de jogo própria, landscape imersivo, vídeo via SurfaceView/ANativeWindow e menu superior recolhível a **círculo pequeno semitransparente** no canto superior direito.
+- Tela de jogo própria, landscape imersivo, vídeo SurfaceView/ANativeWindow e menu superior recolhível a um círculo discreto semitransparente.
 - Aspectos 4:3, pixel perfect com escala inteira de referência, 16:9, stretch e fill.
-- Controles táteis semitransparentes: direcional **contínuo e diagonal**, ABXY, L/R e Start/Select; suporte a toques simultâneos.
+- Controles táteis semitransparentes, diagonais e multitouch; **quatro presets originais** (Maizo, inspirado em CTR, inspirado em ARMSX1 e inspirado em PPSSPP), com edição de grupos e de botões individuais.
 - **Editar** diretamente na tela de jogo: arrastar grupos D-pad e botões, salvar layout; tamanho/posição/transparência ajustáveis também pelos sliders, com preferências globais e por ROM.
 - Input físico por joystick/gamepad Android e teclado; multitarefa do primeiro e segundo gamepads separada, evitando mistura de máscaras.
 - Áudio AudioTrack estéreo com buffer reduzido e modo low-latency quando o Android oferece.
-- Ajustes por categoria (vídeo, áudio, controles, cheats, núcleo e estados), opções reais expostas via libretro.
+- Ajustes por categoria (vídeo, áudio, controles, cheats, rede, núcleo, estados e DEV), opções reais expostas via libretro.
 - **Cheats automáticos**: identifica ROM pelo nome ou título interno SNES, encontra códigos na base libretro-database CC BY-SA 4.0 via HTTPS, permite selecionar quais ativar e mantém cache para uso offline posterior. A busca é heurística: checar revisão/região.
 - Três slots de save state mais importação/exportação e bloqueio de restore com ROM divergente.
 - **Multiplayer local sem internet**: controle tátil P1 + gamepad P2, ou dois gamepads em P1/P2.
@@ -50,3 +50,17 @@ Detalhes e riscos: [Netplay](docs/NETPLAY.md), [referências e segurança](docs/
 ## Licenças
 
 Snes9x possui licença específica de **uso não comercial**; o filtro NTSC inclui avisos separados. Consulte [LICENSE_DECISION.md](LICENSE_DECISION.md), [LICENSES](LICENSES), [VENDORED.md](VENDORED.md) e [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). **Não monetizar ou distribuir jogos protegidos** sem direitos ou autorização. Código de RetroTouch/RetroArch não foi copiado; referências são de design/documentação.
+
+## Consolidação 0.3 — conexão, vídeo, capas e perfis
+
+- **Presets editáveis:** Maizo Original, CTR Racing, ARMSX Compact e PPSSPP Comfort; perfis autorais, sem código ou imagens reproduzidos dos emuladores usados como referência. Posicionamento de ABXY, L/R e Start/Select individual, grupos e D-pad juntos; persistência dos presets por jogo e configurações globais.
+- **Modos sem perder progresso:** Offline local, LAN automática, LAN manual e Internet/VPN. Host/IP/porta são memorizados separadamente para cada modo. Mudanças com sessão conectada são recusadas para evitar interromper jogo.
+- **Métricas reais do app:** HUD opcional com FPS do núcleo, tempo médio gasto na emulação, tempo médio de atualização do vídeo e áudio enfileirado. Sessões remotas exibem espera pelo peer, picos, FPS efetivo e quadros atrasados. São contadores coletados em runtime, não benchmarks de dispositivos pré-testados.
+- **Pacing:** loop offline usa próximo deadline acumulado e se recupera de atrasos sem acelerar relógio do emulador. O modo Internet mantém o protocolo determinístico MZNP v2, usa TCP_NODELAY, best-effort prioridade de baixa latência e timeout tolerante a jitter; não inclui rollback ou servidor relay.
+- **Filtros opcionais RGB565:** Original (fast path), scanlines, suavização horizontal e combinação leve. Aplicados na saída de vídeo, sem inventar suporte Vulkan/OpenGL ou forçar filtros que prejudiquem FPS.
+- **Cheats com checksum:** primeiro procura identificação No-Intro pelo tamanho + CRC32 + SHA-1 (com suporte a cabeçalho SNES de 512 bytes), usando base pública fixada; se não reconhecer, mantém a busca por nome e informa que é heurística.
+- **Capas opcionais automáticas:** consulta a biblioteca de thumbnails do Libretro por nome padronizado e guarda PNGs no cache interno. Não empacota capas de terceiros no APK. A disponibilidade e as condições de uso das artes dependem do respectivo titular.
+- **Backup de segurança multiplayer:** estado salvo antes e depois da sessão sem sobrescrever os três slots manuais; é possível restaurar explicitamente a última cópia do jogo pelo menu Estados.
+- **Menu DEV:** pode ser desbloqueado com PIN local de conveniência `9090`, habilitando configurações avançadas de compartilhamento de ROMs *cuja redistribuição seja autorizada*. O PIN não muda direitos autorais nem criptografa a rede. O app não inclui e não distribui ROMs comerciais por padrão.
+
+Referências e limites: [docs/FINAL_UPDATE.md](docs/FINAL_UPDATE.md).

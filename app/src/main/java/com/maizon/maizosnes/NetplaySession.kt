@@ -37,6 +37,8 @@ internal class NetplaySession(
     private val framePeriodNs: () -> Long,
     private val onStatus: (String) -> Unit,
     private val onFinish: (String) -> Unit,
+    private val mode: NetworkMode = NetworkMode.LAN_AUTO,
+    private val onMetrics: (NetworkMetrics) -> Unit = { },
     private val shareAllowedByHost: Boolean = false,
     private val receiveAllowedByClient: Boolean = false,
     private val onReceiveRom: (String, ByteArray) -> Boolean = { _, _ -> false }
@@ -153,6 +155,7 @@ internal class NetplaySession(
     private fun runSession(connection: Socket, host: Boolean) {
         connection.tcpNoDelay = true
         connection.keepAlive = true
+        runCatching { connection.trafficClass = 0x10 } // IPTOS_LOWDELAY best-effort
         connection.soTimeout = 20000
         val input = DataInputStream(BufferedInputStream(connection.getInputStream(), 32768))
         val output = DataOutputStream(BufferedOutputStream(connection.getOutputStream(), 32768))
@@ -277,19 +280,30 @@ internal class NetplaySession(
             output.flush()
         }
 
-        connection.soTimeout = 5000
+        connection.soTimeout = if (mode == NetworkMode.INTERNET) 12000 else 5000
         onStatus(if (host) "Conectado como jogador 1 (host)." else "Conectado como jogador 2.")
         val period = framePeriodNs().coerceIn(10000000L, 50000000L)
         var nextFrameAt = System.nanoTime()
         var frame = 0
+        var measureFrames = 0
+        var measureStalls = 0L
+        var measureWaitNs = 0L
+        var measureMaxWaitNs = 0L
+        var measureStart = System.nanoTime()
         while (!closed.get()) {
             val localMask = localInput() and 0xffff
+            val waitStart = System.nanoTime()
             output.writeInt(frame)
             output.writeInt(localMask)
             output.flush()
             val peerFrame = input.readInt()
             require(peerFrame == frame) { "Frame inválido: esperado $frame, veio $peerFrame." }
             val peerMask = input.readInt() and 0xffff
+            val waitNs = (System.nanoTime() - waitStart).coerceAtLeast(0L)
+            measureFrames++
+            measureWaitNs += waitNs
+            measureMaxWaitNs = maxOf(measureMaxWaitNs, waitNs)
+            if (waitNs > period) measureStalls++
             val p1 = if (host) localMask else peerMask
             val p2 = if (host) peerMask else localMask
             check(step(p1, p2) == 0) { "Erro ao processar quadro $frame." }
@@ -306,6 +320,22 @@ internal class NetplaySession(
             val remaining = nextFrameAt - System.nanoTime()
             if (remaining > 0) LockSupport.parkNanos(remaining)
             else if (remaining < -period * 3) nextFrameAt = System.nanoTime()
+            val now = System.nanoTime()
+            if (now - measureStart >= 1_000_000_000L) {
+                val elapsedSeconds = ((now - measureStart).toDouble() / 1e9).coerceAtLeast(0.001)
+                onMetrics(NetworkMetrics(
+                    frame = frame.toLong(),
+                    peerWaitMs = if (measureFrames == 0) 0.0 else measureWaitNs / 1e6 / measureFrames,
+                    maxPeerWaitMs = measureMaxWaitNs / 1e6,
+                    effectiveFps = measureFrames / elapsedSeconds,
+                    stalledFrames = measureStalls
+                ))
+                measureStart = now
+                measureFrames = 0
+                measureStalls = 0
+                measureWaitNs = 0
+                measureMaxWaitNs = 0
+            }
         }
     }
 }

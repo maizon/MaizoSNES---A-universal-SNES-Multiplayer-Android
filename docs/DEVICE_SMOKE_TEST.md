@@ -58,3 +58,14 @@ Registre modelo, Android, versão do APK, hash SHA-256 do APK, resultado e trech
 - [ ] Conexão pública/loopback e ROM incorreta não recebem compartilhamento.
 - [ ] Desligar Wi-Fi/forçar desconexão não deixa socket/trava ou envio parcial recuperável.
 - [ ] Checar que o botão de menu fica em círculo pequeno translúcido ao recolher e não bloqueia gameplay.
+
+## Consolidação final — ensaios específicos
+
+- [ ] Testar separação de perfis LAN automática/manual, Internet e offline local após fechar/reabrir o app; nenhum save slot foi sobrescrito.
+- [ ] Verificar backup `before` e `after`, restauração confirmada, mesma ROM e slots manuais intocados.
+- [ ] Alternar presets Maizo/CTR/ARMS/PPSSPP, editar individualmente A/B/X/Y/L/R/Start/Select, alternar e confirmar que edições persistem no perfil correto.
+- [ ] Medir FPS 10 min com filtros Original/Scanlines/Soft/CRT Soft, comparar custo no HUD, sem aumento de velocidade da emulação.
+- [ ] Verificar FPS medido e FPS nominal NTSC/PAL, mudança de janela e pausa; confira média da espera pelo peer no modo LAN e VPN.
+- [ ] ROM com CRC32+SHA1 No-Intro conhecida aparece como identificada por checksum; ROM modificada volta para correspondência heurística.
+- [ ] Habilitar/desabilitar download de capas; imagens aparecem na grade sem sobrecarregar rede/dados móveis, cache offline é reutilizado.
+- [ ] Configurações → DEV: PIN incorreto não desbloqueia; `9090` habilita menu. Compartilhamento permanece somente entre IPs privados com autorização de ambos e direitos de redistribuição.

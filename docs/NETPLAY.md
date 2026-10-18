@@ -52,3 +52,13 @@ O caminho para respostas locais muito rápidas é **predição + rollback** com 
 - `./gradlew testDebugUnitTest` contém testes TCP loopback, recusa de ROM divergente, transferência autorizada em rede privada (quando o runner tem IPv4 privado) e parsing de cheats/descoberta, sem ROM comercial.
 - CI valida compilação e protocolo básico **somente no JVM**; não mede input-lag, Wi-Fi, NAT, velocidade nem funcionamento de jogos.
 - Em hardware real, testar troca de inputs simultâneos, dez minutos por jogo, NTSC/PAL, reconnect, redes com perda/jitter, hashes e término de sessão. Registrar APK SHA, Android, modelo e logs.
+
+## Modos de rede e telemetria (0.3)
+
+Os modos Offline local, LAN automática, LAN por IP e Internet/VPN usam perfis de IP e porta separados na interface (SharedPreferences). Modos não modificam a versão MZNP v2, input player1/player2, hashes periódicos ou estado inicial do host. Trocar de modo durante uma sessão é bloqueado para evitar perder a partida. A transição interrompe apenas a conexão, não remove ROM, estados ou perfis de controles.
+
+O transporte TCP continua `TCP_NODELAY`. Em Internet/VPN há timeout de 12 segundos por leitura de frame para maior tolerância a jitter; LAN continua com timeout de 5 segundos. `Socket.trafficClass = 0x10` é pedido ao sistema como dica de prioridade de baixa latência, sem garantia de QoS. Métricas são coletadas por sessão: média e pico do **tempo à espera do input remoto** (não é uma medição exata de ping/RTT), FPS efetivo e quantidade de quadros com espera superior ao período nominal.
+
+O tempo de ida e volta na rede não desaparece com ajustes de socket. **Não há implementação nem alegação de rollback/predição neste release.** Um rollback correto exigiria snapshots por frame, replay com áudio/vídeo silenciados, input prediction e testes de duas plataformas por longo período; isso ficou deliberadamente fora da atualização para preservar o multiplayer lockstep funcional.
+
+Backup automático opcional antes/depois da conexão usa arquivos `states/multiplayer_<sha>_before/after.mzstate` guardados pela impressão digital da ROM, sem substituir os slots manuais. Restaure pelo menu Estados somente com a ROM correspondente carregada.
