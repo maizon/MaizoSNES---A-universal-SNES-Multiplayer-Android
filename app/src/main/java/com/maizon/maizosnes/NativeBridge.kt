@@ -21,6 +21,10 @@ object NativeBridge {
     external fun nativeSetVideoFilter(mode: Int)
     /** Nearest-neighbor output framebuffer multiplier (1..4), not SNES PPU upscale. */
     external fun nativeSetOutputScale(scale: Int)
+    /** Enables native frame export for GLES, disabling direct CPU SurfaceView output. */
+    external fun nativeSetGpuEnabled(enabled: Boolean)
+    /** Copies RGB565 frame into direct ByteBuffer and sets width, height, frame revision. */
+    external fun nativeCopyGpuFrame(buffer: java.nio.ByteBuffer, metadata: IntArray): Boolean
     /** Cumulative counters: frames, emuNs, presentedFrames, presentNs, targetFrameNs, audioFramesQueued. */
     external fun nativeGetPerfCounters(): LongArray
     /** Applies an actual Snes9x libretro option through the frontend bridge. */

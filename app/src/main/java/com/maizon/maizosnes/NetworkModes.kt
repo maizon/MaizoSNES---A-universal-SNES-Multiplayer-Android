@@ -31,3 +31,20 @@ internal enum class VideoFilter(val label: String, val nativeId: Int, val descri
     SHARPEN("Nitidez / sharpen", 7, "Aumenta contraste das bordas dos pixels"),
     RGB_TRIAD("CRT RGB triad", 8, "Simula faixas de fósforo R/G/B, CPU")
 }
+
+/** Native framebuffer versus experimental OpenGL ES 2 texture/pixel shaders. */
+internal enum class RenderBackend(val label: String, val hint: String) {
+    CPU("CPU RGB565 (estável)", "Renderização nativa direta, menor consumo"),
+    GLES("OpenGL ES 2 (GPU / Mali)", "Escala por GPU com shaders; experimental em aparelhos reais")
+}
+
+internal enum class GpuShader(val label: String, val glId: Int, val hint: String) {
+    NEAREST("Nearest (pixels nítidos)", 0, "Textura RGB565 com amostragem nearest"),
+    LINEAR("Bilinear GPU", 1, "Interpolação linear de escala pelo hardware"),
+    SMOOTH("Suavização 4 vizinhos", 2, "Suaviza artefatos, sem ser FXAA completo"),
+    CRT("CRT curvo / scanlines", 3, "Curvatura leve, vignette e scanlines na GPU"),
+    LCD("LCD grid", 4, "Linhas leves, sem passagens adicionais"),
+    SHARP("Nitidez / sharpen GPU", 5, "Realça bordas usando 2 amostras adjacentes"),
+    GRAY("Preto e branco GPU", 6, "Escala de cinza por shader"),
+    SATURATE("Cores vivas GPU", 7, "Saturação 1.3x por shader")
+}

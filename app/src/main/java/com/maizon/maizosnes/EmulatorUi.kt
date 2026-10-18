@@ -7,6 +7,7 @@ import android.view.SurfaceView
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -82,6 +83,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -130,6 +134,8 @@ internal data class AppSettings(
     val volume: Float = 1f,
     val filter: VideoFilter = VideoFilter.ORIGINAL,
     val outputScale: Int = 1,
+    val renderBackend: RenderBackend = RenderBackend.CPU,
+    val gpuShader: GpuShader = GpuShader.NEAREST,
     val performanceHud: Boolean = false,
     val automaticCovers: Boolean = true,
     val automaticBackup: Boolean = true
@@ -205,6 +211,7 @@ internal fun MaizoEmulatorApp(
     onLocalMultiplayerChanged: (Boolean) -> Unit,
     onChooseAddRom: () -> Unit,
     onScanRomFolder: () -> Unit,
+    onApplyRomPatch: () -> Unit,
     onOpenInstagram: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
@@ -221,7 +228,8 @@ internal fun MaizoEmulatorApp(
     onTogglePause: () -> Unit,
     onExitGame: () -> Unit,
     onInputChanged: (Int, Boolean) -> Unit,
-    onSurfaceChanged: (Surface?) -> Unit
+    onSurfaceChanged: (Surface?) -> Unit,
+    onGpuReady: (Boolean) -> Unit
 ) {
     var showGameMenu by remember { mutableStateOf(false) }
     var editingControls by remember { mutableStateOf(false) }
@@ -240,6 +248,7 @@ internal fun MaizoEmulatorApp(
             onPause = onTogglePause,
             onOpenMenu = { showGameMenu = true },
             onSurfaceChanged = onSurfaceChanged,
+            onGpuReady = onGpuReady,
             onInputChanged = onInputChanged
         )
         if (showGameMenu) {
@@ -282,7 +291,7 @@ internal fun MaizoEmulatorApp(
             AppScreen.LIBRARY -> LibraryScreen(
                 Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
-                onScanRomFolder, onOpenRom, onContinueGame, onRenameRom
+                onScanRomFolder, onApplyRomPatch, onOpenRom, onContinueGame, onRenameRom
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
@@ -359,6 +368,7 @@ private fun LibraryScreen(
     hasLoadedRom: Boolean,
     onChooseAddRom: () -> Unit,
     onScanRomFolder: () -> Unit,
+    onApplyRomPatch: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
     onRenameRom: (String, String) -> Unit
@@ -398,6 +408,10 @@ private fun LibraryScreen(
                 }
                 OutlinedButton(onClick = onScanRomFolder, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Text("PROCURAR ROMS EM PASTA DO APARELHO")
+                }
+                if (hasLoadedRom) OutlinedButton(onClick = onApplyRomPatch,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    Text("APLICAR MOD .IPS / .BPS À ROM ATUAL", fontSize = 11.sp)
                 }
             }
         }
@@ -799,12 +813,13 @@ private fun GameScreen(
     onPause: () -> Unit,
     onOpenMenu: () -> Unit,
     onSurfaceChanged: (Surface?) -> Unit,
+    onGpuReady: (Boolean) -> Unit,
     onInputChanged: (Int, Boolean) -> Unit
 ) {
     var toolbarExpanded by remember(romName) { mutableStateOf(false) }
     var editIndividual by remember(romName) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        VideoSurface(settings.aspect, onSurfaceChanged)
+        VideoSurface(settings, onSurfaceChanged, onGpuReady)
         if (settings.touch.enabled) TouchOverlay(
             settings.touch, onInputChanged, editingControls, editIndividual,
             onLayoutChanged = { onSettingsChanged(settings.copy(touch = it)) }
@@ -898,7 +913,12 @@ private fun GameScreen(
 }
 
 @Composable
-private fun VideoSurface(aspect: AspectMode, onSurfaceChanged: (Surface?) -> Unit) {
+private fun VideoSurface(
+    settings: AppSettings,
+    onSurfaceChanged: (Surface?) -> Unit,
+    onGpuReady: (Boolean) -> Unit
+) {
+    val aspect = settings.aspect
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.roundToPx() }
@@ -917,7 +937,11 @@ private fun VideoSurface(aspect: AspectMode, onSurfaceChanged: (Surface?) -> Uni
             AspectMode.ULTRAWIDE -> containedSize(maxWidth, maxHeight, 21f / 9f)
         }
         Box(Modifier.align(Alignment.Center).requiredWidth(size.first).requiredHeight(size.second)) {
-            AndroidViewSurface(onSurfaceChanged)
+            if (settings.renderBackend == RenderBackend.GLES) {
+                GpuVideoSurface(settings.gpuShader, Modifier.fillMaxSize(), onGpuReady)
+            } else {
+                AndroidViewSurface(onSurfaceChanged)
+            }
         }
     }
 }
@@ -1115,34 +1139,97 @@ private fun TouchButton(
     positionModifier: Modifier = Modifier
 ) {
     val shape = if (isPill) RoundedCornerShape(18.dp)
-        else if (skin == TouchPreset.CTR) RoundedCornerShape(13.dp) else CircleShape
-    val baseColor = when (skin) {
-        TouchPreset.MAIZO -> Color(0xFFE4E8F2)
-        TouchPreset.CTR -> Color(0xFFFFD75E)
-        TouchPreset.ARMS -> Color(0xFF161C2B)
-        TouchPreset.PPSSPP -> Color(0xFF3F64A3)
-    }
-    val glyphColor = when (skin) {
-        TouchPreset.MAIZO, TouchPreset.CTR -> Color(0xFF0B1020)
+        else if (skin == TouchPreset.CTR || skin == TouchPreset.ARMS)
+            RoundedCornerShape(13.dp) else CircleShape
+    val glyph = when (skin) {
+        TouchPreset.MAIZO, TouchPreset.CTR -> Color(0xFF121522)
         TouchPreset.ARMS -> Color(0xFF7FFFE3)
         TouchPreset.PPSSPP -> Color.White
     }
+    val alpha = opacity.coerceIn(0.18f, 1f)
     Box(
-        modifier = (if (isPill) Modifier.width((size * 2f).dp).height(size.dp) else Modifier.size(size.dp))
+        modifier = (if (isPill) Modifier.width((size * 2f).dp).height(size.dp)
+            else Modifier.size(size.dp))
             .then(positionModifier)
             .clip(shape)
-            .background(baseColor.copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.68f))
-            .border(1.dp, Color.White.copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.65f), shape)
             .then(if (enabled) Modifier.pointerInput(bit) {
                 awaitEachGesture {
                     awaitFirstDown()
                     onInputChanged(bit, true)
-                    try { waitForUpOrCancellation() } finally { onInputChanged(bit, false) }
+                    try { waitForUpOrCancellation() }
+                    finally { onInputChanged(bit, false) }
                 }
             } else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = glyphColor, fontWeight = FontWeight.Black,
+        // Distinct original vector artwork drawn at any DPI. Each preset
+        // switches BOTH positions and rendered geometry; not just tint.
+        Canvas(Modifier.fillMaxSize()) {
+            val c = Offset(this.size.width / 2f, this.size.height / 2f)
+            val radius = minOf(this.size.width, this.size.height) * 0.47f
+            val corner = CornerRadius(radius * 0.32f, radius * 0.32f)
+            when (skin) {
+                TouchPreset.MAIZO -> {
+                    drawRoundRect(brush = Brush.linearGradient(listOf(
+                        Color(0xFFFFFFFF).copy(alpha = alpha * .80f),
+                        Color(0xFF98BBEA).copy(alpha = alpha * .68f))),
+                        cornerRadius = CornerRadius(radius * .68f, radius * .68f))
+                    drawRoundRect(color = Color.White.copy(alpha = alpha * .86f),
+                        cornerRadius = CornerRadius(radius * .68f, radius * .68f),
+                        style = Stroke(width = 2.dp.toPx()))
+                }
+                TouchPreset.CTR -> {
+                    drawRoundRect(color = Color(0xFF16181C).copy(alpha = alpha * .90f),
+                        cornerRadius = corner)
+                    drawRoundRect(brush = Brush.linearGradient(listOf(
+                        Color(0xFFFFF1A8).copy(alpha = alpha),
+                        Color(0xFFFFAE32).copy(alpha = alpha * .91f),
+                        Color(0xFF88481A).copy(alpha = alpha * .88f))),
+                        topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(
+                            (this.size.width - 6.dp.toPx()).coerceAtLeast(1f),
+                            (this.size.height - 6.dp.toPx()).coerceAtLeast(1f)),
+                        cornerRadius = corner)
+                    drawRoundRect(color = Color(0xFFFFF7CD).copy(alpha = alpha),
+                        topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(
+                            (this.size.width - 6.dp.toPx()).coerceAtLeast(1f),
+                            (this.size.height - 6.dp.toPx()).coerceAtLeast(1f)),
+                        cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
+                    drawLine(Color.White.copy(alpha = alpha * .38f),
+                        Offset(radius * .27f, radius * .32f),
+                        Offset(this.size.width - radius * .27f, radius * .32f),
+                        strokeWidth = 1.5.dp.toPx())
+                }
+                TouchPreset.ARMS -> {
+                    drawRoundRect(color = Color(0xFF030A14).copy(alpha = alpha * .82f),
+                        cornerRadius = corner)
+                    drawRoundRect(color = Color(0xFF54FFE7).copy(alpha = alpha * .88f),
+                        cornerRadius = corner, style = Stroke(width = 2.dp.toPx()))
+                    drawLine(Color(0xFF2AE3E2).copy(alpha = alpha * .44f),
+                        Offset(4.dp.toPx(), this.size.height - 6.dp.toPx()),
+                        Offset(this.size.width - 4.dp.toPx(), this.size.height - 6.dp.toPx()),
+                        strokeWidth = 3.dp.toPx())
+                }
+                TouchPreset.PPSSPP -> {
+                    if (isPill) {
+                        drawRoundRect(color = Color(0xFF142B4A).copy(alpha = alpha * .42f),
+                            cornerRadius = CornerRadius(radius, radius))
+                        drawRoundRect(color = Color.White.copy(alpha = alpha * .85f),
+                            cornerRadius = CornerRadius(radius, radius),
+                            style = Stroke(width = 2.dp.toPx()))
+                    } else {
+                        drawCircle(color = Color(0xFF416EA9).copy(alpha = alpha * .32f),
+                            center = c, radius = radius)
+                        drawCircle(color = Color.White.copy(alpha = alpha * .88f),
+                            center = c, radius = radius, style = Stroke(2.3.dp.toPx()))
+                        drawCircle(color = Color.White.copy(alpha = alpha * .20f),
+                            center = c, radius = radius * .77f, style = Stroke(.8.dp.toPx()))
+                    }
+                }
+            }
+        }
+        Text(label, color = glyph, fontWeight = FontWeight.Black,
             fontSize = if (label.length > 3) 8.sp else 15.sp)
     }
 }
@@ -1217,6 +1304,25 @@ private fun EmulatorSettings(
                         "O núcleo SNES renderiza na resolução nativa (normalmente 256×224 ou 512×448). " +
                             "A saída é ampliada pela superfície Android; mudar proporção NÃO cria " +
                             "detalhes nem widescreen real. Upscale por shader exigirá backend GPU.")
+                    SettingSectionTitle("Renderizador de vídeo",
+                        "Alternância entre CPU RGB565 comprovada e GPU experimental OpenGL ES 2.")
+                    RenderBackend.values().forEach { backend ->
+                        ChoiceRow(backend.label, backend.hint,
+                            settings.renderBackend == backend) {
+                            onSettingsChanged(settings.copy(renderBackend = backend))
+                        }
+                    }
+                    if (settings.renderBackend == RenderBackend.GLES) {
+                        SettingSectionTitle("Shaders OpenGL ES 2",
+                            "Escala na GPU do tamanho nativo da ROM para a superfície Android. " +
+                                "Não adiciona detalhes ao jogo nem altera o campo de visão.")
+                        GpuShader.values().forEach { shader ->
+                            ChoiceRow(shader.label, shader.hint,
+                                settings.gpuShader == shader) {
+                                onSettingsChanged(settings.copy(gpuShader = shader))
+                            }
+                        }
+                    }
                     SettingSectionTitle("Framebuffer ampliado (CPU RGB565)",
                         "Escala de SAÍDA por duplicação nítida dos pixels, sem criar detalhes " +
                             "novos nem alterar a resolução interna do SNES. " +
@@ -1267,11 +1373,19 @@ private fun EmulatorSettings(
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
                     SettingSectionTitle("Layouts de controle",
-                        "Presets originais inspirados na ergonomia de CTR, ARMSX1 e PPSSPP; " +
-                            "totalmente ajustáveis, sem copiar imagens ou código dos projetos.")
+                        "Quatro skins vetoriais autorais com formas e disposição distintas, " +
+                            "inspiradas no estilo de CTR, ARMSX1 e PPSSPP. " +
+                            "Não são os assets originais desses programas.")
                     TouchPreset.values().forEach { preset ->
                         ChoiceRow(preset.label, preset.hint,
                             settings.touch.preset == preset) { onSelectTouchPreset(preset) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)) {
+                            for ((label, bit) in listOf("B" to 0, "A" to 8, "X" to 9, "Y" to 1)) {
+                                TouchButton(label, bit, 33f, 0.78f, { _, _ -> },
+                                    enabled = false, skin = preset)
+                            }
+                        }
                     }
                     SettingSectionTitle("Editor de layout",
                         "No jogo: EDITAR → GRUPOS/BOTÕES. " +

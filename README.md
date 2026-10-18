@@ -2,6 +2,17 @@
 
 Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.
 
+## Atualização 0.5 Preview — Internet / GPU / MODs / controles
+
+- **Descoberta mundial de salas por servidor próprio:** escolha o modo `Servidor de salas (NAT/CGNAT)`, informe apenas o IP ou URL HTTP do servidor, busque salas e entre com um toque. Um servidor Node.js sem dependências está em `server/relay.js`. Tanto P1 como P2 se conectam de saída ao relay TCP, evitando portas no roteador. **É relay, não P2P direto**. Instruções: `docs/INTERNET_RELAY.md`.
+- **Vídeo com duas pipelines:** CPU RGB565 (padrão) ou OpenGL ES 2 (experimental, ideal para teste em Mali). GPU opcional com escala nearest, bilinear, suavização de vizinhos, CRT curvo, LCD, nitidez, preto e branco e saturação. CPU opcional com saída framebuffer 1×–4× (duplicação de pixels), scanlines, suavização, grade, monocromático, sharpen e triad RGB. Não aumenta resolução interna/visão lateral do jogo.
+- **Mods fornecidos pelo usuário:** aplica arquivos IPS ou BPS a uma ROM da biblioteca, validando CRC do BPS, salvando **cópia** com sufixo `_mod`. A ROM original e seus saves são preservados. Não inclui patches nem alterações comerciais. Mods widescreen são **específicos de cada jogo**; ajustar proporção não é widescreen hack.
+- **Controles visuais distintos:** quatro skins vetoriais originais desenhadas em tempo real (Maizo, CTR-like, ARMS-like, PPSSPP-like) e prévias no menu; troca de formas, contornos, transparência e posições. **Não são cópias dos arquivos gráficos originais**.
+- **Busca de ROMs por pasta do aparelho**, subpastas permitidas via SAF (limite intencional de escopo, sem acesso indiscriminado).
+- **Créditos para Maicon Nascimento** e botão Instagram, com atribuição aos demais projetos.
+
+O modo de rede pública é experimental: sem TLS no túnel TCP, contas ou controle de abuso. Para uso com pessoas não confiáveis configure um relay com VPN privada e autenticação adicionais. O build CI testa o servidor em loopback, mas não confirma estabilidade de GPU ou internet em smartphones reais. Não fornecemos APK comercial ou ROM.
+
 ## Funcionalidades implementadas no código
 
 - Biblioteca privada: importar ROMs `.sfc`, `.smc` ou ZIP com uma ROM, listar, renomear e abrir sem picker repetitivo.

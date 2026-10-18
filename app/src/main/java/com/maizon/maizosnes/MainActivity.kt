@@ -87,6 +87,9 @@ class MainActivity : ComponentActivity() {
     private val scanRomTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) scanRomTree(uri)
     }
+    private val patchRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) applyRomPatch(uri)
+    }
     private val exportStateLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) exportState(uri)
     }
@@ -129,6 +132,7 @@ class MainActivity : ComponentActivity() {
         runCatching {
             NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
             NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+            NativeBridge.nativeSetGpuEnabled(appSettings.value.renderBackend == RenderBackend.GLES)
         }
         refreshCovers()
         startPerformanceSampler()
@@ -187,6 +191,7 @@ class MainActivity : ComponentActivity() {
                     onLocalMultiplayerChanged = ::setLocalMultiplayer,
                     onChooseAddRom = { openRomLauncher.launch(arrayOf("*/*")) },
                     onScanRomFolder = { scanRomTreeLauncher.launch(null) },
+                    onApplyRomPatch = { patchRomLauncher.launch(arrayOf("*/*")) },
                     onOpenInstagram = {
                         val uri = Uri.parse("https://www.instagram.com/maicon_nasciment0/")
                         runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
@@ -207,7 +212,8 @@ class MainActivity : ComponentActivity() {
                     onTogglePause = ::togglePause,
                     onExitGame = ::exitGameplay,
                     onInputChanged = ::updateInput,
-                    onSurfaceChanged = ::updateEmulatorSurface
+                    onSurfaceChanged = ::updateEmulatorSurface,
+                    onGpuReady = ::updateGpuReady
                 )
             }
         }
@@ -516,6 +522,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun applyRomPatch(uri: Uri) {
+        if (netplaySession != null) {
+            statusMessage.value = "Encerre a sessão multiplayer antes de aplicar um patch."
+            return
+        }
+        val original = currentRomFile.value
+        if (original == null || !original.isFile) {
+            statusMessage.value = "Abra primeiro a ROM que receberá o patch."
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                statusMessage.value = "Aplicando patch IPS/BPS sem alterar a ROM original…"
+                val newName = withContext(Dispatchers.IO) {
+                    val patchData = readUriBytes(uri, 16 * 1024 * 1024)
+                    val newBytes = RomPatcher.apply(original.readBytes(), patchData)
+                    val extension = original.extension.lowercase().let {
+                        if (it == "smc") "smc" else "sfc"
+                    }
+                    val prefix = original.nameWithoutExtension.take(70) + "_mod"
+                    var destination = File(romDirectory, "$prefix.$extension")
+                    var suffix = 2
+                    while (destination.exists()) {
+                        destination = File(romDirectory, "$prefix-${suffix++}.$extension")
+                    }
+                    val tmp = File.createTempFile("rom-patch-", ".tmp", romDirectory)
+                    try {
+                        tmp.writeBytes(newBytes)
+                        check(tmp.renameTo(destination)) { "Falha ao salvar ROM modificada." }
+                    } finally { tmp.delete() }
+                    destination.name
+                }
+                refreshLibrary()
+                statusMessage.value = "Patch aplicado: $newName. " +
+                    "ROM original preservada. Abra o novo jogo para testar."
+            } catch (error: Exception) {
+                statusMessage.value = "Patch recusado: " +
+                    (error.message ?: "arquivo inválido ou incompatível")
+            }
+        }
+    }
+
     private fun refreshLibrary() {
         romFiles.value = romDirectory.listFiles()
             ?.filter { it.isFile && it.extension.lowercase() in setOf("sfc", "smc") }
@@ -574,6 +622,7 @@ class MainActivity : ComponentActivity() {
         runCatching {
             NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
             NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+            NativeBridge.nativeSetGpuEnabled(appSettings.value.renderBackend == RenderBackend.GLES)
         }
         loadRomFile(file)
     }
@@ -834,6 +883,7 @@ class MainActivity : ComponentActivity() {
                 runCatching {
             NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
             NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+            NativeBridge.nativeSetGpuEnabled(appSettings.value.renderBackend == RenderBackend.GLES)
         }
                 cheatEntries.value = emptyList()
                 activeCheatIds.value = emptySet()
@@ -878,6 +928,7 @@ class MainActivity : ComponentActivity() {
         runCatching {
             NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
             NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+            NativeBridge.nativeSetGpuEnabled(appSettings.value.renderBackend == RenderBackend.GLES)
         }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         @Suppress("DEPRECATION")
@@ -935,6 +986,12 @@ class MainActivity : ComponentActivity() {
             volume = prefs.getFloat(key("audio_volume"), 1f),
             filter = filter,
             outputScale = prefs.getInt(key("video_output_scale"), 1).coerceIn(1, 4),
+            renderBackend = runCatching { RenderBackend.valueOf(
+                prefs.getString(key("video_backend"), RenderBackend.CPU.name)
+                    ?: RenderBackend.CPU.name) }.getOrDefault(RenderBackend.CPU),
+            gpuShader = runCatching { GpuShader.valueOf(
+                prefs.getString(key("gpu_shader"), GpuShader.NEAREST.name)
+                    ?: GpuShader.NEAREST.name) }.getOrDefault(GpuShader.NEAREST),
             performanceHud = prefs.getBoolean(key("performance_hud"), false),
             automaticCovers = prefs.getBoolean("library_covers_enabled", true),
             automaticBackup = prefs.getBoolean("automatic_netplay_backups", true)
@@ -942,6 +999,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun persistSettings(next: AppSettings) {
+        val backendChanged = appSettings.value.renderBackend != next.renderBackend
+        if (backendChanged) {
+            surfaceAttached = false
+            runCatching { NativeBridge.nativeSetPaused(true) }
+            runCatching { NativeBridge.nativeSetSurface(null) }
+        }
         appSettings.value = next
         val prefix = profilePrefix(if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
         val coversChanged = next.automaticCovers != prefs.getBoolean("library_covers_enabled", true)
@@ -949,6 +1012,8 @@ class MainActivity : ComponentActivity() {
             .putString(prefix + "aspect", next.aspect.name)
             .putString(prefix + "video_filter", next.filter.name)
             .putInt(prefix + "video_output_scale", next.outputScale.coerceIn(1, 4))
+            .putString(prefix + "video_backend", next.renderBackend.name)
+            .putString(prefix + "gpu_shader", next.gpuShader.name)
             .putBoolean(prefix + "performance_hud", next.performanceHud)
             .putString(prefix + "touch_preset", next.touch.preset.name)
             .putString(prefix + "touch_preset_" + next.touch.preset.name,
@@ -970,6 +1035,7 @@ class MainActivity : ComponentActivity() {
         runCatching {
             NativeBridge.nativeSetVideoFilter(next.filter.nativeId)
             NativeBridge.nativeSetOutputScale(next.outputScale)
+            NativeBridge.nativeSetGpuEnabled(next.renderBackend == RenderBackend.GLES)
         }
         if (coversChanged) refreshCovers()
     }
@@ -1396,9 +1462,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateEmulatorSurface(surface: Surface?) {
+        if (appSettings.value.renderBackend == RenderBackend.GLES) {
+            runCatching { NativeBridge.nativeSetSurface(null) }
+            return
+        }
         surfaceAttached = surface != null
         runCatching { NativeBridge.nativeSetSurface(surface) }
         syncPlaybackState()
+    }
+
+    private fun updateGpuReady(ready: Boolean) {
+        if (appSettings.value.renderBackend != RenderBackend.GLES) return
+        surfaceAttached = ready
+        syncPlaybackState()
+        if (!ready) statusMessage.value = "GPU não disponível. Mude para CPU nos ajustes do jogo."
     }
 
     private fun syncPlaybackState() {

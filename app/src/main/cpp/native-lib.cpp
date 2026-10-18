@@ -50,6 +50,12 @@ std::thread g_frameThread;
 std::atomic<int64_t> g_frameDurationNs{16683333};
 std::atomic<int> g_videoFilter{0}; // 0..8 selectable video filters
 std::atomic<int> g_outputScale{1}; // 1x..4x display framebuffer, not SNES internal resolution
+std::atomic<bool> g_gpuEnabled{false};
+std::mutex g_gpuFrameMutex;
+std::vector<uint16_t> g_gpuFrame;
+unsigned g_gpuWidth = 0;
+unsigned g_gpuHeight = 0;
+uint32_t g_gpuRevision = 0;
 std::atomic<uint64_t> g_emuFrames{0};
 std::atomic<uint64_t> g_emuNs{0};
 std::atomic<uint64_t> g_presentFrames{0};
@@ -245,6 +251,35 @@ uint16_t convertXrgb8888(uint32_t pixel) {
 void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned height, size_t pitch) {
     if (!data || width == 0 || height == 0 || width > 1024 || height > 1024) return;
 
+    if (g_gpuEnabled.load(std::memory_order_acquire)) {
+        const auto start = std::chrono::steady_clock::now();
+        const unsigned bpp = g_pixelFormat == RETRO_PIXEL_FORMAT_XRGB8888 ? 4u : 2u;
+        if (pitch < width * bpp) return;
+        std::lock_guard<std::mutex> frameLock(g_gpuFrameMutex);
+        g_gpuFrame.resize(static_cast<size_t>(width) * height);
+        for (unsigned y = 0; y < height; ++y) {
+            const auto* row = static_cast<const uint8_t*>(data) + y * pitch;
+            uint16_t* dst = g_gpuFrame.data() + static_cast<size_t>(y) * width;
+            if (g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
+                std::memcpy(dst, row, static_cast<size_t>(width) * sizeof(uint16_t));
+            } else {
+                for (unsigned x = 0; x < width; ++x) {
+                    dst[x] = g_pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555 ?
+                        convert1555(reinterpret_cast<const uint16_t*>(row)[x]) :
+                        convertXrgb8888(reinterpret_cast<const uint32_t*>(row)[x]);
+                }
+            }
+        }
+        g_gpuWidth = width;
+        g_gpuHeight = height;
+        ++g_gpuRevision;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        g_presentNs.fetch_add(static_cast<uint64_t>(std::max<int64_t>(0, elapsed)),
+                              std::memory_order_relaxed);
+        g_presentFrames.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     std::lock_guard<std::mutex> guard(g_surfaceMutex);
     if (!g_window) return;
 
@@ -582,6 +617,36 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetOutputScale(
     JNIEnv*, jobject, jint scale) {
     g_outputScale.store(std::clamp(static_cast<int>(scale), 1, 4),
                         std::memory_order_release);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetGpuEnabled(
+    JNIEnv*, jobject, jboolean enabled) {
+    g_gpuEnabled.store(enabled == JNI_TRUE, std::memory_order_release);
+    if (enabled != JNI_TRUE) {
+        std::lock_guard<std::mutex> guard(g_gpuFrameMutex);
+        g_gpuFrame.clear();
+        g_gpuWidth = g_gpuHeight = 0;
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeCopyGpuFrame(
+    JNIEnv* env, jobject, jobject buffer, jintArray metadata) {
+    if (!buffer || !metadata || env->GetArrayLength(metadata) < 3)
+        return JNI_FALSE;
+    auto* target = static_cast<uint8_t*>(env->GetDirectBufferAddress(buffer));
+    const jlong capacity = env->GetDirectBufferCapacity(buffer);
+    if (!target || capacity <= 0) return JNI_FALSE;
+    std::lock_guard<std::mutex> guard(g_gpuFrameMutex);
+    const size_t byteCount = g_gpuFrame.size() * sizeof(uint16_t);
+    if (byteCount == 0 || static_cast<uint64_t>(capacity) < byteCount)
+        return JNI_FALSE;
+    std::memcpy(target, g_gpuFrame.data(), byteCount);
+    const jint info[3] = { static_cast<jint>(g_gpuWidth),
+        static_cast<jint>(g_gpuHeight), static_cast<jint>(g_gpuRevision) };
+    env->SetIntArrayRegion(metadata, 0, 3, info);
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL
