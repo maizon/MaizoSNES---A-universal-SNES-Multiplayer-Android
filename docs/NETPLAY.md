@@ -1,5 +1,13 @@
 # Multiplayer (código experimental)
 
+## Atualização de protocolo (0.7)
+
+**Esta versão usa MZNP v3** e rejeita clientes 0.6/v2 incompatíveis. Durante a negociação, após conferir ROM e opções, o host envia até 64 cheats sanitizados; o segundo jogador precisa ter ativado consentimento prévio. Ambos aplicam os mesmos códigos enquanto o jogo está parado. Qualquer rejeição impede o primeiro quadro. Sem autorização, o host deve desativar cheats antes de criar a sala. Trocas de cheats durante frames permanecem bloqueadas. O fingerprint de estado a cada 120 quadros continua sendo usado.
+
+Salas online agora podem anunciar prefixo de 64 bits do SHA-256 da ROM já modificada (IPS/BPS) e etiqueta de cheats para evitar tentativas incompatíveis. O handshake TCP continua conferindo o hash SHA-256 integral dos bytes reais, nunca apenas o prefixo da lista pública.
+
+Modo **Automático** combina descoberta LAN UDP existente e diretórios em `server/registry.json`. A lista de servidores inicial não tem nenhum endpoint: o operador precisa implantar servidores reais, adicionar URL HTTPS e permitir a porta TCP do relay. **Não há P2P direto** nem servidores públicos implantados por esta revisão; refs: `docs/MULTIPLAYER_PREMIUM_PLAN.md`, `docs/INTERNET_RELAY.md`.
+
 ## Situação verificada
 
 Esta revisão implementa **código** para partidas locais com dois controles físicos e para dois aparelhos por TCP, na LAN ou através de um endereço IP TCP alcançável. O aplicativo **ainda exige testes reais em dois Androids**, inclusive de determinismo, troca de ROM, latência, entrada/saída de app e Wi-Fi instável. Nunca confundir CI verde/teste de loopback com multiplayer validado em dispositivos.

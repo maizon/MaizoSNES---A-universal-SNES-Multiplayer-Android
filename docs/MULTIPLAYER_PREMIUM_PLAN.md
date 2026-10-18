@@ -50,7 +50,7 @@
 ## Milestones e critérios
 
 - M1 — **Registro e Auto Lobby**: código de descoberta no APK, manifest oficial editável e testes de parsing/ranking; CI verde. Sem servidor cadastrado, UI sinaliza honestamente e mantém LAN.
-- M2 — **Online Cheats v3**: negociação opt-in e aplicação pré-jogo com protocolo versionado e testes de recusa/aceite.
+- M2 — **Online Cheats v3**: implementação em revisão/CI, com negociação opt-in antes do quadro zero, validação de códigos e teste de recusa/aceite. Requer validação em 2 aparelhos para marcar concluído.
 - M3 — **Servidores públicos reais**: deploy administrado, HTTPS e transporte criptografado/autenticação, pelo menos um nó em produção, healthcheck, política de uso, testes na Internet real. Depende de infraestrutura e credenciais do operador.
 - M4 — **P2P ICE + TURN** e matchmaking avançado com engenharia de transporte/testes.
 - M5 — **Rollback/reconnect** e otimizações comprovadas por benchmarks.

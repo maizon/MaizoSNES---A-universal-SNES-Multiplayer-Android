@@ -41,11 +41,19 @@ internal class NetplaySession(
     private val onMetrics: (NetworkMetrics) -> Unit = { },
     private val shareAllowedByHost: Boolean = false,
     private val receiveAllowedByClient: Boolean = false,
-    private val onReceiveRom: (String, ByteArray) -> Boolean = { _, _ -> false }
+    private val onReceiveRom: (String, ByteArray) -> Boolean = { _, _ -> false },
+    /** Host-selected cheat codes, never changed while a session is running. */
+    private val hostCheatCodes: List<String> = emptyList(),
+    /** Both players explicitly opt-in before entering a cheated match. */
+    private val allowOnlineCheats: Boolean = false,
+    /** Runs only during the pre-frame handshake, after netplay mode is set. */
+    private val applyOnlineCheats: (Array<String>) -> Int = { codes ->
+        if (codes.isEmpty()) 0 else -6
+    }
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
-        private const val VERSION = 2
+        private const val VERSION = 3
         private const val MAX_ROM = 64 * 1024 * 1024
         private const val MAX_STATE = 64 * 1024 * 1024 + 28
         private const val HASH_INTERVAL = 120
@@ -106,7 +114,11 @@ internal class NetplaySession(
             title.take(75).toByteArray(Charsets.UTF_8),
             android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE or
                 android.util.Base64.NO_PADDING)
-        relayConnect(serverHost, relayPort, "HOST $roomId $safeTitle", true, roomId)
+        val fingerprint = romDigest(rom).take(8)
+            .joinToString("") { "%02x".format(it) }
+        val cheats = if (allowOnlineCheats && hostCheatCodes.isNotEmpty()) "1" else "0"
+        relayConnect(serverHost, relayPort,
+            "HOST $roomId $safeTitle $fingerprint $cheats", true, roomId)
     }
 
     fun joinViaRelay(serverHost: String, relayPort: Int, roomId: String) = launch {
@@ -208,6 +220,65 @@ internal class NetplaySession(
 
     private fun read32(input: DataInputStream): ByteArray =
         ByteArray(32).also { input.readFully(it) }
+
+    /** MZNP v3: fully synchronized host-authoritative cheat list.
+     * Codes must be identically installed on BOTH cores before save-state
+     * synchronization and before the first game frame. If either player
+     * does not consent or applying fails, abort, never silently desync.
+     */
+    private fun negotiateOnlineCheats(
+        input: DataInputStream,
+        output: DataOutputStream,
+        isHost: Boolean
+    ) {
+        if (isHost) {
+            val codes = if (allowOnlineCheats) hostCheatCodes else emptyList()
+            require(codes.size <= 64) { "Limite de 64 cheats sincronizados." }
+            require(codes.all(::validCheatCode)) { "Cheat inválido no host." }
+            output.writeInt(codes.size)
+            codes.forEach { output.writeUTF(it) }
+            output.flush()
+            require(input.readBoolean()) {
+                "Jogador 2 não autorizou ou não conseguiu aplicar cheats."
+            }
+            val result = runCatching {
+                applyOnlineCheats(codes.toTypedArray())
+            }.getOrDefault(-99)
+            output.writeBoolean(result >= 0)
+            output.flush()
+            require(result >= 0) { "Host não conseguiu ativar cheats: erro $result." }
+            if (codes.isNotEmpty())
+                onStatus("${codes.size} cheats aplicados aos dois jogadores antes da partida.")
+        } else {
+            val count = input.readInt()
+            require(count in 0..64) { "Quantidade de cheats inválida." }
+            val codes = (0 until count).map { input.readUTF() }
+            require(codes.all(::validCheatCode)) { "Servidor enviou cheats inválidos." }
+            if (codes.isNotEmpty() && !allowOnlineCheats) {
+                output.writeBoolean(false)
+                output.flush()
+                error("Host utiliza cheats; ative a autorização em Multiplayer ou jogue sem cheats.")
+            }
+            val applied = runCatching {
+                applyOnlineCheats(codes.toTypedArray())
+            }.getOrDefault(-99)
+            output.writeBoolean(applied >= 0)
+            output.flush()
+            require(applied >= 0) {
+                "Não foi possível aplicar cheats online (erro $applied)."
+            }
+            require(input.readBoolean()) { "Host não conseguiu ativar os mesmos cheats." }
+            if (codes.isNotEmpty())
+                onStatus("${codes.size} cheats sincronizados e autorizados antes do jogo.")
+        }
+    }
+
+    private fun validCheatCode(code: String): Boolean =
+        code.length in 4..190 &&
+            code.all { char ->
+                char in '0'..'9' || char in 'a'..'f' ||
+                    char in 'A'..'F' || char in "-:+,.; "
+            }
 
     private fun runSession(connection: Socket, host: Boolean) {
         connection.tcpNoDelay = true
@@ -314,7 +385,8 @@ internal class NetplaySession(
             }
         }
 
-        onStatus("ROM e opções conferidas. Sincronizando estado inicial…")
+        negotiateOnlineCheats(input, output, host)
+        onStatus("ROM, opções e cheats conferidos. Sincronizando estado inicial…")
         if (host) {
             val state = saveState() ?: error("Não foi possível criar o estado inicial.")
             require(state.size in 29..MAX_STATE) { "Estado inicial inválido." }
@@ -337,7 +409,8 @@ internal class NetplaySession(
             output.flush()
         }
 
-        connection.soTimeout = if (mode == NetworkMode.INTERNET) 12000 else 5000
+        connection.soTimeout = if (mode == NetworkMode.INTERNET ||
+            mode == NetworkMode.RELAY || mode == NetworkMode.AUTO) 12000 else 5000
         onStatus(if (host) "Conectado como jogador 1 (host)." else "Conectado como jogador 2.")
         val period = framePeriodNs().coerceIn(10000000L, 50000000L)
         var nextFrameAt = System.nanoTime()

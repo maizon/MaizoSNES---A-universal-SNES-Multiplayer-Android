@@ -29,7 +29,8 @@ function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0"
       protocol: "maizo-relay-v1",
       relayPort: tcp.address()?.port || relayPort,
       rooms: [...rooms.values()].filter(r => !r.host.destroyed).map(r => ({
-        id: r.id, game: r.game, createdAt: r.createdAt
+        id: r.id, game: r.game, createdAt: r.createdAt,
+        romHash: r.romHash, cheats: r.cheats
       }))
     }));
   });
@@ -58,7 +59,7 @@ function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0"
         socket.end("ERR INVALID\n"); return;
       }
       if (parts[0] === "HOST") {
-        if (rooms.size >= maxRooms || parts.length !== 3 || rooms.has(id)) {
+        if (rooms.size >= maxRooms || ![3, 5].includes(parts.length) || rooms.has(id)) {
           socket.end("ERR FULL_OR_DUPLICATE\n"); return;
         }
         let title;
@@ -67,8 +68,15 @@ function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0"
             .replace(/[\r\n\x00-\x1f]/g, "").slice(0, 75);
         } catch (_) { title = "SNES"; }
         if (!title) title = "SNES";
+        const romHash = parts.length === 5 ? parts[3] : "";
+        const cheats = parts.length === 5 && parts[4] === "1";
+        if ((romHash && !/^[a-f0-9]{16}$/.test(romHash)) ||
+            (parts.length === 5 && !["0", "1"].includes(parts[4]))) {
+          socket.end("ERR INVALID_META\n"); return;
+        }
         ownedId = id;
-        rooms.set(id, { id, game: title, createdAt: Date.now(), host: socket });
+        rooms.set(id, { id, game: title, romHash, cheats,
+          createdAt: Date.now(), host: socket });
         socket.pause();
         return;
       }
@@ -79,7 +87,7 @@ function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0"
         room.host.removeAllListeners("timeout");
         room.host.setTimeout(0);
         socket.setTimeout(0);
-        // Both clients wait for this exact line before starting the MZNP v2 bytes.
+        // Both clients wait for this exact line before starting the MZNP v3 bytes.
         room.host.write("READY\n");
         socket.write("READY\n");
         room.host.pipe(socket);

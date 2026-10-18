@@ -2,6 +2,15 @@
 
 Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.
 
+## Atualização 0.7 Preview — Auto Lobby + cheats online sincronizados
+
+- Modo **Automático (recomendado)** reúne salas LAN e servidores oficiais cadastrados pelo próprio MaizoSNES. Nenhum IP/URL é solicitado ao jogador comum. O catálogo `server/registry.json` começa vazio até operadores autorizados realmente implantarem instâncias. Listas de terceiros não são servidores compatíveis automaticamente.
+- Pesquisa simultânea em relays HTTPS autorizados (até 8 endpoints), lista salas por região, mostra tempo de resposta HTTP, hash parcial da ROM e aviso de cheats; pré-verificação de compatibilidade por SHA-256 da ROM antes de entrar. A versão MZNP v3 ainda valida o SHA-256 **completo**.
+- **Cheats online opcionais, sincronizados ANTES do primeiro quadro**: o host seleciona os códigos na biblioteca; ambos precisam autorizar nas opções multiplayer. Os dois núcleos aplicam a mesma lista validada ou encerram a conexão antes de jogar. Mudança de cheats durante a partida permanece bloqueada.
+- Patches IPS/BPS existentes funcionam em partidas online **quando ambos têm a mesma ROM já modificada** (SHA-256 idêntico). O programa não envia automaticamente patches/ROMs.
+- Modo antigo por IP, LAN automática e relay manual preservados; configurações avançadas recolhíveis.
+- Planos e limitações: `docs/MULTIPLAYER_PREMIUM_PLAN.md`. Sem relays implantados/credenciais, não é possível prometer salas públicas funcionando na internet.
+
 ## Atualização 0.6 Preview — controle moderno e servidor por IP
 
 - **9 layouts de toque** persistidos por jogo/preset: Maizo, CTR, ARMSX, PPSSPP, **PlayStation (△○✕□), Xbox Series (ABXY), Nintendo Switch, Arcade RGB e Steam Deck**. Os cinco modernos usam botões em losango, L/R no topo e temas vetoriais diferentes; botões continuam mapeados aos mesmos bits SNES. O editor mantém posições individuais, escala e transparência.

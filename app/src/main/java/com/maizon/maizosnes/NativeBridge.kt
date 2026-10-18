@@ -11,6 +11,8 @@ object NativeBridge {
     external fun nativeSetInput(bits: Int)
     /** Complete selected cheat set, rebuilt atomically. Negative value means rejection. */
     external fun nativeApplyCheats(codes: Array<String>): Int
+    /** Available only during MZNP v3 setup, before the first netplay frame. */
+    external fun nativeApplyOnlineCheats(codes: Array<String>): Int
     external fun nativeSetPlayer2Input(bits: Int)
     external fun nativeSetNetplayMode(enabled: Boolean)
     external fun nativeNetplayStep(player1: Int, player2: Int): Int

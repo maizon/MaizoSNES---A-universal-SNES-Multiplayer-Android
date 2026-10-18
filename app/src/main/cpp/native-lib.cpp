@@ -36,6 +36,7 @@ std::atomic<bool> g_paused{false};
 std::atomic<uint32_t> g_inputMask{0};
 std::atomic<uint32_t> g_player2InputMask{0};
 std::atomic<bool> g_netplayMode{false};
+std::atomic<bool> g_netplayCheatSetupAllowed{false};
 std::atomic<uint64_t> g_audioWrite{0};
 std::atomic<uint64_t> g_audioRead{0};
 int16_t g_audioRing[kAudioCapacity]{};
@@ -559,6 +560,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jboolean enabled) {
     if (enabled == JNI_TRUE) {
         g_netplayMode.store(true, std::memory_order_release);
+        g_netplayCheatSetupAllowed.store(true, std::memory_order_release);
         stopFrameThread();
         g_inputMask.store(0, std::memory_order_release);
         g_player2InputMask.store(0, std::memory_order_release);
@@ -566,6 +568,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jb
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (g_gameLoaded.load(std::memory_order_acquire)) retro_cheat_reset();
     } else {
+        g_netplayCheatSetupAllowed.store(false, std::memory_order_release);
         stopFrameThread();
         g_netplayMode.store(false, std::memory_order_release);
         if (g_gameLoaded.load(std::memory_order_acquire)) startFrameThread();
@@ -580,6 +583,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStep(
     if (!g_gameLoaded.load(std::memory_order_acquire)) return -2;
     g_inputMask.store(static_cast<uint32_t>(player1) & 0xffffu, std::memory_order_release);
     g_player2InputMask.store(static_cast<uint32_t>(player2) & 0xffffu, std::memory_order_release);
+    g_netplayCheatSetupAllowed.store(false, std::memory_order_release);
     const auto begin = std::chrono::steady_clock::now();
     retro_run();
     const auto after = std::chrono::steady_clock::now();
@@ -692,9 +696,8 @@ Java_com_maizon_maizosnes_NativeBridge_nativeReadAudio(JNIEnv* env, jobject, jsh
 // Rebuild from a complete selected set to allow deactivation. In pinned
 // Snes9x libretro.cpp, retro_cheat_set() uses a 256-byte unchecked strcpy:
 // reject untrusted cheat strings longer than 190 ASCII chars *before* calling.
-extern "C" JNIEXPORT jint JNICALL
-Java_com_maizon_maizosnes_NativeBridge_nativeApplyCheats(
-    JNIEnv* env, jobject, jobjectArray codesArray) {
+static jint applyValidatedCheats(
+    JNIEnv* env, jobjectArray codesArray, bool netplayHandshake) {
     if (!codesArray) return -1;
     const jsize count = env->GetArrayLength(codesArray);
     if (count > 64 || count < 0) return -2;
@@ -722,12 +725,28 @@ Java_com_maizon_maizosnes_NativeBridge_nativeApplyCheats(
     }
     std::lock_guard<std::mutex> lock(g_coreMutex);
     if (!g_gameLoaded.load(std::memory_order_acquire)) return -5;
-    if (g_netplayMode.load(std::memory_order_acquire)) return -6;
+    const bool netplay = g_netplayMode.load(std::memory_order_acquire);
+    const bool allowed = g_netplayCheatSetupAllowed.load(std::memory_order_acquire);
+    if (netplayHandshake ? (!netplay || !allowed) : netplay) return -6;
     retro_cheat_reset();
     for (size_t i = 0; i < selected.size(); ++i) {
         retro_cheat_set(static_cast<unsigned>(i), true, selected[i].c_str());
     }
     return static_cast<jint>(selected.size());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeApplyCheats(
+    JNIEnv* env, jobject, jobjectArray codesArray) {
+    return applyValidatedCheats(env, codesArray, false);
+}
+
+// Called ONLY during MZNP v3 handshake. The native gate shuts permanently
+// at first netplay frame, preventing unilateral mid-session cheats.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeApplyOnlineCheats(
+    JNIEnv* env, jobject, jobjectArray codesArray) {
+    return applyValidatedCheats(env, codesArray, true);
 }
 
 extern "C" JNIEXPORT void JNICALL

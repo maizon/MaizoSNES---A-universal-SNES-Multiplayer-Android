@@ -8,7 +8,13 @@ import java.net.URL
 /** Directory + outbound TCP relay, hosted by the user on a reachable server.
  * This deliberately does NOT claim direct P2P, NAT punching, or encrypted TCP.
  */
-internal data class InternetRoom(val id: String, val game: String, val createdAt: Long)
+internal data class InternetRoom(
+    val id: String,
+    val game: String,
+    val createdAt: Long,
+    val romHash: String = "",
+    val cheats: Boolean = false
+)
 internal data class RelayListing(val serverHost: String, val relayPort: Int, val rooms: List<InternetRoom>)
 
 internal object RelayDirectory {
@@ -77,8 +83,11 @@ internal object RelayDirectory {
             val item = values.optJSONObject(index) ?: continue
             val id = item.optString("id")
             if (!id.matches(Regex("[a-f0-9]{12,24}"))) continue
+            val romHash = item.optString("romHash").lowercase()
             rooms.add(InternetRoom(id, item.optString("game").take(75),
-                item.optLong("createdAt")))
+                item.optLong("createdAt"),
+                romHash.takeIf { it.matches(Regex("[a-f0-9]{16}")) } ?: "",
+                item.optBoolean("cheats", false)))
         }
         return RelayListing(parsed.host, port, rooms)
     }

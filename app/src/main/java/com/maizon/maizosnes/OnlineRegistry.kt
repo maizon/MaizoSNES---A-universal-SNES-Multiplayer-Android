@@ -25,7 +25,9 @@ internal data class AutoRoom(
     val serverName: String,
     val region: String,
     val endpoint: String,
-    val latencyMs: Long
+    val latencyMs: Long,
+    val romHash: String = "",
+    val cheats: Boolean = false
 )
 internal data class AutoServerStatus(
     val relay: PublicRelay,
@@ -115,9 +117,11 @@ internal object OnlineRegistry {
 
     internal fun loadRegistered(): List<PublicRelay> {
         var lastError: Exception? = null
+        var manifestLoaded = false
         for (source in listOf(MAIN_MANIFEST, PREVIEW_MANIFEST)) {
             try {
                 val relays = parseRegistry(downloadRegistry(source))
+                manifestLoaded = true
                 if (relays.isNotEmpty()) return relays
             } catch (e: Exception) {
                 lastError = e
@@ -125,6 +129,7 @@ internal object OnlineRegistry {
         }
         // An empty first-party registry is an expected initial state: the
         // project owner must first deploy and register real relay servers.
+        if (manifestLoaded) return emptyList()
         if (lastError != null) throw lastError
         return emptyList()
     }
@@ -151,7 +156,7 @@ internal object OnlineRegistry {
                         .coerceIn(1L, 120000L)
                     val rooms = listing.rooms.map { room ->
                         AutoRoom(room.id, room.game, server.name, server.region,
-                            server.endpoint, elapsed)
+                            server.endpoint, elapsed, room.romHash, room.cheats)
                     }
                     AutoServerStatus(server, elapsed, rooms.size) to rooms
                 }.getOrNull()

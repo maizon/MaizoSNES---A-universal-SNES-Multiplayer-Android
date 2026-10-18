@@ -166,6 +166,7 @@ internal fun MaizoEmulatorApp(
     screen: AppScreen,
     statusMessage: String,
     currentRomName: String?,
+    localRomHashPrefix: String,
     hasLoadedRom: Boolean,
     paused: Boolean,
     settings: AppSettings,
@@ -204,6 +205,8 @@ internal fun MaizoEmulatorApp(
     onRefreshAutoRooms: () -> Unit,
     onHostAutomatic: () -> Unit,
     onJoinAutomatic: (AutoRoom) -> Unit,
+    onlineCheatsOptIn: Boolean,
+    onOnlineCheatsChanged: (Boolean) -> Unit,
     shareRomAllowed: Boolean,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
@@ -303,7 +306,7 @@ internal fun MaizoEmulatorApp(
                 onOpenRom, onContinueGame, onRenameRom
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
-                Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
+                Modifier.fillMaxSize().padding(padding), currentRomName, localRomHashPrefix, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
                 connectionMode, onConnectionModeChanged,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
@@ -313,6 +316,7 @@ internal fun MaizoEmulatorApp(
                 onHostRelay, onJoinRelay,
                 autoRooms, autoServers, autoStatus, autoScanActive,
                 onRefreshAutoRooms, onHostAutomatic, onJoinAutomatic,
+                onlineCheatsOptIn, onOnlineCheatsChanged,
                 shareRomAllowed, receiveRomAllowed,
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
                 onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
@@ -561,6 +565,7 @@ private fun RomCard(
 private fun MultiplayerScreen(
     modifier: Modifier,
     romName: String?,
+    localRomHashPrefix: String,
     ready: Boolean,
     status: String,
     localIpAddress: String,
@@ -588,6 +593,8 @@ private fun MultiplayerScreen(
     onRefreshAutoRooms: () -> Unit,
     onHostAutomatic: () -> Unit,
     onJoinAutomatic: (AutoRoom) -> Unit,
+    onlineCheatsOptIn: Boolean,
+    onOnlineCheatsChanged: (Boolean) -> Unit,
     shareRomAllowed: Boolean,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
@@ -661,6 +668,16 @@ private fun MultiplayerScreen(
                 Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
                     color = Muted, fontSize = 12.sp)
                 ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
+                ToggleSettingRow(
+                    "Autorizar cheats sincronizados no multiplayer",
+                    "Experimental: marque antes de entrar ou criar sala. O anfitrião " +
+                        "seleciona os cheats da biblioteca e os dois aparelhos instalam " +
+                        "exatamente os mesmos códigos antes do primeiro quadro. " +
+                        "Sem autorização, a partida com cheats é recusada. " +
+                        "Não é permitido mudar os códigos durante o jogo.",
+                    onlineCheatsOptIn,
+                    { if (!active) onOnlineCheatsChanged(it) }
+                )
             }
         }
 
@@ -714,8 +731,13 @@ private fun MultiplayerScreen(
                         color = Muted, fontSize = 12.sp)
                 } else {
                     autoRooms.forEach { room ->
+                        val hashCompatible = room.romHash.isBlank() ||
+                            localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
+                        val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                         Card(
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = !active && ready) {
+                            modifier = Modifier.fillMaxWidth().clickable(
+                                enabled = !active && ready && hashCompatible && cheatsAllowed
+                            ) {
                                 onJoinAutomatic(room)
                             },
                             colors = CardDefaults.cardColors(containerColor = PanelRaised),
@@ -727,8 +749,18 @@ private fun MultiplayerScreen(
                                     Text(room.game, fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold)
                                     Text(room.serverName + " • " + room.region +
-                                        " • resposta " + room.latencyMs + " ms",
+                                        " • resposta HTTP " + room.latencyMs + " ms",
                                         color = Muted, fontSize = 10.sp)
+                                    Text(
+                                        when {
+                                            !hashCompatible -> "ROM/MOD DIFERENTE — mesma versão necessária"
+                                            !cheatsAllowed -> "CHEATS — autorize nas configurações"
+                                            room.cheats -> "CHEATS SINCRONIZADOS • ROM compatível"
+                                            room.romHash.isNotBlank() -> "ROM compatível por SHA-256"
+                                            else -> "Versão da ROM será validada ao conectar"
+                                        }, color = if (hashCompatible && cheatsAllowed) Mint
+                                            else Color(0xFFFFBD85), fontSize = 10.sp
+                                    )
                                 }
                                 Text("ENTRAR ›", color = Mint,
                                     fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -825,8 +857,13 @@ private fun MultiplayerScreen(
                         color = Muted, fontSize = 12.sp)
                 }
                 relayRooms.forEach { room ->
+                    val hashCompatible = room.romHash.isBlank() ||
+                        localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
+                    val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable(enabled = !active && ready) {
+                        modifier = Modifier.fillMaxWidth().clickable(
+                            enabled = !active && ready && hashCompatible && cheatsAllowed
+                        ) {
                             onJoinRelay(room.id)
                         },
                         shape = RoundedCornerShape(12.dp),
@@ -837,6 +874,15 @@ private fun MultiplayerScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text("Sala " + room.id, color = Muted, fontSize = 10.sp)
+                                Text(
+                                    when {
+                                        !hashCompatible -> "ROM/MOD DIFERENTE"
+                                        !cheatsAllowed -> "CHEATS — autorize"
+                                        room.cheats -> "CHEATS SINCRONIZADOS"
+                                        else -> "ROM verificada ao entrar"
+                                    }, color = if (hashCompatible && cheatsAllowed) Mint
+                                        else Color(0xFFFFBD85), fontSize = 10.sp
+                                )
                             }
                             Text("ENTRAR ›", color = Mint, fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp)

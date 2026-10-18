@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val activeScreen = androidx.compose.runtime.mutableStateOf(AppScreen.LIBRARY)
     private val currentRomFile = androidx.compose.runtime.mutableStateOf<File?>(null)
     private val currentRomName = androidx.compose.runtime.mutableStateOf<String?>(null)
+    private val currentRomHashPrefix = androidx.compose.runtime.mutableStateOf("")
     private val appSettings = androidx.compose.runtime.mutableStateOf(AppSettings())
     private val coreSettings = androidx.compose.runtime.mutableStateMapOf<String, String>()
     private val paused = androidx.compose.runtime.mutableStateOf(false)
@@ -65,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private val scanningRelay = androidx.compose.runtime.mutableStateOf(false)
     private val autoRooms = androidx.compose.runtime.mutableStateOf<List<AutoRoom>>(emptyList())
     private val autoServers = androidx.compose.runtime.mutableStateOf<List<AutoServerStatus>>(emptyList())
+    private val onlineCheatsOptIn = androidx.compose.runtime.mutableStateOf(false)
     private val autoScanActive = androidx.compose.runtime.mutableStateOf(false)
     private val autoNetworkStatus = androidx.compose.runtime.mutableStateOf("Buscando servidores disponíveis…")
     private val devUnlocked = androidx.compose.runtime.mutableStateOf(false)
@@ -148,6 +150,7 @@ class MainActivity : ComponentActivity() {
         }.getOrDefault(NetworkMode.AUTO)
         loadConnectionTarget()
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
+        onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
         devShareEnabled.value = prefs.getBoolean("dev_share_advanced", false) && devUnlocked.value
         if (devShareEnabled.value) shareRomAllowed.value = true
@@ -168,6 +171,7 @@ class MainActivity : ComponentActivity() {
                     screen = activeScreen.value,
                     statusMessage = statusMessage.value,
                     currentRomName = currentRomName.value,
+                    localRomHashPrefix = currentRomHashPrefix.value,
                     hasLoadedRom = hasLoadedRom,
                     paused = paused.value,
                     settings = appSettings.value,
@@ -201,6 +205,8 @@ class MainActivity : ComponentActivity() {
                     onRefreshAutoRooms = ::refreshAutoRooms,
                     onHostAutomatic = ::hostAutomatic,
                     onJoinAutomatic = ::joinAutomatic,
+                    onlineCheatsOptIn = onlineCheatsOptIn.value,
+                    onOnlineCheatsChanged = ::setOnlineCheatsOptIn,
                     shareRomAllowed = shareRomAllowed.value,
                     receiveRomAllowed = receiveRomAllowed.value,
                     onShareRomAllowedChanged = { shareRomAllowed.value = it },
@@ -795,6 +801,7 @@ class MainActivity : ComponentActivity() {
             syncPlaybackState()
             audioOutput?.stop()
             statusMessage.value = "Carregando " + file.name + "…"
+            currentRomHashPrefix.value = ""
             try {
                 val bytes = withContext(Dispatchers.IO) {
                     file.inputStream().use { input ->
@@ -812,7 +819,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 require(bytes.isNotEmpty()) { "O arquivo está vazio." }
-                val result = withContext(Dispatchers.Default) { NativeBridge.nativeLoadRom(bytes, file.name) }
+                val (result, romPrefix) = withContext(Dispatchers.Default) {
+                    val result = NativeBridge.nativeLoadRom(bytes, file.name)
+                    val prefix = if (result == 0) MessageDigest.getInstance("SHA-256")
+                        .digest(bytes).take(8)
+                        .joinToString("") { "%02x".format(it) } else ""
+                    result to prefix
+                }
                 if (result != 0) {
                     hasLoadedRom = false
                     currentRomFile.value = null
@@ -828,6 +841,7 @@ class MainActivity : ComponentActivity() {
                 cheatRomKey = null
                 currentRomFile.value = file
                 currentRomName.value = file.name
+                currentRomHashPrefix.value = romPrefix
                 userPaused = false
                 paused.value = false
                 audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate()).also {
@@ -959,11 +973,40 @@ class MainActivity : ComponentActivity() {
 
     private fun joinAutomatic(room: AutoRoom) {
         if (netplaySession != null) return
-        if (!hasLoadedRom) {
-            autoNetworkStatus.value = "Abra a mesma ROM para entrar na sala online."
-            return
-        }
+        if (!canJoinOnlineRoom(room.romHash, room.cheats)) return
         startRelayRoom(room.id, room.endpoint)
+    }
+
+    private fun canJoinOnlineRoom(hash: String, cheats: Boolean): Boolean {
+        if (!hasLoadedRom) {
+            lanStatus.value = "Abra a ROM desejada antes de entrar no jogo."
+            autoNetworkStatus.value = lanStatus.value
+            return false
+        }
+        if (hash.isNotEmpty() && currentRomHashPrefix.value.isNotEmpty() &&
+            hash != currentRomHashPrefix.value) {
+            lanStatus.value = "ROM ou mod diferente: abra a mesma versão da ROM " +
+                "do anfitrião. Os dois aparelhos precisam do mesmo SHA-256."
+            autoNetworkStatus.value = lanStatus.value
+            return false
+        }
+        if (cheats && !onlineCheatsOptIn.value) {
+            lanStatus.value = "Essa sala utiliza cheats. Ative primeiro " +
+                "'Autorizar cheats sincronizados' nas opções Multiplayer."
+            autoNetworkStatus.value = lanStatus.value
+            return false
+        }
+        return true
+    }
+
+    private fun setOnlineCheatsOptIn(enabled: Boolean) {
+        if (netplaySession != null) return
+        onlineCheatsOptIn.value = enabled
+        prefs.edit().putBoolean("online_cheats_opt_in", enabled).apply()
+        lanStatus.value = if (enabled)
+            "Cheats online autorizados. O host controla os códigos e todos " +
+                "são aplicados antes da partida. Não é possível trocar durante o jogo."
+        else "Cheats online desativados. Partidas com cheats serão recusadas."
     }
 
     private fun changeRelayAddress(value: String) {
@@ -1001,7 +1044,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun joinRelay(roomId: String) {
-        if (netplaySession != null || (!hasLoadedRom && !receiveRomAllowed.value)) {
+        if (netplaySession != null) return
+        val room = relayRooms.value.firstOrNull { it.id == roomId }
+        if (room != null && !canJoinOnlineRoom(room.romHash, room.cheats)) return
+        if (!hasLoadedRom) {
             lanStatus.value = "Abra a mesma ROM para entrar na sala."
             return
         }
@@ -1601,6 +1647,11 @@ class MainActivity : ComponentActivity() {
             step = { player1, player2 -> NativeBridge.nativeNetplayStep(player1, player2) },
             stateHash = { NativeBridge.nativeNetplayStateHash() },
             framePeriodNs = { NativeBridge.nativeGetFramePeriodNs() },
+            allowOnlineCheats = onlineCheatsOptIn.value,
+            hostCheatCodes = if (host == null && onlineCheatsOptIn.value)
+                cheatEntries.value.filter { it.id in activeCheatIds.value }
+                    .map { it.code }.take(64) else emptyList(),
+            applyOnlineCheats = { codes -> NativeBridge.nativeApplyOnlineCheats(codes) },
             mode = connectionMode.value,
             onMetrics = { metrics ->
                 runOnUiThread {

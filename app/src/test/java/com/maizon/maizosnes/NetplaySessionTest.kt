@@ -185,4 +185,99 @@ class NetplaySessionTest {
         }
     }
 
+
+    @Test fun hostCheatsAreAppliedToBothPeersBeforeFirstFrame() {
+        val rom = File.createTempFile("maizosnes-cheat-net", ".sfc")
+        rom.writeBytes(ByteArray(128) { 12 })
+        val listening = CountDownLatch(1)
+        val connected = CountDownLatch(2)
+        val finished = CountDownLatch(2)
+        val appliedHost = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val appliedClient = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val firstFrame = CountDownLatch(2)
+        val port = availablePort()
+        fun session(host: Boolean) = NetplaySession(
+            rom = rom,
+            coreOptions = emptyMap(),
+            localInput = { 0 },
+            prepare = { },
+            saveState = { ByteArray(100) { 1 } },
+            loadState = { if (it.size == 100) 0 else -1 },
+            step = { _, _ ->
+                firstFrame.countDown()
+                0
+            },
+            stateHash = { 900L },
+            framePeriodNs = { 16666667L },
+            allowOnlineCheats = true,
+            hostCheatCodes = if (host) listOf("1234-5678") else emptyList(),
+            applyOnlineCheats = { codes ->
+                (if (host) appliedHost else appliedClient).addAll(codes.toList())
+                codes.size
+            },
+            onStatus = { message ->
+                if (host && message.startsWith("Sala disponível")) listening.countDown()
+                if (message.startsWith("Conectado")) connected.countDown()
+            },
+            onFinish = { finished.countDown() }
+        )
+        val host = session(true)
+        val client = session(false)
+        try {
+            host.host(port)
+            assertTrue(listening.await(5, TimeUnit.SECONDS))
+            client.join("127.0.0.1", port)
+            assertTrue("Peers should accept identical cheats", connected.await(8, TimeUnit.SECONDS))
+            assertTrue(firstFrame.await(5, TimeUnit.SECONDS))
+            assertEquals(listOf("1234-5678"), appliedHost.toList())
+            assertEquals(listOf("1234-5678"), appliedClient.toList())
+        } finally {
+            host.stop()
+            client.stop()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            rom.delete()
+        }
+    }
+
+    @Test fun clientOptOutRejectsCheatMatchBeforeFirstFrame() {
+        val rom = File.createTempFile("maizosnes-no-cheat", ".sfc")
+        rom.writeBytes(ByteArray(256) { 11 })
+        val listening = CountDownLatch(1)
+        val finished = CountDownLatch(2)
+        val frames = AtomicInteger(0)
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val port = availablePort()
+        fun session(host: Boolean) = NetplaySession(
+            rom = rom,
+            coreOptions = emptyMap(),
+            localInput = { 0 },
+            prepare = { },
+            saveState = { ByteArray(100) },
+            loadState = { 0 },
+            step = { _, _ -> frames.incrementAndGet(); 0 },
+            stateHash = { 0L },
+            framePeriodNs = { 16666667L },
+            allowOnlineCheats = host,
+            hostCheatCodes = if (host) listOf("1234-5678") else emptyList(),
+            applyOnlineCheats = { it.size },
+            onStatus = {
+                if (host && it.startsWith("Sala disponível")) listening.countDown()
+            },
+            onFinish = { errors.add(it); finished.countDown() }
+        )
+        val host = session(true)
+        val client = session(false)
+        try {
+            host.host(port)
+            assertTrue(listening.await(5, TimeUnit.SECONDS))
+            client.join("127.0.0.1", port)
+            assertTrue("Cheat handshake should abort", finished.await(8, TimeUnit.SECONDS))
+            assertEquals("No frame may execute without consent", 0, frames.get())
+            assertTrue(errors.any { it.contains("cheats", ignoreCase = true) })
+        } finally {
+            host.stop()
+            client.stop()
+            rom.delete()
+        }
+    }
 }
