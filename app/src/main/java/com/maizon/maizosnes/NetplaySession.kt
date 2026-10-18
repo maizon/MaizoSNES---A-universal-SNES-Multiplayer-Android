@@ -49,11 +49,13 @@ internal class NetplaySession(
     /** Runs only during the pre-frame handshake, after netplay mode is set. */
     private val applyOnlineCheats: (Array<String>) -> Int = { codes ->
         if (codes.isEmpty()) 0 else -6
-    }
+    },
+    /** Session-only and validated: client temporarily applies host core options. */
+    private val applyHostCoreOptions: (Map<String, String>) -> Boolean = { false }
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
-        private const val VERSION = 3
+        private const val VERSION = 4
         private const val MAX_ROM = 64 * 1024 * 1024
         private const val MAX_STATE = 64 * 1024 * 1024 + 28
         private const val HASH_INTERVAL = 120
@@ -110,7 +112,7 @@ internal class NetplaySession(
     /**
      * Outbound TCP relay transport. Both endpoints connect to the same public
      * server; no inbound ports on either phone, so NAT/CGNAT works. The relay
-     * sends READY before we run the unmodified MZNP v2 handshake.
+     * sends READY before the MZNP v4 handshake, including core option sync.
      */
     fun hostViaRelay(serverHost: String, relayPort: Int, roomId: String, title: String) = launch {
         require(rom?.isFile == true) { "O anfitrião precisa abrir uma ROM." }
@@ -210,12 +212,12 @@ internal class NetplaySession(
         return md.digest()
     }
 
-    private fun optionsDigest(): ByteArray {
+    private fun optionsDigest(options: Map<String, String> = coreOptions): ByteArray {
         // Core source is pinned by scripts/fetch_snes9x.sh. No binary identity
         // guarantee across APKs; tested compatibility is still required.
         val manifest = buildString {
             append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp2\n")
-            coreOptions.toSortedMap().forEach { (key, value) ->
+            options.toSortedMap().forEach { (key, value) ->
                 append(key).append('=').append(value).append('\n')
             }
         }
@@ -292,14 +294,23 @@ internal class NetplaySession(
         val input = DataInputStream(BufferedInputStream(connection.getInputStream(), 32768))
         val output = DataOutputStream(BufferedOutputStream(connection.getOutputStream(), 32768))
         val ownRom = romDigest(rom)
-        val ownOptions = optionsDigest()
-
+        // A client computes its settings fingerprint AFTER applying host choices.
         if (host) {
+            val ownOptions = optionsDigest()
             output.writeInt(MAGIC)
             output.writeInt(VERSION)
             output.write(ownRom)
             output.write(ownOptions)
             output.writeUTF(rom!!.name.take(110))
+            require(coreOptions.size <= 64) { "Opções de núcleo demais." }
+            output.writeInt(coreOptions.size)
+            coreOptions.toSortedMap().forEach { (key, value) ->
+                require(key.length in 1..100 && value.length in 1..100) {
+                    "Opção de núcleo inválida."
+                }
+                output.writeUTF(key)
+                output.writeUTF(value)
+            }
             output.flush()
 
             require(input.readInt() == MAGIC && input.readInt() == VERSION) {
@@ -348,6 +359,29 @@ internal class NetplaySession(
             val hostOptions = read32(input)
             val hostName = input.readUTF()
             require(hostName.length in 1..110) { "Nome de ROM inválido." }
+            val optionCount = input.readInt()
+            require(optionCount in 0..64) { "Registro de opções inválido." }
+            val serverOptions = LinkedHashMap<String, String>()
+            repeat(optionCount) {
+                val key = input.readUTF()
+                val value = input.readUTF()
+                val definition = CoreOptionDefinitions.all.firstOrNull { it.key == key }
+                require(definition != null && value in definition.values &&
+                    serverOptions.put(key, value) == null) {
+                    "O host anunciou uma opção não autorizada."
+                }
+            }
+            require(MessageDigest.isEqual(optionsDigest(serverOptions), hostOptions)) {
+                "Configuração do host corrompida na rede."
+            }
+            if (serverOptions != coreOptions) {
+                onStatus("Sincronizando configurações do núcleo do anfitrião…")
+                require(applyHostCoreOptions(serverOptions)) {
+                    "Não foi possível adotar opções do host. Configurações locais preservadas."
+                }
+                onStatus("Opções do anfitrião aplicadas temporariamente nesta sessão.")
+            }
+            val ownOptions = optionsDigest(serverOptions)
 
             output.writeInt(MAGIC)
             output.writeInt(VERSION)
@@ -357,7 +391,7 @@ internal class NetplaySession(
             output.flush()
 
             require(MessageDigest.isEqual(hostOptions, ownOptions)) {
-                "Opções do núcleo diferentes. Iguale as configurações."
+                "Falha ao sincronizar configurações do núcleo."
             }
             when (input.readUnsignedByte()) {
                 READY -> require(MessageDigest.isEqual(hostRom, ownRom)) {
