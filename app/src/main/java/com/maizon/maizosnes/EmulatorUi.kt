@@ -138,7 +138,8 @@ internal data class AppSettings(
     val gpuShader: GpuShader = GpuShader.NEAREST,
     val performanceHud: Boolean = false,
     val automaticCovers: Boolean = true,
-    val automaticBackup: Boolean = true
+    val automaticBackup: Boolean = true,
+    val audioBufferMs: Int = 40
 )
 
 private val Bg = Color(0xFF090D19)
@@ -1692,6 +1693,26 @@ private fun EmulatorSettings(
                         }
                         ChoiceRow(mode.label, description, settings.aspect == mode) { onSettingsChanged(settings.copy(aspect = mode)) }
                     }
+                    SettingSectionTitle("Perfis de imagem em um toque",
+                        "Ajuste vários controles juntos, sem perder as opções manuais abaixo.")
+                    OutlinedButton(onClick = {
+                        onSettingsChanged(settings.copy(
+                            aspect = AspectMode.CRT,
+                            renderBackend = RenderBackend.CPU,
+                            filter = VideoFilter.ORIGINAL,
+                            outputScale = 1))
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("MODO LEVE • COMPATIBILIDADE E FPS")
+                    }
+                    OutlinedButton(onClick = {
+                        onSettingsChanged(settings.copy(
+                            aspect = AspectMode.CRT,
+                            renderBackend = RenderBackend.GLES,
+                            gpuShader = GpuShader.NEAREST,
+                            outputScale = 1))
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("GPU OPENGL • PIXELS NÍTIDOS (EXPERIMENTAL)")
+                    }
                     SettingSectionTitle("Resolução e escala",
                         "O núcleo SNES renderiza na resolução nativa (normalmente 256×224 ou 512×448). " +
                             "A saída é ampliada pela superfície Android; mudar proporção NÃO cria " +
@@ -1753,6 +1774,18 @@ private fun EmulatorSettings(
                 "Áudio" -> {
                     ToggleSettingRow("Áudio do jogo", "Silencia a saída sem parar a emulação.", settings.audioEnabled) {
                         onSettingsChanged(settings.copy(audioEnabled = it))
+                    }
+                    SettingSectionTitle("Buffer de áudio (25–60 ms)",
+                        "25 ms: resposta rápida, exige aparelho estável. " +
+                        "40 ms: equilíbrio recomendado. 60 ms: reduz cortes quando há oscilação.")
+                    listOf(25, 40, 60).forEach { millis ->
+                        ChoiceRow("$millis ms", when (millis) {
+                            25 -> "Baixa latência • sensível a engasgos"
+                            40 -> "Balanceado • recomendado"
+                            else -> "Estabilidade • buffer maior"
+                        }, settings.audioBufferMs == millis) {
+                            onSettingsChanged(settings.copy(audioBufferMs = millis))
+                        }
                     }
                     SettingSectionTitle("Volume de saída", (settings.volume * 100).toInt().toString() + "%")
                     Slider(value = settings.volume, onValueChange = { onSettingsChanged(settings.copy(volume = it)) }, valueRange = 0f..1f)
