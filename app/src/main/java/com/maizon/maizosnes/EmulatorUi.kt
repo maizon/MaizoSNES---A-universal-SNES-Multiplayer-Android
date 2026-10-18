@@ -613,25 +613,6 @@ private fun MultiplayerScreen(
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
     LaunchedEffect(connectionMode) {
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("DOIS JOGADORES • MESMO CELULAR", fontWeight = FontWeight.Bold)
-                Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
-                    color = Muted, fontSize = 12.sp)
-                ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
-                ToggleSettingRow(
-                    "Autorizar cheats sincronizados no multiplayer",
-                    "Experimental: marque antes de entrar ou criar sala. O anfitrião " +
-                        "seleciona os cheats da biblioteca e os dois aparelhos instalam " +
-                        "exatamente os mesmos códigos antes do primeiro quadro. " +
-                        "Sem autorização, a partida com cheats é recusada. " +
-                        "Não é permitido mudar os códigos durante o jogo.",
-                    onlineCheatsOptIn,
-                    { if (!active) onOnlineCheatsChanged(it) }
-                )
-            }
-        }
-
         if (connectionMode == NetworkMode.LAN_AUTO ||
             connectionMode == NetworkMode.AUTO) onScanLan()
         if (connectionMode == NetworkMode.AUTO) onRefreshAutoRooms()
@@ -823,6 +804,25 @@ private fun MultiplayerScreen(
                 Text("Sem servidores? Verifique a internet ou use LAN. " +
                     "Para conectar, confirme que ambos têm a mesma ROM e APK.",
                     color = Muted, fontSize = 10.sp)
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("DOIS JOGADORES • MESMO CELULAR", fontWeight = FontWeight.Bold)
+                Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
+                    color = Muted, fontSize = 12.sp)
+                ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
+                ToggleSettingRow(
+                    "Autorizar cheats sincronizados no multiplayer",
+                    "Experimental: marque antes de entrar ou criar sala. O anfitrião " +
+                        "seleciona os cheats da biblioteca e os dois aparelhos instalam " +
+                        "exatamente os mesmos códigos antes do primeiro quadro. " +
+                        "Sem autorização, a partida com cheats é recusada. " +
+                        "Não é permitido mudar os códigos durante o jogo.",
+                    onlineCheatsOptIn,
+                    { if (!active) onOnlineCheatsChanged(it) }
+                )
             }
         }
 
