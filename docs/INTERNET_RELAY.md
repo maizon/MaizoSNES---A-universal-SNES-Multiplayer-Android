@@ -14,7 +14,7 @@ Para alterar as portas, use `MAIZO_HTTP_PORT` e `MAIZO_TCP_PORT`.
 Nenhuma dependência npm adicional é necessária.
 
 No Android: **LAN → Servidor de salas (relay) → Endereço do servidor**,
-informe `http://IP-DO-SERVIDOR:8787`, toque em **Atualizar salas**,
+informe apenas `IP-DO-SERVIDOR` (a porta HTTP **8787** será acrescentada automaticamente) ou `http://IP-DO-SERVIDOR:8787`, toque em **Atualizar salas**,
 depois em **Criar sala pela internet**, ou toque em uma sala da lista.
 
 Host e convidado iniciam **conexões de saída** para a porta TCP do servidor;

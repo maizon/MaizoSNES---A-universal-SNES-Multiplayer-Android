@@ -12,7 +12,8 @@ internal data class InternetRoom(val id: String, val game: String, val createdAt
 internal data class RelayListing(val serverHost: String, val relayPort: Int, val rooms: List<InternetRoom>)
 
 internal object RelayDirectory {
-    fun list(address: String): RelayListing {
+    /** Bare IP/hostname works without typing http:// or the default :8787. */
+    internal fun endpoint(address: String): URL {
         val raw = address.trim().take(300)
         require(raw.isNotBlank()) { "Informe o IP ou URL do servidor." }
         val normalized = if (raw.startsWith("http://", true) ||
@@ -21,11 +22,26 @@ internal object RelayDirectory {
         require(parsed.scheme.lowercase() in setOf("http", "https")) {
             "Use URL http:// ou https://."
         }
-        require(!parsed.host.isNullOrBlank() && parsed.userInfo == null) {
-            "Servidor inválido."
+        require(!parsed.host.isNullOrBlank() && parsed.userInfo == null &&
+            parsed.rawQuery == null && parsed.rawFragment == null &&
+            (parsed.rawPath.isNullOrEmpty() || parsed.rawPath == "/")) {
+            "Informe somente o IP, domínio ou URL base do servidor."
         }
-        val base = "${parsed.scheme}://${parsed.rawAuthority}"
-        val url = URL("$base/api/rooms")
+        // A plain IP is intentionally mapped to port 8787. HTTPS without
+        // explicit port may be terminated by the owner's reverse proxy on 443.
+        val defaultPort = if (parsed.scheme.equals("https", true)) -1 else 8787
+        val effectivePort = if (parsed.port == -1) defaultPort else parsed.port
+        require(effectivePort == -1 || effectivePort in 1..65535) {
+            "Porta HTTP inválida."
+        }
+        val authority = if (parsed.port == -1 && effectivePort != -1)
+            "${parsed.rawAuthority}:$effectivePort" else parsed.rawAuthority
+        return URL("${parsed.scheme}://$authority/api/rooms")
+    }
+
+    fun list(address: String): RelayListing {
+        val url = endpoint(address)
+        val parsed = URI(url.toExternalForm())
         val request = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 6500

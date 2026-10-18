@@ -1048,23 +1048,82 @@ private fun TouchOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("Y", 1, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(1))
-                TouchButton("X", 9, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(9))
+            if (layout.preset.diamond) {
+                // Modern gamepads arrange SNES X at north, A at east,
+                // B at south, Y at west. Labels are presentation only;
+                // input mapping remains SNES/libretro native.
+                val faceDiameter = (actionSize * 2.95f).dp
+                Box(Modifier.size(faceDiameter)) {
+                    TouchButton(layout.preset.faceLegend(9), 9, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset,
+                        positionModifier = Modifier.align(Alignment.TopCenter).then(positionFor(9)))
+                    TouchButton(layout.preset.faceLegend(1), 1, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset,
+                        positionModifier = Modifier.align(Alignment.CenterStart).then(positionFor(1)))
+                    TouchButton(layout.preset.faceLegend(8), 8, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset,
+                        positionModifier = Modifier.align(Alignment.CenterEnd).then(positionFor(8)))
+                    TouchButton(layout.preset.faceLegend(0), 0, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset,
+                        positionModifier = Modifier.align(Alignment.BottomCenter).then(positionFor(0)))
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    TouchButton(layout.preset.faceLegend(1), 1, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset, positionModifier = positionFor(1))
+                    TouchButton(layout.preset.faceLegend(9), 9, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset, positionModifier = positionFor(9))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    TouchButton(layout.preset.faceLegend(0), 0, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset, positionModifier = positionFor(0))
+                    TouchButton(layout.preset.faceLegend(8), 8, actionSize,
+                        layout.opacity, onInputChanged, enabled = !editing,
+                        skin = layout.preset, positionModifier = positionFor(8))
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("B", 0, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(0))
-                TouchButton("A", 8, actionSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(8))
+            if (!layout.preset.diamond) {
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    TouchButton(layout.preset.shoulderLegend(10), 10,
+                        actionSize * 0.82f, layout.opacity, onInputChanged,
+                        enabled = !editing, skin = layout.preset,
+                        positionModifier = positionFor(10))
+                    TouchButton(layout.preset.shoulderLegend(11), 11,
+                        actionSize * 0.82f, layout.opacity, onInputChanged,
+                        enabled = !editing, skin = layout.preset,
+                        positionModifier = positionFor(11))
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("L", 10, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(10))
-                TouchButton("R", 11, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset, positionModifier = positionFor(11))
+        }
+        if (layout.preset.diamond) {
+            // Modern pad shoulder triggers are at the top of the device,
+            // well clear of the collapsible menu (44dp upper right).
+            Box(Modifier.align(Alignment.TopStart).padding(start = 17.dp, top = 58.dp)
+                .then(positionFor(10))) {
+                TouchButton(layout.preset.shoulderLegend(10), 10,
+                    34f * layout.scale, layout.opacity, onInputChanged,
+                    isPill = true, enabled = !editing, skin = layout.preset)
+            }
+            Box(Modifier.align(Alignment.TopEnd).padding(end = 17.dp, top = 58.dp)
+                .then(positionFor(11))) {
+                TouchButton(layout.preset.shoulderLegend(11), 11,
+                    34f * layout.scale, layout.opacity, onInputChanged,
+                    isPill = true, enabled = !editing, skin = layout.preset)
             }
         }
         Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            TouchButton("SELECT", 2, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(2))
-            TouchButton("START", 3, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(3))
+            TouchButton(layout.preset.menuLegend(2), 2, 34f * layout.scale,
+                layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(2))
+            TouchButton(layout.preset.menuLegend(3), 3, 34f * layout.scale,
+                layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(3))
         }
     }
 }
@@ -1131,7 +1190,18 @@ private fun GestureDpad(
             Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                 TouchButton("←", 6, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
                 Box(Modifier.size(cellSize.dp).clip(CircleShape)
-                    .background(Color.White.copy(alpha = opacity * 0.22f)))
+                    .background(if (skin == TouchPreset.STEAM) Color(0xFF121E32).copy(alpha = opacity)
+                        else Color.White.copy(alpha = opacity * 0.22f)), contentAlignment = Alignment.Center) {
+                    if (skin == TouchPreset.STEAM || skin == TouchPreset.XBOX) {
+                        Canvas(Modifier.size((cellSize * 0.72f).dp)) {
+                            drawCircle(color = Color(0xFF3A4E6E).copy(alpha = opacity),
+                                radius = size.minDimension * 0.45f)
+                            drawCircle(color = Color.White.copy(alpha = opacity * 0.54f),
+                                radius = size.minDimension * 0.42f,
+                                style = Stroke(width = 2.dp.toPx()))
+                        }
+                    }
+                }
                 TouchButton("→", 7, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
             }
             TouchButton("↓", 5, cellSize, opacity, onInputChanged, enabled = false, skin = skin)
@@ -1149,12 +1219,39 @@ private fun TouchButton(
     positionModifier: Modifier = Modifier
 ) {
     val shape = if (isPill) RoundedCornerShape(18.dp)
-        else if (skin == TouchPreset.CTR || skin == TouchPreset.ARMS)
-            RoundedCornerShape(13.dp) else CircleShape
+        else if (skin == TouchPreset.CTR || skin == TouchPreset.ARMS ||
+            skin == TouchPreset.SWITCH) RoundedCornerShape(13.dp)
+        else CircleShape
+    val faceAccent = when (skin) {
+        TouchPreset.PLAYSTATION -> when (bit) {
+            9 -> Color(0xFF50E6A5)  // triangle
+            8 -> Color(0xFFFF646B)  // circle
+            0 -> Color(0xFF65B9FF)  // cross
+            1 -> Color(0xFFFF9ED5)  // square
+            else -> Color(0xFFE4E6F0)
+        }
+        TouchPreset.XBOX -> when (bit) {
+            0 -> Color(0xFF34C758)  // A
+            8 -> Color(0xFFF24C45)  // B
+            1 -> Color(0xFF2388EA)  // X
+            9 -> Color(0xFFFFCC30)  // Y
+            else -> Color(0xFFD0D9E4)
+        }
+        TouchPreset.ARCADE -> when (bit) {
+            0 -> Color(0xFFFF5B51)
+            1 -> Color(0xFF45E9F6)
+            8 -> Color(0xFFFFCF47)
+            9 -> Color(0xFF82F96D)
+            else -> Color(0xFF97E8FE)
+        }
+        else -> Color.White
+    }
     val glyph = when (skin) {
         TouchPreset.MAIZO, TouchPreset.CTR -> Color(0xFF121522)
         TouchPreset.ARMS -> Color(0xFF7FFFE3)
-        TouchPreset.PPSSPP -> Color.White
+        TouchPreset.PLAYSTATION -> faceAccent
+        TouchPreset.PPSSPP, TouchPreset.XBOX, TouchPreset.SWITCH,
+        TouchPreset.ARCADE, TouchPreset.STEAM -> Color.White
     }
     val alpha = opacity.coerceIn(0.18f, 1f)
     Box(
@@ -1220,6 +1317,57 @@ private fun TouchButton(
                         Offset(4.dp.toPx(), this.size.height - 6.dp.toPx()),
                         Offset(this.size.width - 4.dp.toPx(), this.size.height - 6.dp.toPx()),
                         strokeWidth = 3.dp.toPx())
+                }
+                TouchPreset.PLAYSTATION -> {
+                    drawCircle(color = Color(0xFF151D2F).copy(alpha = alpha * 0.86f),
+                        center = c, radius = radius)
+                    drawCircle(color = faceAccent.copy(alpha = alpha * 0.96f),
+                        center = c, radius = radius * 0.91f,
+                        style = Stroke(width = 2.1.dp.toPx()))
+                    drawCircle(color = Color.White.copy(alpha = alpha * 0.18f),
+                        center = Offset(c.x - radius * 0.13f, c.y - radius * 0.17f),
+                        radius = radius * 0.56f, style = Stroke(width = 1.dp.toPx()))
+                }
+                TouchPreset.XBOX -> {
+                    drawCircle(color = Color(0xFF151A23).copy(alpha = alpha * 0.95f),
+                        center = c, radius = radius)
+                    drawCircle(brush = Brush.linearGradient(listOf(
+                        faceAccent.copy(alpha = alpha * 0.93f),
+                        faceAccent.copy(alpha = alpha * 0.67f))),
+                        center = c, radius = radius * 0.87f)
+                    drawCircle(color = Color.White.copy(alpha = alpha * 0.33f),
+                        center = c, radius = radius * 0.89f,
+                        style = Stroke(width = 1.4.dp.toPx()))
+                }
+                TouchPreset.SWITCH -> {
+                    drawRoundRect(color = Color(0xFF0E1520).copy(alpha = alpha * 0.82f),
+                        cornerRadius = corner)
+                    drawRoundRect(color = Color(0xFFE8EBF1).copy(alpha = alpha * 0.86f),
+                        cornerRadius = corner, style = Stroke(width = 1.6.dp.toPx()))
+                    drawCircle(color = Color(0xFF1B222E).copy(alpha = alpha * 0.62f),
+                        center = c, radius = radius * 0.45f)
+                }
+                TouchPreset.ARCADE -> {
+                    drawCircle(color = Color(0xFF0F0D1F).copy(alpha = alpha * 0.97f),
+                        center = c, radius = radius)
+                    drawCircle(color = faceAccent.copy(alpha = alpha * 0.53f),
+                        center = c, radius = radius * 0.88f)
+                    drawCircle(color = faceAccent.copy(alpha = alpha),
+                        center = c, radius = radius * 0.94f,
+                        style = Stroke(width = 3.2.dp.toPx()))
+                    drawCircle(color = Color.White.copy(alpha = alpha * 0.35f),
+                        center = Offset(c.x - radius * 0.3f, c.y - radius * 0.30f),
+                        radius = radius * 0.22f)
+                }
+                TouchPreset.STEAM -> {
+                    drawCircle(color = Color(0xFF101A2B).copy(alpha = alpha * 0.94f),
+                        center = c, radius = radius)
+                    drawCircle(color = Color(0xFF8AA8C9).copy(alpha = alpha * 0.8f),
+                        center = c, radius = radius * 0.93f,
+                        style = Stroke(width = 1.8.dp.toPx()))
+                    drawCircle(color = Color(0xFF3D6083).copy(alpha = alpha * 0.55f),
+                        center = c, radius = radius * 0.73f,
+                        style = Stroke(width = 1.2.dp.toPx()))
                 }
                 TouchPreset.PPSSPP -> {
                     if (isPill) {
@@ -1383,23 +1531,31 @@ private fun EmulatorSettings(
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
                     SettingSectionTitle("Layouts de controle",
-                        "Quatro skins vetoriais autorais com formas e disposição distintas, " +
-                            "inspiradas no estilo de CTR, ARMSX1 e PPSSPP. " +
-                            "Não são os assets originais desses programas.")
+                        "Nove layouts visuais, incluindo PlayStation, Xbox, Switch, Arcade " +
+                            "e Steam Deck. Botões ABXY mantêm mapeamento do SNES. " +
+                            "Arte original, sem reutilizar imagens proprietárias.")
                     TouchPreset.values().forEach { preset ->
                         ChoiceRow(preset.label, preset.hint,
                             settings.touch.preset == preset) { onSelectTouchPreset(preset) }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)) {
-                            for ((label, bit) in listOf("B" to 0, "A" to 8, "X" to 9, "Y" to 1)) {
-                                TouchButton(label, bit, 33f, 0.78f, { _, _ -> },
-                                    enabled = false, skin = preset)
+                            for (bit in listOf(1, 9, 0, 8)) {
+                                TouchButton(preset.faceLegend(bit), bit, 33f, 0.78f,
+                                    { _, _ -> }, enabled = false, skin = preset)
                             }
                         }
                     }
+                    Text(
+                        if (settings.touch.preset == TouchPreset.PLAYSTATION)
+                            "Mapeamento: □ = Y • △ = X • ✕ = B • ○ = A do SNES."
+                        else if (settings.touch.preset == TouchPreset.XBOX)
+                            "Mapeamento: X = Y • Y = X • A = B • B = A do SNES."
+                        else "Todos os estilos preservam os bits dos botões originais do SNES.",
+                        color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
                     SettingSectionTitle("Editor de layout",
                         "No jogo: EDITAR → GRUPOS/BOTÕES. " +
-                            "Arraste D-pad/grupos ou ABXY, L/R, Start/Select individualmente.")
+                            "Arraste o D-pad e os botões individuais. " +
+                            "Perfis modernos usam L/R nos cantos superiores.")
                     SliderSetting("D-pad: horizontal", settings.touch.dpadX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadX = it))) }, (settings.touch.dpadX * 100).toInt().toString() + "%")
                     SliderSetting("D-pad: subir", settings.touch.dpadY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadY = it))) }, (settings.touch.dpadY * 100).toInt().toString() + "%")
                     SliderSetting("Botões: horizontal", settings.touch.buttonsX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsX = it))) }, (settings.touch.buttonsX * 100).toInt().toString() + "%")

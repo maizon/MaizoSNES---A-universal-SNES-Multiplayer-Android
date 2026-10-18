@@ -17,7 +17,7 @@ O workflow `.github/workflows/publish-signed.yml` verifica testes e
 assinatura antes de criar uma GitHub Release com tag de preview.
 Depois de integrar a branch de desenvolvimento à branch padrão (para que
 o workflow seja registrado), execute-o manualmente em GitHub → Actions
-→ Publish Signed MaizoSNES. Informe, por exemplo, `v0.5.0-preview`,
+→ Publish Signed MaizoSNES. Informe, por exemplo, `v0.6.0-preview`,
 e confirme que os requisitos de licenciamento e redistribuição foram
 avaliados. **A confirmação não altera as licenças dos componentes.**
 

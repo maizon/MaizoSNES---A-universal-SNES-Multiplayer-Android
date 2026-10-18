@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'New preview tag (e.g. v0.5.0-preview)'
+        description: 'New preview tag (e.g. v0.6.0-preview)'
         required: true
         type: string
       reviewed_licenses:
@@ -104,4 +104,4 @@ jobs:
             "app/build/outputs/apk/release/app-release.apk#MaizoSNES-ARM64-signed.apk" \
             --target "$(git rev-parse HEAD)" \
             --title "MaizoSNES $MAIZO_TAG" \
-            --notes-file docs/CHANGELOG_0.5.md --prerelease
+            --notes-file docs/CHANGELOG_0.6.md --prerelease

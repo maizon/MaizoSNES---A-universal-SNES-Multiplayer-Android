@@ -2,6 +2,12 @@
 
 Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.
 
+## Atualização 0.6 Preview — controle moderno e servidor por IP
+
+- **9 layouts de toque** persistidos por jogo/preset: Maizo, CTR, ARMSX, PPSSPP, **PlayStation (△○✕□), Xbox Series (ABXY), Nintendo Switch, Arcade RGB e Steam Deck**. Os cinco modernos usam botões em losango, L/R no topo e temas vetoriais diferentes; botões continuam mapeados aos mesmos bits SNES. O editor mantém posições individuais, escala e transparência.
+- Servidor de salas remotas: informe **apenas o endereço IP**, por exemplo `192.0.2.10` (HTTP porta 8787 automática), ou URL `http://192.0.2.10:8787` / servidor HTTPS. O serviço é auto-hospedado e ambos os jogadores usam conexão de saída; o túnel ainda não é criptografado.
+- Testes unitários dos mapeamentos de controles e validação das URLs e portas de servidor.
+
 ## Atualização 0.5 Preview — Internet / GPU / MODs / controles
 
 - **Descoberta mundial de salas por servidor próprio:** escolha o modo `Servidor de salas (NAT/CGNAT)`, informe apenas o IP ou URL HTTP do servidor, busque salas e entre com um toque. Um servidor Node.js sem dependências está em `server/relay.js`. Tanto P1 como P2 se conectam de saída ao relay TCP, evitando portas no roteador. **É relay, não P2P direto**. Instruções: `docs/INTERNET_RELAY.md`.

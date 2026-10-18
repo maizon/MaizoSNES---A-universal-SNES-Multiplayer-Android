@@ -13,8 +13,8 @@ android {
         applicationId = "com.maizon.maizosnes"
         minSdk = 23
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0-preview"
+        versionCode = 6
+        versionName = "0.6.0-preview"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
