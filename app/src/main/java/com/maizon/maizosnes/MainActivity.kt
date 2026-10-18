@@ -172,8 +172,7 @@ private fun HeroCard(onOpen: () -> Unit) {
                     Text("RETRO. REIMAGINADO.", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = Color(0xFFC7C0FF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 }
                 Spacer(Modifier.height(18.dp))
-                Text("Sua próxima
-aventura começa aqui.", fontSize = 29.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Sua próxima aventura começa aqui.", fontSize = 29.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(10.dp))
                 Text("Uma nova experiência SNES, feita para Android e para jogar junto.", color = Muted, fontSize = 14.sp, lineHeight = 21.sp)
                 Spacer(Modifier.height(22.dp))
