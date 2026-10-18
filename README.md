@@ -9,7 +9,7 @@
 - Upstream: [snes9xgit/snes9x](https://github.com/snes9xgit/snes9x), tag **1.63**, pinned commit `921f9f7b83660eb44ad263022a57a4a029057c37`.
 - `scripts/fetch_snes9x.sh` fetches that exact revision and verifies the upstream license files. Core source is fetched during local/CI builds and is not committed to this application repository.
 - CMake uses an explicit list based on upstream `libretro/Makefile.common`, with the libretro frontend as the portable core host.
-- ROMs are selected through Android's Storage Access Framework and read into memory. The app does not bundle or download games. The first ROM path accepts raw `.sfc` / `.smc` files, not ZIP archives.
+- ROMs are selected through Android's Storage Access Framework and read into memory. The app does not bundle or download games. The first ROM path accepts raw `.sfc` / `.smc` files, not ZIP archives. Save states use a versioned container with a ROM-byte fingerprint, and restore rejects a state saved from a different ROM.
 - The current build targets `arm64-v8a` only. ARMv7 is not enabled.
 - The app includes a native-window video surface, touch controls, a libretro audio callback queue, Android `AudioTrack` output and an in-app viewer for the full third-party license texts. The emulation and audio output pause when the activity or game surface is not active. Rendering currently copies into a native-window buffer; a dedicated GPU renderer/shader pipeline is not implemented yet.
 - The frame loop derives its interval from the core's reported timing where available. Hardware frame pacing and audio sync still need device tests.
@@ -33,7 +33,7 @@ The Snes9x license grants rights for **non-commercial purposes** and states that
 
 ## Roadmap
 
-1. Test the APK on a physical Android device with a known-good ROM: boot, image, sound, input, save/restore, rotation and lifecycle.
+1. Test the APK on a physical Android device with a known-good ROM: boot, image, sound, touch/physical-controller input, save/restore, rotation and lifecycle.
 2. Fix runtime issues and add controller mapping and aspect-ratio options.
 3. Add a dedicated GPU renderer, shaders and frame-time diagnostics after baseline behavior is stable.
 4. Implement local Wi-Fi multiplayer only after game-state determinism and input synchronization have been tested.

@@ -180,7 +180,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        val isJoystick = event.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
+        val isJoystick = (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
         if (isJoystick && event.action == MotionEvent.ACTION_MOVE) {
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
@@ -306,7 +306,11 @@ class MainActivity : ComponentActivity() {
                 statusMessage.value = if (result == 0) {
                     "Estado restaurado: $name"
                 } else {
-                    "O núcleo recusou o estado ($result). Use a mesma ROM que gerou o arquivo."
+                    if (result == -8) {
+                        "Este estado foi criado com outra ROM. Abra o arquivo de estado correto."
+                    } else {
+                        "O núcleo recusou o estado ($result). Confira se o arquivo corresponde à ROM aberta."
+                    }
                 }
             } catch (error: Exception) {
                 syncPlaybackState()

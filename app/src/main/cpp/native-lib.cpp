@@ -20,9 +20,13 @@ constexpr char kLogTag[] = "MaizoSNES";
 constexpr size_t kAudioCapacity = 65536; // int16 values; SPSC ring buffer.
 constexpr size_t kMaxRomBytes = 64u * 1024u * 1024u;
 constexpr size_t kMaxStateBytes = 64u * 1024u * 1024u;
+constexpr uint8_t kStateMagic[8] = {'M', 'Z', 'S', 'S', 'T', 'A', 'T', 'E'};
+constexpr size_t kStateHeaderSize = 28;
+constexpr uint32_t kStateFormatVersion = 1;
 
 std::string g_appDataPath;
 std::string g_romName;
+uint64_t g_romFingerprint = 0; // Protected by g_coreMutex.
 std::atomic<bool> g_initialized{false};
 std::atomic<bool> g_gameLoaded{false};
 std::atomic<bool> g_runFrames{false};
@@ -46,6 +50,37 @@ void logMessage(int priority, const char* format, ...) {
     va_start(args, format);
     __android_log_vprint(priority, kLogTag, format, args);
     va_end(args);
+}
+
+
+uint64_t fingerprintBytes(const uint8_t* data, size_t size) {
+    // FNV-1a 64-bit: a stable lightweight identity for matching save files to ROM bytes.
+    uint64_t hash = 14695981039346656037ull;
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= data[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+void writeU32LE(uint8_t* dst, uint32_t value) {
+    for (unsigned i = 0; i < 4; ++i) dst[i] = static_cast<uint8_t>(value >> (i * 8));
+}
+
+void writeU64LE(uint8_t* dst, uint64_t value) {
+    for (unsigned i = 0; i < 8; ++i) dst[i] = static_cast<uint8_t>(value >> (i * 8));
+}
+
+uint32_t readU32LE(const uint8_t* src) {
+    uint32_t value = 0;
+    for (unsigned i = 0; i < 4; ++i) value |= static_cast<uint32_t>(src[i]) << (i * 8);
+    return value;
+}
+
+uint64_t readU64LE(const uint8_t* src) {
+    uint64_t value = 0;
+    for (unsigned i = 0; i < 8; ++i) value |= static_cast<uint64_t>(src[i]) << (i * 8);
+    return value;
 }
 
 void RETRO_CALLCONV coreLog(enum retro_log_level level, const char* format, ...) {
@@ -288,6 +323,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeLoadRom(
     const size_t slash = name.find_last_of("/\\");
     if (slash != std::string::npos) name.erase(0, slash + 1);
     if (name.empty()) name = "game.sfc";
+    const uint64_t romFingerprint = fingerprintBytes(bytes.data(), bytes.size());
 
     stopFrameThread();
     bool loaded = false;
@@ -295,6 +331,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeLoadRom(
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (g_gameLoaded.load(std::memory_order_acquire)) retro_unload_game();
         g_gameLoaded.store(false, std::memory_order_release);
+        g_romFingerprint = 0;
         g_romName = name;
         retro_game_info info{};
         info.path = g_romName.c_str();
@@ -302,6 +339,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeLoadRom(
         info.size = bytes.size();
         info.meta = nullptr;
         loaded = retro_load_game(&info);
+        g_romFingerprint = loaded ? romFingerprint : 0;
         g_gameLoaded.store(loaded, std::memory_order_release);
     }
 
@@ -385,6 +423,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeGetAudioSampleRate(JNIEnv*, jobject
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSerializeState(JNIEnv* env, jobject) {
     std::vector<uint8_t> stateBytes;
+    uint64_t romFingerprint = 0;
     {
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (!g_initialized.load(std::memory_order_acquire) ||
@@ -392,8 +431,8 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSerializeState(JNIEnv* env, jobject
             return nullptr;
         }
         const size_t size = retro_serialize_size();
-        if (size == 0 || size > kMaxStateBytes) {
-            logMessage(ANDROID_LOG_WARN, "Invalid save-state size: %zu", size);
+        if (size == 0 || size > kMaxStateBytes || g_romFingerprint == 0) {
+            logMessage(ANDROID_LOG_WARN, "Invalid save-state size or ROM fingerprint: %zu", size);
             return nullptr;
         }
         stateBytes.resize(size);
@@ -401,13 +440,26 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSerializeState(JNIEnv* env, jobject
             logMessage(ANDROID_LOG_ERROR, "Core failed to serialize save state");
             return nullptr;
         }
+        romFingerprint = g_romFingerprint;
     }
 
-    jbyteArray output = env->NewByteArray(static_cast<jsize>(stateBytes.size()));
+    // Container header: magic[8], format version u32 LE, ROM fingerprint u64 LE,
+    // and payload size u64 LE. This prevents restoring data into a different ROM.
+    uint8_t header[kStateHeaderSize]{};
+    std::memcpy(header, kStateMagic, sizeof(kStateMagic));
+    writeU32LE(header + 8, kStateFormatVersion);
+    writeU64LE(header + 12, romFingerprint);
+    writeU64LE(header + 20, static_cast<uint64_t>(stateBytes.size()));
+
+    const size_t totalSize = kStateHeaderSize + stateBytes.size();
+    jbyteArray output = env->NewByteArray(static_cast<jsize>(totalSize));
     if (!output) return nullptr;
-    env->SetByteArrayRegion(
-        output, 0, static_cast<jsize>(stateBytes.size()),
-        reinterpret_cast<const jbyte*>(stateBytes.data()));
+    env->SetByteArrayRegion(output, 0, static_cast<jsize>(kStateHeaderSize),
+                            reinterpret_cast<const jbyte*>(header));
+    if (env->ExceptionCheck()) return nullptr;
+    env->SetByteArrayRegion(output, static_cast<jsize>(kStateHeaderSize),
+                            static_cast<jsize>(stateBytes.size()),
+                            reinterpret_cast<const jbyte*>(stateBytes.data()));
     if (env->ExceptionCheck()) return nullptr;
     return output;
 }
@@ -418,24 +470,51 @@ Java_com_maizon_maizosnes_NativeBridge_nativeUnserializeState(
     if (!g_initialized.load(std::memory_order_acquire) || !stateArray) return -1;
 
     const jsize length = env->GetArrayLength(stateArray);
-    if (length <= 0 || static_cast<size_t>(length) > kMaxStateBytes) return -2;
+    if (length <= static_cast<jsize>(kStateHeaderSize) ||
+        static_cast<size_t>(length) > kStateHeaderSize + kMaxStateBytes) return -2;
 
-    std::vector<uint8_t> stateBytes(static_cast<size_t>(length));
+    uint8_t header[kStateHeaderSize]{};
     env->GetByteArrayRegion(
-        stateArray, 0, length, reinterpret_cast<jbyte*>(stateBytes.data()));
+        stateArray, 0, static_cast<jsize>(kStateHeaderSize),
+        reinterpret_cast<jbyte*>(header));
     if (env->ExceptionCheck()) return -3;
+    if (std::memcmp(header, kStateMagic, sizeof(kStateMagic)) != 0 ||
+        readU32LE(header + 8) != kStateFormatVersion) {
+        logMessage(ANDROID_LOG_WARN, "Save-state header/version is not recognized");
+        return -4;
+    }
+
+    const uint64_t savedRomFingerprint = readU64LE(header + 12);
+    const uint64_t declaredPayloadSize = readU64LE(header + 20);
+    const size_t actualPayloadSize = static_cast<size_t>(length) - kStateHeaderSize;
+    if (declaredPayloadSize == 0 || declaredPayloadSize > kMaxStateBytes ||
+        declaredPayloadSize != actualPayloadSize) {
+        logMessage(ANDROID_LOG_WARN, "Save-state payload size is invalid");
+        return -5;
+    }
+
+    std::vector<uint8_t> stateBytes(actualPayloadSize);
+    env->GetByteArrayRegion(
+        stateArray, static_cast<jsize>(kStateHeaderSize),
+        static_cast<jsize>(actualPayloadSize),
+        reinterpret_cast<jbyte*>(stateBytes.data()));
+    if (env->ExceptionCheck()) return -6;
 
     std::lock_guard<std::mutex> lock(g_coreMutex);
-    if (!g_gameLoaded.load(std::memory_order_acquire)) return -4;
+    if (!g_gameLoaded.load(std::memory_order_acquire)) return -7;
+    if (savedRomFingerprint != g_romFingerprint) {
+        logMessage(ANDROID_LOG_WARN, "Save state belongs to a different ROM image");
+        return -8;
+    }
     if (!retro_unserialize(stateBytes.data(), stateBytes.size())) {
-        logMessage(ANDROID_LOG_WARN, "Core rejected save state (%d bytes)", length);
-        return -5;
+        logMessage(ANDROID_LOG_WARN, "Core rejected save state payload (%zu bytes)", actualPayloadSize);
+        return -9;
     }
 
     // Kotlin stops the audio consumer before restore, so this ring reset is race-free.
     const uint64_t latestWrite = g_audioWrite.load(std::memory_order_acquire);
     g_audioRead.store(latestWrite, std::memory_order_release);
-    logMessage(ANDROID_LOG_INFO, "Save state restored (%d bytes)", length);
+    logMessage(ANDROID_LOG_INFO, "Save state restored (%zu bytes)", actualPayloadSize);
     return 0;
 }
 
@@ -458,6 +537,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
     {
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (g_gameLoaded.exchange(false, std::memory_order_acq_rel)) retro_unload_game();
+        g_romFingerprint = 0;
         if (g_initialized.exchange(false, std::memory_order_acq_rel)) retro_deinit();
     }
     {
