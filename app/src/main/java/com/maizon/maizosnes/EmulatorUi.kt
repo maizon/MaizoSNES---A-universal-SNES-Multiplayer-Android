@@ -612,6 +612,25 @@ private fun MultiplayerScreen(
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
     LaunchedEffect(connectionMode) {
+        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("DOIS JOGADORES • MESMO CELULAR", fontWeight = FontWeight.Bold)
+                Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
+                    color = Muted, fontSize = 12.sp)
+                ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
+                ToggleSettingRow(
+                    "Autorizar cheats sincronizados no multiplayer",
+                    "Experimental: marque antes de entrar ou criar sala. O anfitrião " +
+                        "seleciona os cheats da biblioteca e os dois aparelhos instalam " +
+                        "exatamente os mesmos códigos antes do primeiro quadro. " +
+                        "Sem autorização, a partida com cheats é recusada. " +
+                        "Não é permitido mudar os códigos durante o jogo.",
+                    onlineCheatsOptIn,
+                    { if (!active) onOnlineCheatsChanged(it) }
+                )
+            }
+        }
+
         if (connectionMode == NetworkMode.LAN_AUTO ||
             connectionMode == NetworkMode.AUTO) onScanLan()
         if (connectionMode == NetworkMode.AUTO) onRefreshAutoRooms()
@@ -672,25 +691,6 @@ private fun MultiplayerScreen(
                 }
             }
         }
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("DOIS JOGADORES • MESMO CELULAR", fontWeight = FontWeight.Bold)
-                Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
-                    color = Muted, fontSize = 12.sp)
-                ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
-                ToggleSettingRow(
-                    "Autorizar cheats sincronizados no multiplayer",
-                    "Experimental: marque antes de entrar ou criar sala. O anfitrião " +
-                        "seleciona os cheats da biblioteca e os dois aparelhos instalam " +
-                        "exatamente os mesmos códigos antes do primeiro quadro. " +
-                        "Sem autorização, a partida com cheats é recusada. " +
-                        "Não é permitido mudar os códigos durante o jogo.",
-                    onlineCheatsOptIn,
-                    { if (!active) onOnlineCheatsChanged(it) }
-                )
-            }
-        }
-
         if (connectionMode == NetworkMode.AUTO) Card(
             colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)
@@ -1655,15 +1655,20 @@ private fun EmulatorSettings(
     var cheatFilter by remember { mutableStateOf("") }
     val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Rede", "Núcleo", "Estados", "DEV")
     Column(Modifier.fillMaxWidth()) {
+        Text("CENTRAL DE AJUSTES",
+            color = Mint, fontWeight = FontWeight.Bold, fontSize = 11.sp,
+            letterSpacing = 1.5.sp,
+            modifier = Modifier.padding(bottom = 8.dp))
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             categories.forEach { item ->
-                val selected = item == category
-                TextButton(onClick = { category = item }, colors = ButtonDefaults.textButtonColors(contentColor = if (selected) Mint else Muted)) {
-                    Text(item, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-                }
+                androidx.compose.material3.FilterChip(
+                    selected = item == category,
+                    onClick = { category = item },
+                    label = { Text(item, fontSize = 12.sp) }
+                )
             }
         }
         Column(
@@ -1863,7 +1868,7 @@ private fun EmulatorSettings(
                 "Rede" -> {
                     SettingSectionTitle("Perfil de conexão",
                         "Alternar modos não apaga ROMs, save states nem preferências; " +
-                            "as salas usam o protocolo MZNP v2 existente.")
+                            "as salas usam MZNP v4 e sincronização temporária das opções do host.")
                     NetworkMode.values().forEach { mode ->
                         ChoiceRow(mode.label, mode.hint, connectionMode == mode) {
                             if (!cheatsLocked) onConnectionModeChanged(mode)
@@ -1871,14 +1876,24 @@ private fun EmulatorSettings(
                     }
                     if (cheatsLocked) Text("Para trocar modo, encerre a sessão ativa.",
                         color = Color(0xFFFFC47E), fontSize = 11.sp)
-                    Text("LAN usa descoberta automática ou endereço manual. Internet " +
-                        "continua em lockstep, por isso o RTT real limita o FPS e a resposta. " +
-                        "O perfil Internet aumenta tolerância a jitter, sem desativar os " +
-                        "testes de hash ou corromper a sincronização.",
+                    Text("LAN usa descoberta automática ou IP manual. Internet " +
+                        "continua em lockstep para manter os jogos sincronizados. " +
+                        "O convidado copia temporariamente as opções compatíveis do host; " +
+                        "ao sair, os ajustes pessoais são restaurados.",
                         color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
                 }
                 "Núcleo" -> {
-                    SettingSectionTitle("Snes9x 1.63", "Opções reais do núcleo. Alterações são consultadas no caminho de atualização do core.")
+                    SettingSectionTitle("Snes9x 1.63 • opções avançadas",
+                        "Controle nativo do emulador. No multiplayer, as opções do anfitrião " +
+                            "são sincronizadas temporariamente com o convidado.")
+                    OutlinedButton(onClick = {
+                        CoreOptionDefinitions.all.forEach { option ->
+                            if (coreOptions[option.key] != option.defaultValue)
+                                onCoreOptionChanged(option.key, option.defaultValue)
+                        }
+                    }, enabled = !cheatsLocked, modifier = Modifier.fillMaxWidth()) {
+                        Text("RESTAURAR CONFIGURAÇÕES DO NÚCLEO")
+                    }
                     CoreOptionDefinitions.all.filter { it.category == "Núcleo" }.forEach { option ->
                         CoreOptionRow(option, coreOptions[option.key] ?: option.defaultValue, onCoreOptionChanged)
                     }
