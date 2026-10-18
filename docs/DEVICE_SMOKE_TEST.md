@@ -1,42 +1,41 @@
-# MaizoSNES — device smoke-test checklist
+# MaizoSNES — checklist de teste em dispositivo
 
-This checklist is manual: a successful GitHub Actions build proves compilation and package checks only. It is not a substitute for testing on an actual Android device.
+CI verde comprova apenas compilação e empacotamento. Este checklist precisa ser preenchido em um Android real.
 
-## Before testing
+## Biblioteca e ROM
+- [ ] O app abre sem crash.
+- [ ] Importar uma ROM própria .sfc e .smc copia para a biblioteca privada.
+- [ ] ROM importada abre sem chamar o picker novamente.
+- [ ] Renomear altera o nome da biblioteca sem perder o arquivo.
+- [ ] ZIP, arquivos vazios/invalidos e arquivos acima de 64 MiB são rejeitados com mensagem.
+- [ ] Abrir outra ROM encerra a anterior e não deixa áudio antigo.
 
-- Install the debug APK from a successful workflow run on an ARM64 Android device.
-- Use a legally obtained, known-good raw SNES `.sfc` or `.smc` file. No test ROM is stored in this repository.
-- Start with device media volume at a safe level and close other audio-heavy apps.
+## Gameplay e proporção
+- [ ] Abrir ROM leva a tela dedicada landscape.
+- [ ] A superfície do jogo ocupa a área principal e controles ficam sobre o vídeo.
+- [ ] Barras do sistema somem em gameplay e retornam à biblioteca.
+- [ ] Back pausa e retorna à biblioteca; Continuar retoma o jogo.
+- [ ] Testar Pixel Perfect, 4:3, 16:9, Esticar e Preencher em jogo normal e Hi-Res.
+- [ ] Perfil por jogo restaura sua proporção.
 
-## Basic gameplay
+## Input e áudio
+- [ ] D-pad responde em todas as direções; direção+ação simultâneas funcionam.
+- [ ] ABXY, L/R, Select/Start respondem.
+- [ ] Controle físico Bluetooth continua funcionando.
+- [ ] Pause/resume não prende input.
+- [ ] Silenciar e ajustar volume não travam áudio.
+- [ ] Áudio mantém sincronização após trocar ROM e restaurar estado.
 
-- [ ] App opens without a crash or native-library loading error.
-- [ ] A valid ROM can be selected through Android's document picker.
-- [ ] A visible game image appears in the SurfaceView.
-- [ ] Touch D-pad and every virtual action button respond; simultaneous direction + action is recognized.
-- [ ] A physical controller's D-pad, ABXY, start/select, shoulder buttons and analog stick work where the device exposes them.
-- [ ] Audio is audible, reasonably synchronized and does not loop stale samples after changing ROMs.
-- [ ] An invalid file produces an error without crashing.
-- [ ] A second ROM replaces the first; the previous game/audio does not continue.
+## Ajustes e save states
+- [ ] Editor mantém X/Y, escala e opacidade ao fechar/reabrir.
+- [ ] Perfis global e por ROM são independentes.
+- [ ] Opções do núcleo alteram o efeito correspondente.
+- [ ] Slots 1, 2 e 3 salvam/restauram; estado de outra ROM é recusado.
+- [ ] Importar/exportar save state continua disponível.
+- [ ] Reiniciar jogo funciona.
 
-## Save-state safety
-
-- [ ] Save a state and confirm a nonempty file is written.
-- [ ] Continue playing, restore the saved state, and check the game returns to the saved point.
-- [ ] Attempt to load a state created from different ROM bytes; it must be rejected.
-- [ ] Attempt to load a renamed, random or corrupted file; it must be rejected without a crash.
-- [ ] Reset requires confirmation and warns that unsaved progress will be lost.
-
-## Lifecycle and stability
-
-- [ ] Press Home or open another app: emulation and audio pause.
-- [ ] Return to the app: the game resumes only when its surface is attached.
-- [ ] Recreate the Activity or rotate the device: no crash, leaked surface, stuck input or dead audio thread.
-- [ ] Repeatedly open and close ROM/state pickers without freezing.
-- [ ] Run for at least 10 minutes; check for excessive heat, audio underruns and progressive slowdown.
-
-## Test report
-
-Record device model, Android version, APK commit SHA, ROM identity (do not upload the ROM), failed checklist items and relevant logcat excerpts. Keep ROM files out of bug reports.
-
-Do not mark gameplay as validated until this checklist has been exercised on a physical device.
+## LAN e estabilidade
+- [ ] Tela Multiplayer deixa claro que LAN ainda não funciona nesta versão.
+- [ ] Home/retorno não deixam áudio/thread de input preso.
+- [ ] Jogar por 10 minutos sem crash, slowdown progressivo ou aquecimento anormal.
+- [ ] Registrar aparelho, Android, SHA do APK, falhas e logcat; não anexar ROM.

@@ -1,24 +1,26 @@
-# Architecture and implementation plan
+# Arquitetura MaizoSNES
 
-## Modules (planned)
-- **Android UI (Compose):** library, settings, session setup, touch controls and diagnostics.
-- **Emulation adapter (JNI):** stable Kotlin-facing API for initialize/load/run-frame/input/audio/video/save-state.
-- **Core:** Snes9x candidate; integration is gated on a license review and a reproducible native build for arm64-v8a and armeabi-v7a.
-- **Video:** native frame buffer to OpenGL ES texture; shaders are a separate rendering stage so filters do not alter emulation timing.
-- **Audio:** low-latency audio callback/ring buffer; avoid blocking the emulation thread.
-- **Netplay:** deterministic input packets first; rollback only after save/load-state and determinism tests pass.
-- **Diagnostics:** frame time, emulation speed, audio underruns, network RTT/jitter/loss, rollback count and desync detection.
+## UI e navegação
 
-## Netplay protocol requirements
-Packets should carry protocol version, session ID, sequence number, frame number, player ID, controller bitmask, acknowledgement/window data, and integrity checks. Use bounded packet sizes, timeouts, replay protection, and explicit session negotiation. LAN discovery is separate from internet matchmaking. Never trust a peer-provided ROM path or arbitrary file.
+- Biblioteca importa ROMs .sfc/.smc para filesDir/roms. O picker SAF é utilizado apenas na importação inicial.
+- Gameplay é uma rota separada em landscape e modo imersivo; os controles ficam sobrepostos à superfície.
+- Menu in-game separa proporção, áudio, controles, opções do Snes9x e save states.
+- Preferências de aspecto/áudio/controles têm perfil global e perfil por ROM; opções do núcleo ficam no perfil global.
+- Controles touch/teclas compartilham máscara de input atômica.
 
-## Performance rules
-1. Do not do disk/network I/O on the render or emulation thread.
-2. Reuse frame/audio buffers; avoid per-frame allocations.
-3. Measure frame pacing and input-to-photon latency rather than relying only on average FPS.
-4. Apply shaders on GPU, but retain a simple low-cost fallback.
-5. Treat 50/60 Hz game timing separately from display refresh rate.
-6. Rollback requires deterministic replay and tested state serialization; do not advertise it before validation.
+## Core/JNI
 
-## Current implementation status
-The first commit is a UI/build foundation only. The library buttons are informative placeholders; there is no ROM loader, native emulator core, actual UDP session, rollback, or shader pipeline yet.
+- Núcleo Snes9x 1.63, revisão fixada. O source upstream vem de scripts/fetch_snes9x.sh.
+- retro_run executa em thread nativa; vídeo via callback ANativeWindow; áudio por callback para ring buffer e AudioTrack.
+- As opções do core são strings no mapa nativo, com as chaves da revisão upstream. nativeSetCoreOption usa o mutex do core e GET_VARIABLE_UPDATE notifica o núcleo.
+- Save states seguem serialização libretro e fingerprint da ROM; manter o contrato de rejeição de estado incompatível.
+
+## Vídeo
+
+- Layout Compose decide a área e a proporção visível. Pixel Perfect calcula múltiplo inteiro de 256×224; as outras opções são 4:3, 16:9, stretch e fill/crop.
+- A saída atual usa cópia de CPU para ANativeWindow. OpenGL ES/shaders ainda não estão implementados.
+- Não usar flags de build que comprometam determinismo.
+
+## LAN
+
+Consulte docs/NETPLAY.md. Antes de habilitar LAN, implementar input porta 1, lockstep por frame, handshake de ROM/opções e detecção de dessincronização.

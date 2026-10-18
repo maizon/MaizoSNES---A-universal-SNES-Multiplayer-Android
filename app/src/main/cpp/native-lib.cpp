@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -44,6 +45,25 @@ int g_surfaceWidth = 0;
 int g_surfaceHeight = 0;
 std::thread g_frameThread;
 std::atomic<int64_t> g_frameDurationNs{16683333};
+std::atomic<bool> g_coreOptionsDirty{false};
+
+// Defaults use option values from the pinned Snes9x 1.63 libretro_core_options.h.
+std::unordered_map<std::string, std::string> g_coreOptions = {
+    {"snes9x_aspect", "4:3"}, {"snes9x_overscan", "enabled"},
+    {"snes9x_hires_blend", "disabled"}, {"snes9x_blargg", "disabled"},
+    {"snes9x_audio_interpolation", "gaussian"}, {"snes9x_up_down_allowed", "disabled"},
+    {"snes9x_overclock_superfx", "100%"}, {"snes9x_overclock_cycles", "disabled"},
+    {"snes9x_reduce_sprite_flicker", "disabled"}, {"snes9x_randomize_memory", "disabled"},
+    {"snes9x_block_invalid_vram_access", "enabled"}, {"snes9x_echo_buffer_hack", "disabled"},
+    {"snes9x_layer_1", "enabled"}, {"snes9x_layer_2", "enabled"},
+    {"snes9x_layer_3", "enabled"}, {"snes9x_layer_4", "enabled"},
+    {"snes9x_layer_5", "enabled"}, {"snes9x_gfx_clip", "enabled"},
+    {"snes9x_gfx_transp", "enabled"}, {"snes9x_sndchan_1", "enabled"},
+    {"snes9x_sndchan_2", "enabled"}, {"snes9x_sndchan_3", "enabled"},
+    {"snes9x_sndchan_4", "enabled"}, {"snes9x_sndchan_5", "enabled"},
+    {"snes9x_sndchan_6", "enabled"}, {"snes9x_sndchan_7", "enabled"},
+    {"snes9x_sndchan_8", "enabled"}, {"snes9x_region", "auto"}
+};
 
 void logMessage(int priority, const char* format, ...) {
     va_list args;
@@ -128,11 +148,23 @@ bool RETRO_CALLCONV environmentCallback(unsigned command, void* data) {
                 return true;
             }
             return false;
-        case RETRO_ENVIRONMENT_GET_VARIABLE:
-            if (data) static_cast<retro_variable*>(data)->value = nullptr;
-            return false;
+        case RETRO_ENVIRONMENT_GET_VARIABLE: {
+            if (!data) return false;
+            auto* variable = static_cast<retro_variable*>(data);
+            if (!variable->key) {
+                variable->value = nullptr;
+                return false;
+            }
+            const auto found = g_coreOptions.find(variable->key);
+            if (found == g_coreOptions.end()) {
+                variable->value = nullptr;
+                return false;
+            }
+            variable->value = found->second.c_str();
+            return true;
+        }
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
-            if (data) *static_cast<bool*>(data) = false;
+            if (data) *static_cast<bool*>(data) = g_coreOptionsDirty.exchange(false, std::memory_order_acq_rel);
             return data != nullptr;
         case RETRO_ENVIRONMENT_SET_VARIABLES:
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
@@ -406,6 +438,28 @@ Java_com_maizon_maizosnes_NativeBridge_nativeReadAudio(JNIEnv* env, jobject, jsh
     env->ReleasePrimitiveArrayCritical(output, destination, 0);
     g_audioRead.store(read + count, std::memory_order_release);
     return static_cast<jint>(count);
+}
+
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetCoreOption(
+    JNIEnv* env, jobject, jstring keyString, jstring valueString) {
+    if (!keyString || !valueString) return;
+    const char* keyChars = env->GetStringUTFChars(keyString, nullptr);
+    if (!keyChars) return;
+    const std::string key(keyChars);
+    env->ReleaseStringUTFChars(keyString, keyChars);
+    const char* valueChars = env->GetStringUTFChars(valueString, nullptr);
+    if (!valueChars) return;
+    const std::string value(valueChars);
+    env->ReleaseStringUTFChars(valueString, valueChars);
+
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    const auto found = g_coreOptions.find(key);
+    if (found == g_coreOptions.end() || found->second == value) return;
+    found->second = value;
+    g_coreOptionsDirty.store(true, std::memory_order_release);
+    logMessage(ANDROID_LOG_INFO, "Core option updated: %s=%s", key.c_str(), value.c_str());
 }
 
 extern "C" JNIEXPORT jint JNICALL

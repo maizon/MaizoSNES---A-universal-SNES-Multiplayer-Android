@@ -1,45 +1,42 @@
 # MaizoSNES
 
-**Android-first SNES emulator project**, built around the pinned Snes9x 1.63 libretro core.
+Emulador SNES para Android usando Snes9x 1.63. O projeto não inclui ROMs, BIOS, capas nem assets de jogos.
 
-> **Status: experimental integration.** GitHub Actions has successfully compiled and packaged the native core, ROM-picker bridge, native-window video output, touch input and PCM audio queue into an ARM64 debug APK. These checks validate compilation and package contents, not correct gameplay. ROM loading, image, sound, input, timing and lifecycle still require real-device testing.
+## Implementado nesta fase (código)
 
-## Current technical direction
+- Biblioteca local: importar, listar, renomear e abrir arquivos .sfc/.smc sem repetir o picker depois da importação.
+- Gameplay dedicado em landscape, barras do sistema ocultas, pausa e retorno à biblioteca.
+- Proporção: Pixel Perfect (escala física inteira de referência 256×224), 4:3 CRT, 16:9, esticar e preencher/crop.
+- Menu durante o jogo organizado por Vídeo, Áudio, Controles, Núcleo e Estados.
+- Opções reais do Snes9x ligadas ao contrato libretro GET_VARIABLE / GET_VARIABLE_UPDATE.
+- Controles semi-transparentes flutuantes sobre o vídeo, D-pad, ABXY, L/R, Start/Select.
+- Editor por sliders para posição, tamanho e opacidade, com perfil global e por ROM.
+- Três slots de save state privados, além de importar/exportar estados externos.
+- A tela LAN deixa claro que o netplay ainda não está habilitado; os bloqueios técnicos e o protocolo proposto estão em docs/NETPLAY.md.
 
-- Upstream: [snes9xgit/snes9x](https://github.com/snes9xgit/snes9x), tag **1.63**, pinned commit `921f9f7b83660eb44ad263022a57a4a029057c37`.
-- `scripts/fetch_snes9x.sh` fetches that exact revision and verifies the upstream license files. Core source is fetched during local/CI builds and is not committed to this application repository.
-- CMake uses an explicit list based on upstream `libretro/Makefile.common`, with the libretro frontend as the portable core host.
-- ROMs are selected through Android's Storage Access Framework and read into memory. The app does not bundle or download games. The first ROM path accepts raw `.sfc` / `.smc` files, not ZIP archives. Save states use a versioned container with a ROM-byte fingerprint, and restore rejects a state saved from a different ROM.
-- The current build targets `arm64-v8a` only. ARMv7 is not enabled.
-- The app includes a native-window video surface, touch controls, a libretro audio callback queue, Android `AudioTrack` output and an in-app viewer for the full third-party license texts. The emulation and audio output pause when the activity or game surface is not active. Rendering currently copies into a native-window buffer; a dedicated GPU renderer/shader pipeline is not implemented yet.
-- The frame loop derives its interval from the core's reported timing where available. Hardware frame pacing and audio sync still need device tests.
+## Build reproduzível
 
-## Build
-
-Requirements: JDK 17, Android SDK Platform 35, NDK `26.3.11579264`, CMake `3.22.1`, and Git.
-
-From the repository root:
+Requisitos: JDK 17, Android SDK Platform 35, NDK 26.3.11579264, CMake 3.22.1 e Git.
 
 ```bash
 bash scripts/fetch_snes9x.sh
 ./gradlew --no-daemon assembleDebug
 ```
 
-GitHub Actions prepares the pinned source, verifies that the ARM64 native library is packaged, checks that both third-party license texts are present in the APK, and publishes the debug APK as the `app-debug` workflow artifact.
+O workflow fixa a revisão do Snes9x, compila o APK debug, verifica biblioteca ARM64 e textos de licença e publica o artefato app-debug. Build verde não prova runtime ou teste em device.
 
-## Licensing and distribution restrictions
+## Limites conhecidos
 
-The Snes9x license grants rights for **non-commercial purposes** and states that commercial rights are not granted. The NTSC filter has a separate LGPL license. See `LICENSE_DECISION.md`, `THIRD_PARTY_NOTICES.md`, and `LICENSES/`. Do not monetize or publish an APK until the intended distribution has been reviewed against all applicable license conditions. This README is not legal advice.
+- ABI: arm64-v8a; ARMv7 não está habilitado.
+- ROMs ZIP não são suportadas.
+- Vídeo usa SurfaceView/ANativeWindow; renderer OpenGL ES e shaders CRT não estão integrados. Modos Hi-Res necessitam validação de escala.
+- Netplay LAN foi adiado até existir sincronização lockstep por frame e testes de determinismo em dois devices.
+- Validar no aparelho a troca de aspecto, controles multitouch, áudio e opções do núcleo.
 
-## Roadmap
+## Licenciamento
 
-1. Test the APK on a physical Android device with a known-good ROM: boot, image, sound, touch/physical-controller input, save/restore, rotation and lifecycle.
-2. Fix runtime issues and add controller mapping and aspect-ratio options.
-3. Add a dedicated GPU renderer, shaders and frame-time diagnostics after baseline behavior is stable.
-4. Implement local Wi-Fi multiplayer only after game-state determinism and input synchronization have been tested.
-5. Consider internet netplay/rollback after LAN synchronization works.
-6. Revisit ARMv7 support, compatibility matrix, package contents and licensing before release.
+Snes9x 1.63 tem condições específicas de uso não comercial, e o filtro NTSC possui licença separada. Os avisos integrais ficam em LICENSES/ e são empacotados na aplicação. Não monetizar, incluir anúncios nem publicar em lojas comerciais sem autorização e análise jurídica específica. Ver LICENSE_DECISION.md.
 
-## ROM policy
+## Teste de dispositivo
 
-No ROMs, BIOS files or copyrighted game assets are included. Users must select game files they are legally entitled to use.
+Siga docs/DEVICE_SMOKE_TEST.md e anote aparelho, Android, SHA do APK e resultados. Não anexar ROMs a issues. CI verde não é prova de teste em hardware.

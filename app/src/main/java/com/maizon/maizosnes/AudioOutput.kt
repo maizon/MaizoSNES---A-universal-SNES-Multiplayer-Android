@@ -14,6 +14,22 @@ internal class AudioOutput(private val requestedSampleRate: Int) {
     private var running = false
     private var track: AudioTrack? = null
     private var worker: Thread? = null
+    @Volatile private var enabled = true
+    @Volatile private var volume = 1f
+
+    fun setEnabled(value: Boolean) {
+        enabled = value
+        applyVolume()
+    }
+
+    fun setVolume(value: Float) {
+        volume = value.coerceIn(0f, 1f)
+        applyVolume()
+    }
+
+    private fun applyVolume() {
+        track?.let { output -> runCatching { output.setVolume(if (enabled) volume else 0f) } }
+    }
 
     fun start() {
         if (running) return
@@ -51,6 +67,7 @@ internal class AudioOutput(private val requestedSampleRate: Int) {
         }
 
         track = output
+        applyVolume()
         running = true
         runCatching { output.play() }.onFailure {
             running = false

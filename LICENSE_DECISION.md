@@ -40,3 +40,13 @@ Esta nota documenta cautela técnica do projeto, não constitui aconselhamento j
 - The native target follows the upstream libretro source list, including `filter/snes_ntsc.c`, and uses the libretro frontend API rather than reimplementing every core platform callback.
 - `LICENSES/snes9x.txt` and `LICENSES/snes_ntsc-license.txt` are checked against the fetched upstream license files before compilation. Copies are generated into Android assets for the APK.
 - This is not a final legal determination. Do not publish/monetize builds until the planned distribution model is reviewed.
+
+
+## Decisão de distribuição do aplicativo (2026-10-18)
+
+Política de release deste repositório:
+
+- Não monetizar o app, não exibir anúncios e não oferecer compras dentro do app.
+- Não publicar em lojas comerciais (incluindo Google Play) sem autorização expressa/parecer jurídico que cubra o uso pretendido do Snes9x 1.63.
+- Qualquer release binária pretendida deve ser gratuita e não comercial, fora de lojas comerciais, preservando o texto integral de Snes9x, a licença do filtro NTSC e os avisos na aplicação e página de release.
+- Esta é uma decisão de projeto, não uma conclusão jurídica. Não alegar que qualquer canal de distribuição específico está liberado sem revisão qualificada.
