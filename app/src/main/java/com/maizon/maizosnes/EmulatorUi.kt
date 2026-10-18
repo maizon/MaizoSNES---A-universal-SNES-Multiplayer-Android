@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -96,11 +98,14 @@ import java.io.File
 import kotlin.math.floor
 import kotlin.math.min
 
-internal enum class AppScreen { LIBRARY, MULTIPLAYER, SETTINGS, GAME }
+internal enum class AppScreen { LIBRARY, MULTIPLAYER, SETTINGS, CREDITS, GAME }
 internal enum class AspectMode(val label: String) {
     PIXEL("Pixel perfect"),
     CRT("4:3 (CRT)"),
+    NATIVE("8:7 (pixels SNES)"),
+    CLASSIC("3:2"),
     WIDE("16:9"),
+    ULTRAWIDE("21:9 (barras)"),
     STRETCH("Esticar tela"),
     FILL("Preencher")
 }
@@ -190,6 +195,8 @@ internal fun MaizoEmulatorApp(
     onStopMultiplayer: () -> Unit,
     onLocalMultiplayerChanged: (Boolean) -> Unit,
     onChooseAddRom: () -> Unit,
+    onScanRomFolder: () -> Unit,
+    onOpenInstagram: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
     onRenameRom: (String, String) -> Unit,
@@ -258,6 +265,7 @@ internal fun MaizoEmulatorApp(
                 NavigationBarItem(screen == AppScreen.LIBRARY, { onSetScreen(AppScreen.LIBRARY) }, icon = { Icon(Icons.Default.Gamepad, null) }, label = { Text("Biblioteca") })
                 NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("LAN") })
                 NavigationBarItem(screen == AppScreen.SETTINGS, { onSetScreen(AppScreen.SETTINGS) }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Ajustes") })
+                NavigationBarItem(screen == AppScreen.CREDITS, { onSetScreen(AppScreen.CREDITS) }, icon = { Icon(Icons.Default.Info, null) }, label = { Text("Créditos") })
             }
         }
     ) { padding ->
@@ -265,7 +273,7 @@ internal fun MaizoEmulatorApp(
             AppScreen.LIBRARY -> LibraryScreen(
                 Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
-                onOpenRom, onContinueGame, onRenameRom
+                onScanRomFolder, onOpenRom, onContinueGame, onRenameRom
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
@@ -285,8 +293,47 @@ internal fun MaizoEmulatorApp(
                     onSelectTouchPreset, connectionMode, onConnectionModeChanged,
                     devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)
             }
+            AppScreen.CREDITS -> CreditsScreen(Modifier.fillMaxSize().padding(padding), onOpenInstagram)
             AppScreen.GAME -> Unit
         }
+    }
+}
+
+@Composable
+private fun CreditsScreen(modifier: Modifier, onOpenInstagram: () -> Unit) {
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("CRÉDITOS", color = Mint, fontSize = 12.sp, letterSpacing = 2.sp)
+        Text("MaizoSNES", fontSize = 32.sp, fontWeight = FontWeight.Black)
+        Card(colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("MAICON NASCIMENTO", fontWeight = FontWeight.Black,
+                    fontSize = 21.sp, color = Mint)
+                Text("Criador e responsável pelo projeto MaizoSNES.",
+                    color = Color.White, fontSize = 13.sp)
+                Button(onClick = onOpenInstagram,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                    Text("INSTAGRAM • @maicon_nasciment0")
+                }
+            }
+        }
+        SettingSectionTitle("Tecnologias e agradecimentos",
+            "Reconhecimento aos projetos de código aberto e referências de interface.")
+        Text("Snes9x 1.63 — núcleo de emulação SNES (licença não comercial).\n" +
+            "Libretro — interfaces, cheats, identificação e thumbnails.\n" +
+            "PPSSPP (hrydgard) — referência de ergonomia dos controles.\n" +
+            "CTR Native Android (igawa6) — referência de controles.\n" +
+            "ARMSX1 (ARMSX2) — referência de interface.\n" +
+            "Daijishou (TapiocaFox) — referência de navegação da biblioteca.\n" +
+            "Android Open Source Project e Jetpack Compose — plataforma e interface.",
+            color = Muted, fontSize = 13.sp, lineHeight = 22.sp)
+        Text("Créditos e licenças de terceiros: THIRD_PARTY_NOTICES.md e LICENSES/ " +
+            "no repositório. Os projetos citados não endossam o MaizoSNES.",
+            color = Muted, fontSize = 11.sp)
     }
 }
 
@@ -299,6 +346,7 @@ private fun LibraryScreen(
     currentRomName: String?,
     hasLoadedRom: Boolean,
     onChooseAddRom: () -> Unit,
+    onScanRomFolder: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
     onRenameRom: (String, String) -> Unit
@@ -335,6 +383,9 @@ private fun LibraryScreen(
                         Text("+ ADICIONAR ROM", fontWeight = FontWeight.Bold)
                     }
                     if (hasLoadedRom) OutlinedButton(onClick = onContinueGame) { Text("CONTINUAR") }
+                }
+                OutlinedButton(onClick = onScanRomFolder, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text("PROCURAR ROMS EM PASTA DO APARELHO")
                 }
             }
         }
@@ -774,7 +825,10 @@ private fun VideoSurface(aspect: AspectMode, onSurfaceChanged: (Surface?) -> Uni
                 with(density) { (256 * integerScale).toDp() } to with(density) { (224 * integerScale).toDp() }
             }
             AspectMode.CRT -> containedSize(maxWidth, maxHeight, 4f / 3f)
+            AspectMode.NATIVE -> containedSize(maxWidth, maxHeight, 8f / 7f)
+            AspectMode.CLASSIC -> containedSize(maxWidth, maxHeight, 3f / 2f)
             AspectMode.WIDE -> containedSize(maxWidth, maxHeight, 16f / 9f)
+            AspectMode.ULTRAWIDE -> containedSize(maxWidth, maxHeight, 21f / 9f)
         }
         Box(Modifier.align(Alignment.Center).requiredWidth(size.first).requiredHeight(size.second)) {
             AndroidViewSurface(onSurfaceChanged)
@@ -1064,12 +1118,19 @@ private fun EmulatorSettings(
                         val description = when (mode) {
                             AspectMode.PIXEL -> "Escala física inteira baseada em 256×224; modos Hi-Res podem variar."
                             AspectMode.CRT -> "Preserva uma área 4:3 com barras laterais quando necessário."
-                            AspectMode.WIDE -> "Enquadra o jogo em uma área 16:9."
+                            AspectMode.NATIVE -> "Pixels 8:7 para jogos 256×224 sem correção CRT."
+                            AspectMode.CLASSIC -> "Enquadra a imagem em 3:2, sem criar conteúdo lateral."
+                            AspectMode.WIDE -> "Enquadra o jogo em uma área 16:9, sem widescreen hack." 
+                            AspectMode.ULTRAWIDE -> "Enquadra em 21:9; não expande o campo de visão."
                             AspectMode.STRETCH -> "Estica para ocupar toda a área, podendo distorcer a imagem."
                             AspectMode.FILL -> "Preenche usando 4:3 e corta parte da imagem se necessário."
                         }
                         ChoiceRow(mode.label, description, settings.aspect == mode) { onSettingsChanged(settings.copy(aspect = mode)) }
                     }
+                    SettingSectionTitle("Resolução e escala",
+                        "O núcleo SNES renderiza na resolução nativa (normalmente 256×224 ou 512×448). " +
+                            "A saída é ampliada pela superfície Android; mudar proporção NÃO cria " +
+                            "detalhes nem widescreen real. Upscale por shader exigirá backend GPU.")
                     SettingSectionTitle("Filtros leves", "Sem Vulkan/OpenGL adicional. Desative para desempenho máximo.")
                     VideoFilter.values().forEach { filter ->
                         ChoiceRow(filter.label, filter.description,

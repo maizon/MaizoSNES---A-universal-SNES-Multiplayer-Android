@@ -3,6 +3,7 @@ package com.maizon.maizosnes
 import android.graphics.Bitmap
 import android.content.pm.ActivityInfo
 import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import android.net.wifi.WifiManager
 import android.content.Context
 import android.os.Bundle
@@ -79,6 +80,9 @@ class MainActivity : ComponentActivity() {
 
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) addRomToLibrary(uri)
+    }
+    private val scanRomTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) scanRomTree(uri)
     }
     private val exportStateLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) exportState(uri)
@@ -168,6 +172,12 @@ class MainActivity : ComponentActivity() {
                     onStopMultiplayer = ::stopMultiplayer,
                     onLocalMultiplayerChanged = ::setLocalMultiplayer,
                     onChooseAddRom = { openRomLauncher.launch(arrayOf("*/*")) },
+                    onScanRomFolder = { scanRomTreeLauncher.launch(null) },
+                    onOpenInstagram = {
+                        val uri = Uri.parse("https://www.instagram.com/maicon_nasciment0/")
+                        runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+                            .onFailure { statusMessage.value = "Não foi possível abrir o Instagram." }
+                    },
                     onOpenRom = ::openRom,
                     onContinueGame = ::continueGame,
                     onRenameRom = ::renameRom,
@@ -414,6 +424,80 @@ class MainActivity : ComponentActivity() {
                 statusMessage.value = "Adicionada à biblioteca: " + target.name
             } catch (error: Exception) {
                 statusMessage.value = "Não foi possível adicionar a ROM: " + (error.message ?: "erro de leitura")
+            }
+        }
+    }
+
+    /**
+     * Android 11+ restricts whole-device enumeration. SAF allows the user to
+     * select a folder and grants scoped, revocable read access to its subtree.
+     * No MANAGE_EXTERNAL_STORAGE, no bypass of Android privacy controls.
+     */
+    private fun scanRomTree(uri: Uri) {
+        lifecycleScope.launch {
+            statusMessage.value = "Procurando ROMs na pasta autorizada…"
+            try {
+                val files = withContext(Dispatchers.IO) {
+                    val root = DocumentFile.fromTreeUri(this@MainActivity, uri)
+                        ?: error("Pasta inacessível.")
+                    val pending = ArrayDeque<Pair<DocumentFile, Int>>()
+                    pending.add(root to 0)
+                    val matches = ArrayList<Uri>()
+                    var visited = 0
+                    while (pending.isNotEmpty() && visited < 3000 && matches.size < 250) {
+                        val (folder, depth) = pending.removeFirst()
+                        for (child in folder.listFiles()) {
+                            if (++visited > 3000 || matches.size >= 250) break
+                            if (child.isDirectory && depth < 8) {
+                                pending.add(child to (depth + 1))
+                            } else if (child.isFile &&
+                                child.name.orEmpty().substringAfterLast('.', "").lowercase() in
+                                    setOf("sfc", "smc")) {
+                                matches.add(child.uri)
+                            }
+                        }
+                    }
+                    matches
+                }
+                if (files.isEmpty()) {
+                    statusMessage.value = "Nenhuma ROM .sfc/.smc encontrada nessa pasta."
+                    return@launch
+                }
+                var imported = 0
+                var skipped = 0
+                for (item in files) {
+                    val name = withContext(Dispatchers.IO) {
+                        contentResolver.query(item, arrayOf(OpenableColumns.DISPLAY_NAME),
+                            null, null, null)?.use { cursor ->
+                            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (cursor.moveToFirst() && idx >= 0) cursor.getString(idx) else null
+                        }
+                    } ?: continue
+                    val safe = safeFileName(name)
+                    if (File(romDirectory, safe).exists()) {
+                        skipped++
+                        continue
+                    }
+                    try {
+                        val data = withContext(Dispatchers.IO) { readUriBytes(item, 64 * 1024 * 1024) }
+                        if (data.isEmpty()) continue
+                        withContext(Dispatchers.IO) {
+                            val dst = File(romDirectory, safe)
+                            val tmp = File.createTempFile("scan-", ".partial", romDirectory)
+                            try {
+                                tmp.writeBytes(data)
+                                check(tmp.renameTo(dst)) { "Falha ao importar arquivo." }
+                            } finally { tmp.delete() }
+                        }
+                        imported++
+                    } catch (_: Exception) { skipped++ }
+                }
+                refreshLibrary()
+                statusMessage.value = "Busca concluída: $imported ROM(s) adicionada(s), " +
+                    "$skipped ignorada(s)."
+            } catch (error: Exception) {
+                statusMessage.value = "Busca não concluída: " +
+                    (error.message ?: "sem permissão de leitura")
             }
         }
     }

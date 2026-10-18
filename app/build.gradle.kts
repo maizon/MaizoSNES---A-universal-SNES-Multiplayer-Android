@@ -13,8 +13,8 @@ android {
         applicationId = "com.maizon.maizosnes"
         minSdk = 23
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0-consolidated-experimental"
+        versionCode = 4
+        versionName = "0.4.0-preview"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
@@ -53,6 +53,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
