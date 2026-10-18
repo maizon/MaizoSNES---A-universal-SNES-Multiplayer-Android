@@ -141,19 +141,20 @@ internal data class AppSettings(
     val automaticBackup: Boolean = true
 )
 
-private val Bg = Color(0xFF080B13)
-private val Panel = Color(0xFF151C2A)
-private val PanelRaised = Color(0xFF20293A)
-private val Accent = Color(0xFF8B7CFF)
-private val Mint = Color(0xFF69E8BE)
-private val Muted = Color(0xFFA6B0C3)
+private val Bg = Color(0xFF090D19)
+private val Panel = Color(0xFF171E2E)
+private val PanelRaised = Color(0xFF242D40)
+private val Accent = Color(0xFFAA96FF)
+private val Mint = Color(0xFF72E8C7)
+private val Muted = Color(0xFFBAC5D7)
 
 @Composable
 internal fun MaizoTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Accent, secondary = Mint, background = Bg, surface = Panel,
-            onBackground = Color.White, onSurface = Color.White
+            surfaceVariant = PanelRaised, onSurfaceVariant = Muted,
+            onPrimary = Bg, onBackground = Color.White, onSurface = Color.White
         ),
         content = content
     )
@@ -293,7 +294,7 @@ internal fun MaizoEmulatorApp(
         bottomBar = {
             NavigationBar(containerColor = Color(0xFF101624), modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
                 NavigationBarItem(screen == AppScreen.LIBRARY, { onSetScreen(AppScreen.LIBRARY) }, icon = { Icon(Icons.Default.Gamepad, null) }, label = { Text("Biblioteca") })
-                NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("LAN") })
+                NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("Online") })
                 NavigationBarItem(screen == AppScreen.SETTINGS, { onSetScreen(AppScreen.SETTINGS) }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Ajustes") })
                 NavigationBarItem(screen == AppScreen.CREDITS, { onSetScreen(AppScreen.CREDITS) }, icon = { Icon(Icons.Default.Info, null) }, label = { Text("Créditos") })
             }
@@ -618,12 +619,19 @@ private fun MultiplayerScreen(
     }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("MULTIPLAYER", color = Mint, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-        Text("Jogue junto, onde estiver.", fontSize = 25.sp,
-            lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold)
-        Text("Online com descoberta automática • LAN • opções avançadas de rede",
-            color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+        Text("MULTIPLAYER • MAIZOSNES", color = Mint, fontSize = 11.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 1.7.sp)
+        Text("Jogue junto, de qualquer lugar.", fontSize = 24.sp,
+            lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Crie uma sala, convide alguém e joguem a mesma ROM. " +
+            "Online, Wi-Fi local ou dois controles no mesmo aparelho.",
+            color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+        if (!ready) Surface(color = Color(0xFF31283D), shape = RoundedCornerShape(14.dp)) {
+            Text("① Antes de conectar, escolha e abra um jogo na Biblioteca. " +
+                "② Volte aqui para criar ou entrar em uma sala.",
+                modifier = Modifier.fillMaxWidth().padding(13.dp),
+                color = Color(0xFFFFDEAB), fontSize = 12.sp, lineHeight = 18.sp)
+        }
 
         Card(colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)) {
@@ -666,7 +674,7 @@ private fun MultiplayerScreen(
         }
         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("2 jogadores no mesmo aparelho", fontWeight = FontWeight.Bold)
+                Text("DOIS JOGADORES • MESMO CELULAR", fontWeight = FontWeight.Bold)
                 Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
                     color = Muted, fontSize = 12.sp)
                 ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
@@ -689,10 +697,19 @@ private fun MultiplayerScreen(
         ) {
             Column(Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("SALAS ONLINE", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Lista automática dos servidores oficiais MaizoSNES cadastrados. " +
-                    "Sem IP, URLs ou configurações para o jogador.", color = Muted,
-                    fontSize = 12.sp, lineHeight = 17.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("SALAS ONLINE", modifier = Modifier.weight(1f),
+                        fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                    Surface(color = if (autoServers.isNotEmpty()) Color(0xFF1C473D)
+                        else PanelRaised, shape = RoundedCornerShape(100.dp)) {
+                        Text(if (autoServers.isNotEmpty()) "● ONLINE" else "○ OFFLINE",
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                            color = if (autoServers.isNotEmpty()) Mint else Muted,
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Text("Crie ou entre sem digitar IP. Use a mesma versão do jogo " +
+                    "nos dois celulares.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
                 Button(onClick = onQuickMatch,
                     enabled = ready && !active,
                     modifier = Modifier.fillMaxWidth(),
@@ -700,9 +717,9 @@ private fun MultiplayerScreen(
                     Text("JOGO RÁPIDO • ENTRAR OU CRIAR", color = Color(0xFF111827),
                         fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
                 }
-                Text("Prioriza salas LAN com o mesmo título, depois salas online " +
-                    "com ROM compatível. Se não houver adversários, cria uma sala.",
-                    color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                Text("Jogo rápido procura amigos na LAN e salas online; se não encontrar, " +
+                    "cria automaticamente uma sala para você.",
+                    color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = {
@@ -721,9 +738,31 @@ private fun MultiplayerScreen(
                     }
                 }
                 Surface(color = PanelRaised, shape = RoundedCornerShape(12.dp)) {
-                    Text(autoStatus, color = if (autoServers.isEmpty()) Muted else Mint,
-                        fontSize = 12.sp, lineHeight = 18.sp,
-                        modifier = Modifier.fillMaxWidth().padding(12.dp))
+                    Column(Modifier.fillMaxWidth().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(if (active) "STATUS DA SUA SESSÃO" else "STATUS DA REDE",
+                            color = if (active) Mint else Muted,
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(autoStatus, color = if (active || autoServers.isNotEmpty()) Mint else Muted,
+                            fontSize = 12.sp, lineHeight = 18.sp)
+                    }
+                }
+                if (active) {
+                    Surface(color = Color(0xFF173A39), shape = RoundedCornerShape(14.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("SESSÃO ATIVA • AGUARDANDO OU JOGANDO",
+                                color = Mint, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("O botão Criar sala fica desativado enquanto uma " +
+                                "sessão estiver aberta. O convidado abre a mesma ROM, " +
+                                "toca em Atualizar salas e escolhe sua sala. " +
+                                "Cancele a sessão para criar outra.",
+                                color = Color.White, fontSize = 11.sp, lineHeight = 17.sp)
+                            OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                                Text("CANCELAR SALA / DESCONECTAR", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
                 if (autoServers.isNotEmpty()) {
                     Text("SERVIDORES ONLINE", color = Mint,
@@ -780,8 +819,8 @@ private fun MultiplayerScreen(
                         }
                     }
                 }
-                Text("Servidores precisam ser publicados pelo administrador. " +
-                    "Se não houver servidor disponível, use LAN ou o modo avançado.",
+                Text("Sem servidores? Verifique a internet ou use LAN. " +
+                    "Para conectar, confirme que ambos têm a mesma ROM e APK.",
                     color = Muted, fontSize = 10.sp)
             }
         }
