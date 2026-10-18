@@ -1,1 +1,5 @@
-# Keep native/JNI entry points here when the emulator core is integrated.
+# Preserve JNI methods and the bridge class in minified release builds.
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+-keep class com.maizon.maizosnes.NativeBridge { *; }
