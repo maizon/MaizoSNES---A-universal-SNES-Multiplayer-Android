@@ -3,6 +3,7 @@ package com.maizon.maizosnes
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Build
 import kotlin.math.max
 
 /**
@@ -42,7 +43,7 @@ internal class AudioOutput(private val requestedSampleRate: Int) {
         if (minBuffer <= 0) return
 
         val output = runCatching {
-            AudioTrack.Builder()
+            val builder = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_GAME)
@@ -56,9 +57,14 @@ internal class AudioOutput(private val requestedSampleRate: Int) {
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .build()
                 )
-                .setBufferSizeInBytes(max(minBuffer * 2, sampleRate / 5 * 4))
+                // About 40ms rather than the former hardcoded 200ms. Keep the
+                // platform minimum to avoid persistent underruns on slower devices.
+                .setBufferSizeInBytes(max(minBuffer * 2, sampleRate / 25 * 4))
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            }
+            builder.build()
         }.getOrNull() ?: return
 
         if (output.state != AudioTrack.STATE_INITIALIZED) {

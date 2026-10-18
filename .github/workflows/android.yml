@@ -62,8 +62,8 @@ jobs:
           "${{ steps.android-sdk.outputs.sdkmanager }}" --install "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264" "cmake;3.22.1"
       - name: Prepare pinned Snes9x source and license assets
         run: bash scripts/fetch_snes9x.sh
-      - name: Build debug APK
-        run: ./gradlew --no-daemon assembleDebug
+      - name: Run loopback multiplayer tests and build debug APK
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
       - name: Verify native library is packaged
         shell: bash
         run: |

@@ -1,42 +1,47 @@
-# MaizoSNES
+# MaizoSNES — emulador SNES Android
 
-Emulador SNES para Android usando Snes9x 1.63. O projeto não inclui ROMs, BIOS, capas nem assets de jogos.
+Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.
 
-## Implementado nesta fase (código)
+## Funcionalidades implementadas no código
 
-- Biblioteca local: importar, listar, renomear e abrir arquivos .sfc/.smc sem repetir o picker depois da importação.
-- Gameplay dedicado em landscape, barras do sistema ocultas, pausa e retorno à biblioteca.
-- Proporção: Pixel Perfect (escala física inteira de referência 256×224), 4:3 CRT, 16:9, esticar e preencher/crop.
-- Menu durante o jogo organizado por Vídeo, Áudio, Controles, Núcleo e Estados.
-- Opções reais do Snes9x ligadas ao contrato libretro GET_VARIABLE / GET_VARIABLE_UPDATE.
-- Controles semi-transparentes flutuantes sobre o vídeo, D-pad, ABXY, L/R, Start/Select.
-- Editor por sliders para posição, tamanho e opacidade, com perfil global e por ROM.
-- Três slots de save state privados, além de importar/exportar estados externos.
-- A tela LAN deixa claro que o netplay ainda não está habilitado; os bloqueios técnicos e o protocolo proposto estão em docs/NETPLAY.md.
+- Biblioteca privada: importar ROMs `.sfc`, `.smc` ou ZIP com uma ROM, listar, renomear e abrir sem picker repetitivo.
+- Tela de jogo própria, landscape imersivo, vídeo via SurfaceView/ANativeWindow e barra de acesso ao menu de configuração.
+- Aspectos 4:3, pixel perfect com escala inteira de referência, 16:9, stretch e fill.
+- Controles táteis semitransparentes: direcional **contínuo e diagonal**, ABXY, L/R e Start/Select; suporte a toques simultâneos.
+- **Editar** diretamente na tela de jogo: arrastar grupos D-pad e botões, salvar layout; tamanho/posição/transparência ajustáveis também pelos sliders, com preferências globais e por ROM.
+- Input físico por joystick/gamepad Android e teclado; multitarefa do primeiro e segundo gamepads separada, evitando mistura de máscaras.
+- Áudio AudioTrack estéreo com buffer reduzido e modo low-latency quando o Android oferece.
+- Ajustes por categoria (vídeo, áudio, controles, núcleo e estados), opções reais expostas via libretro.
+- Três slots de save state mais importação/exportação e bloqueio de restore com ROM divergente.
+- **Multiplayer local sem internet**: controle tátil P1 + gamepad P2, ou dois gamepads em P1/P2.
+- **Multiplayer experimental LAN/online por IP TCP**: host P1, cliente P2, SHA-256 da ROM e das opções, sincronização inicial de estado, entradas quadro a quadro e detecção periódica de divergência; conexão direta por IP e porta, sem servidores externos.
+- Testes JVM de protocolo loopback (dois peers) e rejeição de ROM divergente.
 
-## Build reproduzível
+## Estado de validação
 
-Requisitos: JDK 17, Android SDK Platform 35, NDK 26.3.11579264, CMake 3.22.1 e Git.
+A versão anterior do núcleo single-player foi testada pelo desenvolvedor no Android e executou jogos e save states. **O código de netplay, editor por arrasto, ROM ZIP e UI desta revisão não foi validado em dois aparelhos Android**. Apenas a CI e os testes de loopback não demonstram confiabilidade e latência de rede. Por isso o multiplayer continua rotulado **experimental**.
+
+Não existe "delay zero" pela internet: lockstep aguarda entradas remotas. Para uma experiência próxima de resposta local online é necessário implementar e validar predição/rollback. Também não existe matchmaking, NAT traversal, criptografia nem segurança para sala aberta à internet pública.
+
+## Build
+
+Requisitos: JDK 17, Android SDK 35, NDK **26.3.11579264**, CMake **3.22.1** e Git:
 
 ```bash
 bash scripts/fetch_snes9x.sh
-./gradlew --no-daemon assembleDebug
+./gradlew --no-daemon testDebugUnitTest assembleDebug
 ```
 
-O workflow fixa a revisão do Snes9x, compila o APK debug, verifica biblioteca ARM64 e textos de licença e publica o artefato app-debug. Build verde não prova runtime ou teste em device.
+A compilação via GitHub Actions fornece o artefato `app-debug` contendo `app-debug.apk` quando verde. Está configurado somente `arm64-v8a`, sem ARMv7. O renderer atual não é OpenGL/Vulkan.
 
-## Limites conhecidos
+## Usar multiplayer
 
-- ABI: arm64-v8a; ARMv7 não está habilitado.
-- ROMs ZIP não são suportadas.
-- Vídeo usa SurfaceView/ANativeWindow; renderer OpenGL ES e shaders CRT não estão integrados. Modos Hi-Res necessitam validação de escala.
-- Netplay LAN foi adiado até existir sincronização lockstep por frame e testes de determinismo em dois devices.
-- Validar no aparelho a troca de aspecto, controles multitouch, áudio e opções do núcleo.
+**Dois controles locais:** importe um jogo compatível com dois jogadores, abra-o, volte à aba Multiplayer, habilite "Ativar porta 2" e conecte um ou dois controles Bluetooth/USB.
 
-## Licenciamento
+**Dois celulares:** em ambos, instale o mesmo APK, importe e abra a mesma ROM. No primeiro celular escolha **Criar sala**; no segundo digite o IPv4 mostrado pelo anfitrião e toque **Entrar na sala**. É necessário estar na mesma rede Wi-Fi sem isolamento entre clientes. Fora da LAN é necessária uma conexão TCP por IP/porta acessível (ex.: VPN privada). **Não exponha a porta experimental diretamente à internet pública.**
 
-Snes9x 1.63 tem condições específicas de uso não comercial, e o filtro NTSC possui licença separada. Os avisos integrais ficam em LICENSES/ e são empacotados na aplicação. Não monetizar, incluir anúncios nem publicar em lojas comerciais sem autorização e análise jurídica específica. Ver LICENSE_DECISION.md.
+Detalhes e riscos: [Netplay](docs/NETPLAY.md), [referências e segurança](docs/REFERENCES_AND_SECURITY.md), [roteiro de testes reais](docs/DEVICE_SMOKE_TEST.md), [arquitetura](docs/ARCHITECTURE.md).
 
-## Teste de dispositivo
+## Licenças
 
-Siga docs/DEVICE_SMOKE_TEST.md e anote aparelho, Android, SHA do APK e resultados. Não anexar ROMs a issues. CI verde não é prova de teste em hardware.
+Snes9x possui licença específica de **uso não comercial**; o filtro NTSC inclui avisos separados. Consulte [LICENSE_DECISION.md](LICENSE_DECISION.md), [LICENSES](LICENSES), [VENDORED.md](VENDORED.md) e [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). **Não monetizar ou distribuir jogos protegidos** sem direitos ou autorização. Código de RetroTouch/RetroArch não foi copiado; referências são de design/documentação.

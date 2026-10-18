@@ -18,7 +18,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.ZipInputStream
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
@@ -35,6 +39,11 @@ class MainActivity : ComponentActivity() {
     private val coreSettings = androidx.compose.runtime.mutableStateMapOf<String, String>()
     private val paused = androidx.compose.runtime.mutableStateOf(false)
     private val pressedInputs = AtomicInteger(0)
+    private val lanStatus = androidx.compose.runtime.mutableStateOf("Sem sessão ativa.")
+    private val localPlayer2Enabled = androidx.compose.runtime.mutableStateOf(false)
+    private val gamepadKeyMasks = ConcurrentHashMap<Int, Int>()
+    private val gamepadAxisMasks = ConcurrentHashMap<Int, Int>()
+    private var netplaySession: NetplaySession? = null
 
     private var audioOutput: AudioOutput? = null
     private var hasLoadedRom = false
@@ -75,6 +84,7 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Falha na inicialização do núcleo: " + initResult
         }
         appSettings.value = readSettings("profile_global_")
+        val localIp = getLocalIpv4()
 
         setContent {
             MaizoTheme {
@@ -87,6 +97,15 @@ class MainActivity : ComponentActivity() {
                     paused = paused.value,
                     settings = appSettings.value,
                     coreOptions = coreSettings.toMap(),
+                    multiplayerStatus = lanStatus.value,
+                    localIpAddress = localIp,
+                    multiplayerActive = netplaySession != null,
+                    localMultiplayer = localPlayer2Enabled.value,
+                    multiplayerReady = hasLoadedRom,
+                    onHostMultiplayer = ::hostMultiplayer,
+                    onJoinMultiplayer = ::joinMultiplayer,
+                    onStopMultiplayer = ::stopMultiplayer,
+                    onLocalMultiplayerChanged = ::setLocalMultiplayer,
                     onChooseAddRom = { openRomLauncher.launch(arrayOf("*/*")) },
                     onOpenRom = ::openRom,
                     onContinueGame = ::continueGame,
@@ -107,6 +126,22 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun getLocalIpv4(): String = runCatching {
+        val interfaces = NetworkInterface.getNetworkInterfaces()
+        while (interfaces.hasMoreElements()) {
+            val network = interfaces.nextElement()
+            if (!network.isUp || network.isLoopback) continue
+            val addresses = network.inetAddresses
+            while (addresses.hasMoreElements()) {
+                val address = addresses.nextElement()
+                if (address is Inet4Address && address.isSiteLocalAddress) {
+                    return@runCatching address.hostAddress ?: "não detectado"
+                }
+            }
+        }
+        "não detectado"
+    }.getOrDefault("não detectado")
 
     private fun safeFileName(input: String): String =
         input.substringAfterLast('/').substringAfterLast('\\')
@@ -142,14 +177,51 @@ class MainActivity : ComponentActivity() {
                 }
                 val cleaned = safeFileName(name)
                 val extension = cleaned.substringAfterLast('.', "").lowercase()
-                require(extension == "sfc" || extension == "smc") {
-                    "Formato não suportado. Adicione uma ROM SNES .sfc ou .smc sem ZIP."
+                require(extension in setOf("sfc", "smc", "zip")) {
+                    "Formato não suportado. Use .sfc, .smc ou ZIP com uma única ROM."
                 }
-                val bytes = withContext(Dispatchers.IO) { readUriBytes(uri, 64 * 1024 * 1024) }
-                var target = File(romDirectory, cleaned)
+                val (romName, bytes) = withContext(Dispatchers.IO) {
+                    if (extension == "zip") {
+                        var found: Pair<String, ByteArray>? = null
+                        val source = contentResolver.openInputStream(uri)
+                            ?: error("Não foi possível abrir o ZIP.")
+                        ZipInputStream(source.buffered()).use { zip ->
+                            var totalExpanded = 0L
+                            var entryCount = 0
+                            while (true) {
+                                val entry = zip.nextEntry ?: break
+                                entryCount++
+                                require(entryCount <= 128) { "ZIP possui entradas demais." }
+                                val entryName = safeFileName(entry.name)
+                                val isRom = !entry.isDirectory &&
+                                    entryName.substringAfterLast('.', "").lowercase() in setOf("sfc", "smc")
+                                if (isRom) require(found == null) {
+                                    "ZIP com várias ROMs. Importe uma por vez."
+                                }
+                                val output = if (isRom) ByteArrayOutputStream() else null
+                                val buffer = ByteArray(65536)
+                                while (true) {
+                                    val n = zip.read(buffer)
+                                    if (n < 0) break
+                                    totalExpanded += n
+                                    require(totalExpanded <= 64L * 1024L * 1024L) {
+                                        "ZIP excede limite de 64 MiB descompactados."
+                                    }
+                                    output?.write(buffer, 0, n)
+                                }
+                                if (isRom) found = entryName to (output?.toByteArray() ?: ByteArray(0))
+                                zip.closeEntry()
+                            }
+                        }
+                        found ?: error("ZIP sem ROM SNES .sfc/.smc.")
+                    } else cleaned to readUriBytes(uri, 64 * 1024 * 1024)
+                }
+                require(bytes.isNotEmpty()) { "A ROM está vazia." }
+                val romExtension = romName.substringAfterLast('.').lowercase()
+                var target = File(romDirectory, romName)
                 var suffix = 2
                 while (target.exists()) {
-                    target = File(romDirectory, cleaned.substringBeforeLast('.') + " (" + suffix + ")." + extension)
+                    target = File(romDirectory, romName.substringBeforeLast('.') + " (" + suffix + ")." + romExtension)
                     suffix++
                 }
                 withContext(Dispatchers.IO) { target.writeBytes(bytes) }
@@ -200,6 +272,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openRom(name: String) {
+        if (netplaySession != null) {
+            statusMessage.value = "Encerre o multiplayer antes de trocar a ROM."
+            return
+        }
         val file = File(romDirectory, name)
         if (!file.exists() || file.parentFile != romDirectory) {
             statusMessage.value = "Essa ROM não está mais na biblioteca."
@@ -291,6 +367,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exitGameplay() {
+        netplaySession?.stop()
         userPaused = true
         paused.value = true
         activeScreen.value = AppScreen.LIBRARY
@@ -303,6 +380,10 @@ class MainActivity : ComponentActivity() {
 
     private fun togglePause() {
         if (!hasLoadedRom) return
+        if (netplaySession != null) {
+            statusMessage.value = "Pausa individual não é permitida durante a sincronização."
+            return
+        }
         userPaused = !userPaused
         paused.value = userPaused
         syncPlaybackState()
@@ -312,22 +393,28 @@ class MainActivity : ComponentActivity() {
     private fun profilePrefix(file: File?): String = "profile_" + (file?.nameWithoutExtension ?: "global") + "_"
 
     private fun readSettings(prefix: String): AppSettings {
-        val aspectName = prefs.getString(prefix + "aspect", AspectMode.CRT.name) ?: AspectMode.CRT.name
+        // A game profile inherits global settings until the player customizes it.
+        // Once saved in-game, the full snapshot is intentionally independent.
+        val global = "profile_global_"
+        fun key(suffix: String): String =
+            if (prefix != global && !prefs.contains(prefix + suffix)) global + suffix
+            else prefix + suffix
+        val aspectName = prefs.getString(key("aspect"), AspectMode.CRT.name) ?: AspectMode.CRT.name
         val aspect = runCatching { AspectMode.valueOf(aspectName) }.getOrDefault(AspectMode.CRT)
         val touch = TouchLayout(
-            enabled = prefs.getBoolean(prefix + "touch_enabled", true),
-            dpadX = prefs.getFloat(prefix + "dpad_x", 0.02f),
-            dpadY = prefs.getFloat(prefix + "dpad_y", 0.025f),
-            buttonsX = prefs.getFloat(prefix + "buttons_x", 0.02f),
-            buttonsY = prefs.getFloat(prefix + "buttons_y", 0.025f),
-            scale = prefs.getFloat(prefix + "touch_scale", 1f),
-            opacity = prefs.getFloat(prefix + "touch_opacity", 0.62f)
+            enabled = prefs.getBoolean(key("touch_enabled"), true),
+            dpadX = prefs.getFloat(key("dpad_x"), 0.02f),
+            dpadY = prefs.getFloat(key("dpad_y"), 0.025f),
+            buttonsX = prefs.getFloat(key("buttons_x"), 0.02f),
+            buttonsY = prefs.getFloat(key("buttons_y"), 0.025f),
+            scale = prefs.getFloat(key("touch_scale"), 1f),
+            opacity = prefs.getFloat(key("touch_opacity"), 0.62f)
         )
         return AppSettings(
             aspect = aspect,
             touch = touch,
-            audioEnabled = prefs.getBoolean(prefix + "audio_enabled", true),
-            volume = prefs.getFloat(prefix + "audio_volume", 1f)
+            audioEnabled = prefs.getBoolean(key("audio_enabled"), true),
+            volume = prefs.getFloat(key("audio_volume"), 1f)
         )
     }
 
@@ -351,6 +438,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun changeCoreOption(key: String, value: String) {
+        if (netplaySession != null) {
+            statusMessage.value = "Desconecte antes de alterar opções do núcleo."
+            return
+        }
         val definition = CoreOptionDefinitions.all.firstOrNull { it.key == key } ?: return
         if (value !in definition.values) return
         coreSettings[key] = value
@@ -367,6 +458,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveSlot(slot: Int) {
+        if (netplaySession != null) {
+            statusMessage.value = "Save states e reset ficam bloqueados no netplay."
+            return
+        }
         if (!hasLoadedRom) {
             statusMessage.value = "Carregue uma ROM antes de salvar."
             return
@@ -393,6 +488,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadSlot(slot: Int) {
+        if (netplaySession != null) {
+            statusMessage.value = "Save states e reset ficam bloqueados no netplay."
+            return
+        }
         if (!hasLoadedRom) {
             statusMessage.value = "Carregue a ROM correspondente antes de restaurar."
             return
@@ -416,6 +515,10 @@ class MainActivity : ComponentActivity() {
     private fun defaultStateName(): String = safeFileName((currentRomFile.value?.nameWithoutExtension ?: "maizosnes") + ".state")
 
     private fun exportState(uri: Uri) {
+        if (netplaySession != null) {
+            statusMessage.value = "Save states e reset ficam bloqueados no netplay."
+            return
+        }
         if (!hasLoadedRom) {
             statusMessage.value = "Carregue uma ROM antes de exportar o estado."
             return
@@ -436,6 +539,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun importState(uri: Uri) {
+        if (netplaySession != null) {
+            statusMessage.value = "Save states e reset ficam bloqueados no netplay."
+            return
+        }
         if (!hasLoadedRom) {
             statusMessage.value = "Carregue a ROM correspondente antes de importar um estado."
             return
@@ -463,6 +570,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun resetGame() {
+        if (netplaySession != null) {
+            statusMessage.value = "Save states e reset ficam bloqueados no netplay."
+            return
+        }
         if (!hasLoadedRom) return
         lifecycleScope.launch {
             audioOutput?.stop()
@@ -493,12 +604,27 @@ class MainActivity : ComponentActivity() {
         else -> null
     }
 
+    private fun gamepadIds(): List<Int> =
+        InputDevice.getDeviceIds().filter { id ->
+            val source = InputDevice.getDevice(id)?.sources ?: 0
+            (source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+                (source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+        }.sorted()
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val bit = snesButtonForKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
-        when (event.action) {
-            KeyEvent.ACTION_DOWN -> updateInput(bit, true)
-            KeyEvent.ACTION_UP -> updateInput(bit, false)
-            else -> return super.dispatchKeyEvent(event)
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
+            return super.dispatchKeyEvent(event)
+        }
+        if (event.deviceId in gamepadIds()) {
+            val mask = 1 shl bit
+            val previous = gamepadKeyMasks[event.deviceId] ?: 0
+            gamepadKeyMasks[event.deviceId] = if (event.action == KeyEvent.ACTION_DOWN) {
+                previous or mask
+            } else previous and mask.inv()
+            publishInputs()
+        } else {
+            updateInput(bit, event.action == KeyEvent.ACTION_DOWN)
         }
         return true
     }
@@ -511,13 +637,42 @@ class MainActivity : ComponentActivity() {
             val stickX = if (abs(hatX) > 0.5f) hatX else event.getAxisValue(MotionEvent.AXIS_X)
             val stickY = if (abs(hatY) > 0.5f) hatY else event.getAxisValue(MotionEvent.AXIS_Y)
             val deadZone = 0.55f
-            updateInput(6, stickX < -deadZone)
-            updateInput(7, stickX > deadZone)
-            updateInput(4, stickY < -deadZone)
-            updateInput(5, stickY > deadZone)
+            var mask = 0
+            if (stickX < -deadZone) mask = mask or (1 shl 6)
+            if (stickX > deadZone) mask = mask or (1 shl 7)
+            if (stickY < -deadZone) mask = mask or (1 shl 4)
+            if (stickY > deadZone) mask = mask or (1 shl 5)
+            gamepadAxisMasks[event.deviceId] = mask
+            publishInputs()
             return true
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    private fun currentLocalInput(): Int {
+        val first = gamepadIds().firstOrNull()
+        return pressedInputs.get() or (if (first == null) 0 else
+            (gamepadKeyMasks[first] ?: 0) or (gamepadAxisMasks[first] ?: 0))
+    }
+
+    private fun publishInputs() {
+        if (netplaySession != null) return // Network thread applies per-frame P1/P2.
+        val ids = gamepadIds()
+        val first = ids.firstOrNull()
+        val second = ids.getOrNull(1)
+        // Touch + one gamepad: the gamepad becomes player 2.
+        // With two gamepads: first is P1 and second is P2.
+        val oneGamepadAsP2 = localPlayer2Enabled.value && ids.size == 1
+        val p1 = pressedInputs.get() or
+            (if (first == null || oneGamepadAsP2) 0 else
+                (gamepadKeyMasks[first] ?: 0) or (gamepadAxisMasks[first] ?: 0))
+        val p2Device = if (oneGamepadAsP2) first else second
+        val p2 = if (!localPlayer2Enabled.value || p2Device == null) 0 else
+            (gamepadKeyMasks[p2Device] ?: 0) or (gamepadAxisMasks[p2Device] ?: 0)
+        runCatching {
+            NativeBridge.nativeSetInput(p1)
+            NativeBridge.nativeSetPlayer2Input(p2)
+        }
     }
 
     private fun updateInput(bit: Int, isPressed: Boolean) {
@@ -529,7 +684,84 @@ class MainActivity : ComponentActivity() {
             old = pressedInputs.get()
             next = if (isPressed) old or mask else old and mask.inv()
         } while (!pressedInputs.compareAndSet(old, next))
-        runCatching { NativeBridge.nativeSetInput(next) }
+        publishInputs()
+    }
+
+    private fun setLocalMultiplayer(enabled: Boolean) {
+        if (netplaySession != null) return
+        localPlayer2Enabled.value = enabled
+        publishInputs()
+        lanStatus.value = if (enabled) "Modo local: 1 controle = P2 e toque = P1; 2 controles = P1/P2."
+        else "Modo local de dois jogadores desativado."
+    }
+
+    private fun hostMultiplayer(port: Int) = startNetplay(null, port)
+
+    private fun joinMultiplayer(host: String, port: Int) = startNetplay(host, port)
+
+    private fun startNetplay(host: String?, port: Int) {
+        if (!hasLoadedRom || currentRomFile.value == null) {
+            lanStatus.value = "Abra a mesma ROM nos dois aparelhos e volte ao Multiplayer."
+            return
+        }
+        if (netplaySession != null) return
+        if (port !in 1024..65535 || (host != null && host.isBlank())) {
+            lanStatus.value = "Informe endereço e porta válidos (1024–65535)."
+            return
+        }
+        userPaused = true
+        syncPlaybackState()
+        val rom = currentRomFile.value ?: return
+        lateinit var session: NetplaySession
+        session = NetplaySession(
+            rom = rom,
+            coreOptions = coreSettings.toMap(),
+            localInput = { currentLocalInput() },
+            prepare = { enabled -> NativeBridge.nativeSetNetplayMode(enabled) },
+            saveState = { NativeBridge.nativeSerializeState() },
+            loadState = { NativeBridge.nativeUnserializeState(it) },
+            step = { player1, player2 -> NativeBridge.nativeNetplayStep(player1, player2) },
+            stateHash = { NativeBridge.nativeNetplayStateHash() },
+            framePeriodNs = { NativeBridge.nativeGetFramePeriodNs() },
+            onStatus = { message ->
+                runOnUiThread {
+                    if (netplaySession === session) {
+                        lanStatus.value = message
+                        if (message.startsWith("Conectado como")) {
+                            userPaused = false
+                            localPlayer2Enabled.value = false
+                            activeScreen.value = AppScreen.GAME
+                            enterImmersiveGameplay()
+                            syncPlaybackState()
+                        }
+                    }
+                }
+            },
+            onFinish = { message ->
+                runOnUiThread {
+                    if (netplaySession === session) {
+                        netplaySession = null
+                        lanStatus.value = message
+                        statusMessage.value = message
+                        userPaused = true
+                        paused.value = true
+                        activeScreen.value = AppScreen.MULTIPLAYER
+                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        @Suppress("DEPRECATION")
+                        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+                        publishInputs()
+                        syncPlaybackState()
+                    }
+                }
+            }
+        )
+        netplaySession = session
+        lanStatus.value = if (host == null) "Abrindo sala…" else "Conectando…"
+        if (host == null) session.host(port) else session.join(host, port)
+    }
+
+    private fun stopMultiplayer() {
+        netplaySession?.stop()
     }
 
     private fun updateEmulatorSurface(surface: Surface?) {
@@ -547,8 +779,11 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        netplaySession?.stop()
         pressedInputs.set(0)
-        runCatching { NativeBridge.nativeSetInput(0) }
+        gamepadAxisMasks.clear()
+        gamepadKeyMasks.clear()
+        publishInputs()
         activityResumed = false
         syncPlaybackState()
         super.onPause()
@@ -561,6 +796,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        netplaySession?.stop()
         activityResumed = false
         surfaceAttached = false
         audioOutput?.stop()

@@ -33,6 +33,8 @@ std::atomic<bool> g_gameLoaded{false};
 std::atomic<bool> g_runFrames{false};
 std::atomic<bool> g_paused{false};
 std::atomic<uint32_t> g_inputMask{0};
+std::atomic<uint32_t> g_player2InputMask{0};
+std::atomic<bool> g_netplayMode{false};
 std::atomic<uint64_t> g_audioWrite{0};
 std::atomic<uint64_t> g_audioRead{0};
 int16_t g_audioRing[kAudioCapacity]{};
@@ -208,11 +210,14 @@ size_t RETRO_CALLCONV audioSampleBatch(const int16_t* data, size_t frames) {
 void RETRO_CALLCONV inputPoll() {}
 
 int16_t RETRO_CALLCONV inputState(unsigned port, unsigned device, unsigned index, unsigned id) {
-    if (port != 0 || index != 0 || device != RETRO_DEVICE_JOYPAD ||
+    if (port > 1 || index != 0 || device != RETRO_DEVICE_JOYPAD ||
         id > RETRO_DEVICE_ID_JOYPAD_R3) {
         return 0;
     }
-    return (g_inputMask.load(std::memory_order_relaxed) & (1u << id)) ? 1 : 0;
+    const uint32_t bits = port == 0
+        ? g_inputMask.load(std::memory_order_relaxed)
+        : g_player2InputMask.load(std::memory_order_relaxed);
+    return (bits & (1u << id)) ? 1 : 0;
 }
 
 uint16_t convert1555(uint16_t pixel) {
@@ -284,7 +289,7 @@ void stopFrameThread() {
 }
 
 void startFrameThread() {
-    if (g_frameThread.joinable()) return;
+    if (g_frameThread.joinable() || g_netplayMode.load(std::memory_order_acquire)) return;
     g_runFrames.store(true, std::memory_order_release);
     g_frameThread = std::thread([] {
         using clock = std::chrono::steady_clock;
@@ -327,6 +332,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeInit(JNIEnv* env, jobject, jstring 
     retro_set_input_state(inputState);
     retro_init();
     retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+    retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
     g_initialized.store(true, std::memory_order_release);
     logMessage(ANDROID_LOG_INFO, "Snes9x 1.63 libretro core initialized");
     return 0;
@@ -415,6 +421,55 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetSurface(JNIEnv* env, jobject, jo
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetInput(JNIEnv*, jobject, jint bits) {
     g_inputMask.store(static_cast<uint32_t>(bits), std::memory_order_release);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetPlayer2Input(JNIEnv*, jobject, jint bits) {
+    g_player2InputMask.store(static_cast<uint32_t>(bits), std::memory_order_release);
+}
+
+// Netplay owns the frame clock while enabled. The offline frame thread must be
+// fully joined before serializing initial state or executing the first frame.
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jboolean enabled) {
+    if (enabled == JNI_TRUE) {
+        g_netplayMode.store(true, std::memory_order_release);
+        stopFrameThread();
+        g_inputMask.store(0, std::memory_order_release);
+        g_player2InputMask.store(0, std::memory_order_release);
+    } else {
+        stopFrameThread();
+        g_netplayMode.store(false, std::memory_order_release);
+        if (g_gameLoaded.load(std::memory_order_acquire)) startFrameThread();
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStep(
+    JNIEnv*, jobject, jint player1, jint player2) {
+    if (!g_netplayMode.load(std::memory_order_acquire)) return -1;
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire)) return -2;
+    g_inputMask.store(static_cast<uint32_t>(player1) & 0xffffu, std::memory_order_release);
+    g_player2InputMask.store(static_cast<uint32_t>(player2) & 0xffffu, std::memory_order_release);
+    retro_run();
+    return 0;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeGetFramePeriodNs(JNIEnv*, jobject) {
+    return static_cast<jlong>(g_frameDurationNs.load(std::memory_order_acquire));
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStateHash(JNIEnv*, jobject) {
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire)) return 0;
+    const size_t size = retro_serialize_size();
+    if (size == 0 || size > kMaxStateBytes) return 0;
+    std::vector<uint8_t> bytes(size);
+    if (!retro_serialize(bytes.data(), bytes.size())) return 0;
+    return static_cast<jlong>(fingerprintBytes(bytes.data(), bytes.size()));
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -620,6 +675,8 @@ Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
         }
     }
     g_inputMask.store(0, std::memory_order_release);
+    g_player2InputMask.store(0, std::memory_order_release);
+    g_netplayMode.store(false, std::memory_order_release);
     g_audioWrite.store(0, std::memory_order_release);
     g_audioRead.store(0, std::memory_order_release);
     logMessage(ANDROID_LOG_INFO, "Snes9x native bridge shut down");

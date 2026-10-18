@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -66,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -139,6 +141,15 @@ internal fun MaizoEmulatorApp(
     paused: Boolean,
     settings: AppSettings,
     coreOptions: Map<String, String>,
+    multiplayerStatus: String,
+    localIpAddress: String,
+    multiplayerActive: Boolean,
+    multiplayerReady: Boolean,
+    localMultiplayer: Boolean,
+    onHostMultiplayer: (Int) -> Unit,
+    onJoinMultiplayer: (String, Int) -> Unit,
+    onStopMultiplayer: () -> Unit,
+    onLocalMultiplayerChanged: (Boolean) -> Unit,
     onChooseAddRom: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
@@ -157,6 +168,7 @@ internal fun MaizoEmulatorApp(
     onSurfaceChanged: (Surface?) -> Unit
 ) {
     var showGameMenu by remember { mutableStateOf(false) }
+    var editingControls by remember { mutableStateOf(false) }
     BackHandler(enabled = screen == AppScreen.GAME) { onExitGame() }
 
     if (screen == AppScreen.GAME) {
@@ -164,6 +176,9 @@ internal fun MaizoEmulatorApp(
             romName = currentRomName ?: "SNES",
             paused = paused,
             settings = settings,
+            editingControls = editingControls,
+            onEditControls = { editingControls = !editingControls },
+            onSettingsChanged = onSettingsChanged,
             onExit = onExitGame,
             onPause = onTogglePause,
             onOpenMenu = { showGameMenu = true },
@@ -208,7 +223,12 @@ internal fun MaizoEmulatorApp(
                 Modifier.fillMaxSize().padding(padding), romNames, statusMessage, currentRomName,
                 hasLoadedRom, onChooseAddRom, onOpenRom, onContinueGame, onRenameRom
             )
-            AppScreen.MULTIPLAYER -> MultiplayerScreen(Modifier.fillMaxSize().padding(padding))
+            AppScreen.MULTIPLAYER -> MultiplayerScreen(
+                Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
+                multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
+                onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
+                onLocalMultiplayerChanged
+            )
             AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("AJUSTES", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Text("Configure o emulador", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 14.dp))
@@ -329,21 +349,80 @@ private fun RomCard(fileName: String, current: Boolean, onOpen: () -> Unit, onRe
 }
 
 @Composable
-private fun MultiplayerScreen(modifier: Modifier) {
-    Column(modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("MULTIPLAYER", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-        Text("Jogue com alguém na mesma rede Wi-Fi", fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold)
-        Text("A sala LAN ainda não está habilitada nesta versão. Esta tela não simula uma conexão nem mostra falsos estados de conectado.", color = Muted, fontSize = 14.sp, lineHeight = 21.sp)
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(20.dp)) {
-            Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("O que falta", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                Text("• Sincronizar entradas por número de frame nos dois aparelhos.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
-                Text("• Negociar hash da ROM, versão do núcleo e opções determinísticas antes de iniciar.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
-                Text("• Mapear o segundo controle para a porta 2 do Snes9x e encerrar sessões sem travar o loop.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
-                Text("• Detectar dessincronização e recuperar ou abortar a sessão com segurança.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+private fun MultiplayerScreen(
+    modifier: Modifier,
+    romName: String?,
+    ready: Boolean,
+    status: String,
+    localIpAddress: String,
+    active: Boolean,
+    localMultiplayer: Boolean,
+    onHost: (Int) -> Unit,
+    onJoin: (String, Int) -> Unit,
+    onStop: () -> Unit,
+    onLocalMode: (Boolean) -> Unit
+) {
+    var remoteHost by remember { mutableStateOf("") }
+    var portText by remember { mutableStateOf("55435") }
+    val port = portText.toIntOrNull()
+    Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("MULTIPLAYER", color = Mint, fontSize = 11.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+        Text("Jogue junto, onde estiver.", fontSize = 25.sp,
+            lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold)
+        Text("LAN na mesma rede • Online por IP/porta • Dois controles no mesmo aparelho",
+            color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+
+        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("2 jogadores no mesmo aparelho", fontWeight = FontWeight.Bold)
+                Text("Um controle: toque no P1 e gamepad no P2. Dois controles: primeiro no P1 e segundo no P2. O jogo precisa suportar dois jogadores.",
+                    color = Muted, fontSize = 12.sp)
+                ToggleSettingRow("Ativar porta 2", "Funciona sem rede e sem internet.", localMultiplayer, onLocalMode)
             }
         }
-        Text("Detalhes técnicos em docs/NETPLAY.md no repositório.", color = Mint, fontSize = 12.sp)
+
+        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                Text("Sala de dois aparelhos — experimental", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Seu endereço IPv4 local: $localIpAddress", color = Mint, fontSize = 12.sp)
+                Text(if (ready) "Jogo selecionado: ${romName ?: "SNES"}"
+                    else "Primeiro abra a mesma ROM na biblioteca dos dois aparelhos; volte aqui para conectar.",
+                    color = if (ready) Mint else Muted, fontSize = 12.sp)
+                TextField(
+                    value = portText,
+                    onValueChange = { portText = it.filter(Char::isDigit).take(5) },
+                    label = { Text("Porta TCP (1024–65535)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !active
+                )
+                TextField(
+                    value = remoteHost,
+                    onValueChange = { remoteHost = it.take(253) },
+                    label = { Text("IP ou domínio do anfitrião") },
+                    placeholder = { Text("192.168.1.20") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !active
+                )
+                if (active) {
+                    OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR SESSÃO") }
+                } else {
+                    Button(onClick = { port?.let(onHost) }, enabled = ready && port != null && port in 1024..65535,
+                        modifier = Modifier.fillMaxWidth()) { Text("CRIAR SALA • JOGADOR 1") }
+                    OutlinedButton(onClick = { if (port != null) onJoin(remoteHost.trim(), port) },
+                        enabled = ready && port != null && port in 1024..65535 && remoteHost.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()) { Text("ENTRAR NA SALA • JOGADOR 2") }
+                }
+                Surface(color = Color(0xFF242C3B), shape = RoundedCornerShape(12.dp)) {
+                    Text(status, modifier = Modifier.padding(11.dp), color = Mint, fontSize = 12.sp)
+                }
+            }
+        }
+        Text("Sincronização por frame e estado inicial idêntico. Diferenças são detectadas; rede lenta adiciona atraso. Sem rollback, matchmaking, criptografia ou abertura automática de portas. Online remoto exige um IP/porta acessível, como via VPN confiável ou encaminhamento TCP.",
+            color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
     }
 }
 
@@ -352,6 +431,9 @@ private fun GameScreen(
     romName: String,
     paused: Boolean,
     settings: AppSettings,
+    editingControls: Boolean,
+    onEditControls: () -> Unit,
+    onSettingsChanged: (AppSettings) -> Unit,
     onExit: () -> Unit,
     onPause: () -> Unit,
     onOpenMenu: () -> Unit,
@@ -360,7 +442,10 @@ private fun GameScreen(
 ) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         VideoSurface(settings.aspect, onSurfaceChanged)
-        if (settings.touch.enabled) TouchOverlay(settings.touch, onInputChanged)
+        if (settings.touch.enabled) TouchOverlay(
+            settings.touch, onInputChanged, editingControls,
+            onLayoutChanged = { onSettingsChanged(settings.copy(touch = it)) }
+        )
         Row(
             modifier = Modifier.align(Alignment.TopCenter).padding(8.dp).clip(RoundedCornerShape(18.dp))
                 .background(Color(0xB51A2030)).padding(horizontal = 8.dp, vertical = 6.dp),
@@ -371,10 +456,23 @@ private fun GameScreen(
                 Text(File(romName).nameWithoutExtension, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                 if (paused) Text("PAUSADO", color = Mint, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
+            if (settings.touch.enabled) TextButton(onClick = onEditControls) {
+                Text(if (editingControls) "SALVAR" else "EDITAR", fontSize = 11.sp, color = Mint)
+            }
             TextButton(onClick = onPause) { Text(if (paused) "▶" else "Ⅱ", fontSize = 17.sp) }
             TextButton(onClick = onOpenMenu) { Icon(Icons.Default.Settings, contentDescription = "Configurações", tint = Color.White) }
         }
-        if (paused) {
+        if (editingControls) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).padding(top = 45.dp),
+                color = Color(0xC91A2030), shape = RoundedCornerShape(16.dp)
+            ) {
+                Text("ARRASTE O D-PAD OU OS BOTÕES • SALVAR AO TERMINAR",
+                    modifier = Modifier.padding(12.dp), color = Mint,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (paused && !editingControls) {
             Surface(
                 modifier = Modifier.align(Alignment.Center).clickable(onClick = onPause),
                 color = Color(0xC91A2030), shape = RoundedCornerShape(20.dp)
@@ -433,46 +531,142 @@ private fun containedSize(maxWidth: Dp, maxHeight: Dp, targetRatio: Float): Pair
 }
 
 @Composable
-private fun TouchOverlay(layout: TouchLayout, onInputChanged: (Int, Boolean) -> Unit) {
+private fun TouchOverlay(
+    layout: TouchLayout,
+    onInputChanged: (Int, Boolean) -> Unit,
+    editing: Boolean,
+    onLayoutChanged: (TouchLayout) -> Unit
+) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val widthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+        val heightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+        val liveLayout by rememberUpdatedState(layout)
+        val liveUpdate by rememberUpdatedState(onLayoutChanged)
         val dpadSize = 51f * layout.scale
         val actionSize = 49f * layout.scale
-        val yDpad = -(maxHeight * layout.dpadY.coerceIn(0f, 0.27f))
-        val xDpad = maxWidth * layout.dpadX.coerceIn(0f, 0.27f)
-        val yButtons = -(maxHeight * layout.buttonsY.coerceIn(0f, 0.27f))
-        val xButtons = -(maxWidth * layout.buttonsX.coerceIn(0f, 0.27f))
-        Column(
-            modifier = Modifier.align(Alignment.BottomStart).offset(x = xDpad, y = yDpad).padding(3.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            TouchButton("↑", 4, dpadSize, layout.opacity, onInputChanged)
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                TouchButton("←", 6, dpadSize, layout.opacity, onInputChanged)
-                Spacer(Modifier.size(dpadSize.dp).clip(CircleShape).background(Color.White.copy(alpha = layout.opacity * 0.22f)))
-                TouchButton("→", 7, dpadSize, layout.opacity, onInputChanged)
+        val yDpad = -(maxHeight * layout.dpadY.coerceIn(0f, 0.65f))
+        val xDpad = maxWidth * layout.dpadX.coerceIn(0f, 0.65f)
+        val yButtons = -(maxHeight * layout.buttonsY.coerceIn(0f, 0.65f))
+        val xButtons = -(maxWidth * layout.buttonsX.coerceIn(0f, 0.65f))
+
+        val editDpad = if (editing) Modifier.pointerInput(editing) {
+            detectDragGestures { change, dragAmount ->
+                change.consume()
+                liveUpdate(liveLayout.copy(
+                    dpadX = (liveLayout.dpadX + dragAmount.x / widthPx).coerceIn(0f, 0.65f),
+                    dpadY = (liveLayout.dpadY - dragAmount.y / heightPx).coerceIn(0f, 0.65f)
+                ))
             }
-            TouchButton("↓", 5, dpadSize, layout.opacity, onInputChanged)
+        } else Modifier
+        val editButtons = if (editing) Modifier.pointerInput(editing) {
+            detectDragGestures { change, dragAmount ->
+                change.consume()
+                liveUpdate(liveLayout.copy(
+                    buttonsX = (liveLayout.buttonsX - dragAmount.x / widthPx).coerceIn(0f, 0.65f),
+                    buttonsY = (liveLayout.buttonsY - dragAmount.y / heightPx).coerceIn(0f, 0.65f)
+                ))
+            }
+        } else Modifier
+
+        Box(
+            modifier = Modifier.align(Alignment.BottomStart).offset(x = xDpad, y = yDpad)
+                .then(editDpad).padding(3.dp)
+        ) {
+            GestureDpad(dpadSize, layout.opacity, onInputChanged, enabled = !editing)
         }
         Column(
-            modifier = Modifier.align(Alignment.BottomEnd).offset(x = xButtons, y = yButtons).padding(5.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)
+            modifier = Modifier.align(Alignment.BottomEnd).offset(x = xButtons, y = yButtons)
+                .then(editButtons).padding(5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("Y", 1, actionSize, layout.opacity, onInputChanged)
-                TouchButton("X", 9, actionSize, layout.opacity, onInputChanged)
+                TouchButton("Y", 1, actionSize, layout.opacity, onInputChanged, enabled = !editing)
+                TouchButton("X", 9, actionSize, layout.opacity, onInputChanged, enabled = !editing)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("B", 0, actionSize, layout.opacity, onInputChanged)
-                TouchButton("A", 8, actionSize, layout.opacity, onInputChanged)
+                TouchButton("B", 0, actionSize, layout.opacity, onInputChanged, enabled = !editing)
+                TouchButton("A", 8, actionSize, layout.opacity, onInputChanged, enabled = !editing)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                TouchButton("L", 10, actionSize * 0.82f, layout.opacity, onInputChanged)
-                TouchButton("R", 11, actionSize * 0.82f, layout.opacity, onInputChanged)
+                TouchButton("L", 10, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing)
+                TouchButton("R", 11, actionSize * 0.82f, layout.opacity, onInputChanged, enabled = !editing)
             }
         }
-        Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            TouchButton("SELECT", 2, 34f * layout.scale, layout.opacity, onInputChanged, true)
-            TouchButton("START", 3, 34f * layout.scale, layout.opacity, onInputChanged, true)
+        Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            TouchButton("SELECT", 2, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing)
+            TouchButton("START", 3, 34f * layout.scale, layout.opacity, onInputChanged, true, !editing)
+        }
+    }
+}
+
+/**
+ * One continuous touch surface: moving the thumb changes the direction without
+ * lifting it; diagonals press two real libretro joypad bits simultaneously.
+ * The control does not intercept touches when the layout editor is active.
+ */
+@Composable
+private fun GestureDpad(
+    cellSize: Float,
+    opacity: Float,
+    onInputChanged: (Int, Boolean) -> Unit,
+    enabled: Boolean
+) {
+    val currentInput by rememberUpdatedState(onInputChanged)
+    val gap = 2.dp
+    val total = (cellSize * 3).dp + gap * 2
+    Box(
+        modifier = Modifier.size(total)
+            .then(if (enabled) Modifier.pointerInput(Unit) {
+                awaitEachGesture {
+                    val first = awaitFirstDown(requireUnconsumed = false)
+                    var mask = 0
+                    fun update(px: Float, py: Float) {
+                        val nx = px / size.width.toFloat() * 2f - 1f
+                        val ny = py / size.height.toFloat() * 2f - 1f
+                        val dead = 0.27f
+                        var next = 0
+                        if (nx < -dead) next = next or (1 shl 6)
+                        if (nx > dead) next = next or (1 shl 7)
+                        if (ny < -dead) next = next or (1 shl 4)
+                        if (ny > dead) next = next or (1 shl 5)
+                        for (bit in listOf(4, 5, 6, 7)) {
+                            val pressed = next and (1 shl bit) != 0
+                            val wasPressed = mask and (1 shl bit) != 0
+                            if (pressed != wasPressed) currentInput(bit, pressed)
+                        }
+                        mask = next
+                    }
+                    try {
+                        update(first.position.x, first.position.y)
+                        do {
+                            val event = awaitPointerEvent()
+                            val pointer = event.changes.firstOrNull { it.pressed }
+                            if (pointer != null) update(pointer.position.x, pointer.position.y)
+                        } while (pointer != null)
+                    } finally {
+                        for (bit in listOf(4, 5, 6, 7)) {
+                            if (mask and (1 shl bit) != 0) currentInput(bit, false)
+                        }
+                    }
+                }
+            } else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(gap)
+        ) {
+            TouchButton("↑", 4, cellSize, opacity, onInputChanged, enabled = false)
+            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                TouchButton("←", 6, cellSize, opacity, onInputChanged, enabled = false)
+                Box(Modifier.size(cellSize.dp).clip(CircleShape)
+                    .background(Color.White.copy(alpha = opacity * 0.22f)))
+                TouchButton("→", 7, cellSize, opacity, onInputChanged, enabled = false)
+            }
+            TouchButton("↓", 5, cellSize, opacity, onInputChanged, enabled = false)
         }
     }
 }
@@ -480,23 +674,27 @@ private fun TouchOverlay(layout: TouchLayout, onInputChanged: (Int, Boolean) -> 
 @Composable
 private fun TouchButton(
     label: String, bit: Int, size: Float, opacity: Float,
-    onInputChanged: (Int, Boolean) -> Unit, isPill: Boolean = false
+    onInputChanged: (Int, Boolean) -> Unit,
+    isPill: Boolean = false,
+    enabled: Boolean = true
 ) {
     val shape = if (isPill) RoundedCornerShape(18.dp) else CircleShape
     Box(
         modifier = (if (isPill) Modifier.width((size * 2f).dp).height(size.dp) else Modifier.size(size.dp))
-            .clip(shape).background(Color(0xFFE4E8F2).copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.68f))
+            .clip(shape)
+            .background(Color(0xFFE4E8F2).copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.68f))
             .border(1.dp, Color.White.copy(alpha = opacity.coerceIn(0.18f, 0.9f) * 0.65f), shape)
-            .pointerInput(bit) {
+            .then(if (enabled) Modifier.pointerInput(bit) {
                 awaitEachGesture {
                     awaitFirstDown()
                     onInputChanged(bit, true)
                     try { waitForUpOrCancellation() } finally { onInputChanged(bit, false) }
                 }
-            },
+            } else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = Color(0xFF0B1020), fontWeight = FontWeight.Black, fontSize = if (label.length > 3) 8.sp else 15.sp)
+        Text(label, color = Color(0xFF0B1020), fontWeight = FontWeight.Black,
+            fontSize = if (label.length > 3) 8.sp else 15.sp)
     }
 }
 
@@ -563,11 +761,11 @@ private fun EmulatorSettings(
                     ToggleSettingRow("Controles na tela", "Exibe os comandos sobrepostos ao vídeo.", settings.touch.enabled) {
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
-                    SettingSectionTitle("Editor de layout", "Ajuste posição, tamanho e transparência; as mudanças são salvas no perfil ativo.")
-                    SliderSetting("D-pad: horizontal", settings.touch.dpadX, 0f..0.27f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadX = it))) }, (settings.touch.dpadX * 100).toInt().toString() + "%")
-                    SliderSetting("D-pad: subir", settings.touch.dpadY, 0f..0.27f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadY = it))) }, (settings.touch.dpadY * 100).toInt().toString() + "%")
-                    SliderSetting("Botões: horizontal", settings.touch.buttonsX, 0f..0.27f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsX = it))) }, (settings.touch.buttonsX * 100).toInt().toString() + "%")
-                    SliderSetting("Botões: subir", settings.touch.buttonsY, 0f..0.27f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsY = it))) }, (settings.touch.buttonsY * 100).toInt().toString() + "%")
+                    SettingSectionTitle("Editor de layout", "Arraste os grupos no jogo em EDITAR ou use os sliders; posição, tamanho e transparência são salvos por perfil.")
+                    SliderSetting("D-pad: horizontal", settings.touch.dpadX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadX = it))) }, (settings.touch.dpadX * 100).toInt().toString() + "%")
+                    SliderSetting("D-pad: subir", settings.touch.dpadY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadY = it))) }, (settings.touch.dpadY * 100).toInt().toString() + "%")
+                    SliderSetting("Botões: horizontal", settings.touch.buttonsX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsX = it))) }, (settings.touch.buttonsX * 100).toInt().toString() + "%")
+                    SliderSetting("Botões: subir", settings.touch.buttonsY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsY = it))) }, (settings.touch.buttonsY * 100).toInt().toString() + "%")
                     SliderSetting("Tamanho", settings.touch.scale, 0.70f..1.45f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(scale = it))) }, (settings.touch.scale * 100).toInt().toString() + "%")
                     SliderSetting("Opacidade", settings.touch.opacity, 0.20f..0.90f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(opacity = it))) }, (settings.touch.opacity * 100).toInt().toString() + "%")
                     OutlinedButton(onClick = { onSettingsChanged(settings.copy(touch = TouchLayout())) }, modifier = Modifier.fillMaxWidth()) { Text("RESTAURAR LAYOUT PADRÃO") }

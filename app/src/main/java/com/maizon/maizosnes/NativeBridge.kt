@@ -9,6 +9,11 @@ object NativeBridge {
     external fun nativeLoadRom(bytes: ByteArray, displayName: String): Int
     external fun nativeSetSurface(surface: Surface?)
     external fun nativeSetInput(bits: Int)
+    external fun nativeSetPlayer2Input(bits: Int)
+    external fun nativeSetNetplayMode(enabled: Boolean)
+    external fun nativeNetplayStep(player1: Int, player2: Int): Int
+    external fun nativeGetFramePeriodNs(): Long
+    external fun nativeNetplayStateHash(): Long
     external fun nativeSetPaused(paused: Boolean)
     /** Applies an actual Snes9x libretro option through the frontend bridge. */
     external fun nativeSetCoreOption(key: String, value: String)
