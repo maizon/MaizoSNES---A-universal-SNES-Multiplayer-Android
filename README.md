@@ -2,6 +2,32 @@
 
 Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.
 
+## v0.8.0 Release Candidate — interface premium e salas online reparadas
+
+**GitHub Release:** `v0.8.0-rc.1` (Android ARM64 experimental, sem ROM).
+O registro oficial aponta para o relay HTTPS hospedado no Railway. 
+Na aba **Online**, carregue uma ROM antes de criar a sala; a interface mostra
+o estado da conexão, um código e a opção **Cancelar sala / Desconectar**
+enquanto aguarda o segundo jogador. O botão Criar não parece travado: ele
+é desativado ao existir uma sessão ativa.
+
+**Dois celulares:** ambos devem usar APK com protocolo **MZNP v4** e
+a mesma ROM/mod (SHA-256). Quando só as opções de núcleo diferirem, o
+convidado valida e adota temporariamente os valores do host; seu perfil
+pessoal é restaurado ao desconectar. ROMs comerciais não são transferidas.
+
+Novidades: áudio com buffer 25/40/60 ms, presets de imagem leve/GPU
+(OpenGL ES experimental), central de ajustes em chips, opção de restaurar
+configurações do núcleo, sala LAN persistente até cancelamento e redução do
+trabalho com hash de estado durante netplay.
+
+**Importante:** netplay ainda usa lockstep; em rede móvel e RTT alto podem
+ocorrer atrasos e queda de FPS. Não há rollback nem garantia de latência
+zero. Os testes CI verificam HTTP/TCP e jogo determinístico simulado; a
+jogabilidade em dois smartphones precisa de validação física. Relay TCP
+sem TLS fim a fim. APK da CI usa assinatura DEBUG não persistente.
+Consulte `docs/CHANGELOG_0.8.md` e `docs/SUPER_PROMPT_PREMIUM.md`.
+
 ## Atualização 0.7 Preview — Auto Lobby + cheats online sincronizados
 
 - LAN automática identifica prefixo SHA-256 e uso de cheats, além do título; evita entrar em salas com mods diferentes. IP/porta aparecem apenas nos modos avançados.
