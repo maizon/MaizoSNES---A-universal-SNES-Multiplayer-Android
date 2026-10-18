@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(9, 13, 24)
         window.navigationBarColor = android.graphics.Color.rgb(9, 13, 24)
-        setContent { MaizoTheme { MaizoApp() } }
+        val nativeInitResult = runCatching { NativeBridge.nativeInit() }.getOrElse { -999 }\n        setContent { MaizoTheme { MaizoApp(nativeInitResult) } }
     }
 }
 
@@ -86,9 +86,9 @@ private fun MaizoTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun MaizoApp() {
+private fun MaizoApp(nativeInitResult: Int) {
     var tab by remember { mutableIntStateOf(0) }
-    var notice by remember { mutableStateOf("Emulador em preparação · núcleo ainda não integrado") }
+    var notice by remember { mutableStateOf(if (nativeInitResult == 0) "JNI retornou 0" else "Falha na inicialização JNI: $nativeInitResult") }
     Scaffold(
         containerColor = Ink,
         contentWindowInsets = WindowInsets(0),

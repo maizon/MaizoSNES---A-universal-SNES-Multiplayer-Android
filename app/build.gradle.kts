@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.maizon.maizosnes"
     compileSdk = 35
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         applicationId = "com.maizon.maizosnes"
@@ -15,7 +16,19 @@ android {
         versionCode = 1
         versionName = "0.1.0-dev"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        ndk { abiFilters += listOf("arm64-v8a") }
+        externalNativeBuild {
+            cmake {
+                cppFlags("-std=c++17", "-O2")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
