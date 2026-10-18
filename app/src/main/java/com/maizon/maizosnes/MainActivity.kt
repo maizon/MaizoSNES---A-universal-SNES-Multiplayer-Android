@@ -142,6 +142,8 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Lendo arquivo de ROM..."
             try {
                 val (bytes, name) = withContext(Dispatchers.IO) { readRom(uri) }
+                // Stop the consumer before the native core resets its audio ring during ROM changes.
+                audioOutput?.stop()
                 val result = withContext(Dispatchers.Default) {
                     NativeBridge.nativeLoadRom(bytes, name)
                 }
@@ -194,8 +196,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        runCatching { NativeBridge.nativeSetPaused(true) }
+        // Stop the ring-buffer consumer before native pause discards queued samples.
         audioOutput?.stop()
+        runCatching { NativeBridge.nativeSetPaused(true) }
         super.onPause()
     }
 
@@ -221,8 +224,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        runCatching { NativeBridge.nativeSetPaused(true) }
         audioOutput?.stop()
+        runCatching { NativeBridge.nativeSetPaused(true) }
         audioOutput = null
         runCatching { NativeBridge.nativeShutdown() }
         super.onDestroy()
