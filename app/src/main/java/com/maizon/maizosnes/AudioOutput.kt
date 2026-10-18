@@ -10,7 +10,7 @@ import kotlin.math.max
  * Simple streaming PCM output. The native libretro callback fills an SPSC ring buffer;
  * this worker drains it into AudioTrack without allocating per audio callback.
  */
-internal class AudioOutput(private val requestedSampleRate: Int) {
+internal class AudioOutput(private val requestedSampleRate: Int, private val targetBufferMs: Int = 40) {
     @Volatile
     private var running = false
     private var track: AudioTrack? = null
@@ -57,9 +57,10 @@ internal class AudioOutput(private val requestedSampleRate: Int) {
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .build()
                 )
-                // About 40ms rather than the former hardcoded 200ms. Keep the
-                // platform minimum to avoid persistent underruns on slower devices.
-                .setBufferSizeInBytes(max(minBuffer * 2, sampleRate / 25 * 4))
+                // Player-selectable 25 / 40 / 60 ms target. Android device
+                // minimum takes precedence to avoid persistent underruns.
+                .setBufferSizeInBytes(max(minBuffer * 2,
+                    sampleRate * targetBufferMs.coerceIn(25, 60) / 1000 * 4))
                 .setTransferMode(AudioTrack.MODE_STREAM)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
