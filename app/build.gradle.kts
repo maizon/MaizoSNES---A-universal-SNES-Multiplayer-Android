@@ -32,9 +32,27 @@ android {
         }
     }
 
+    signingConfigs {
+        val ksPath = System.getenv("MAIZO_KEYSTORE_PATH")
+        val storePass = System.getenv("MAIZO_STORE_PASSWORD")
+        val keyAliasEnv = System.getenv("MAIZO_KEY_ALIAS")
+        val keyPass = System.getenv("MAIZO_KEY_PASSWORD")
+        if (!ksPath.isNullOrBlank() && !storePass.isNullOrBlank() &&
+            !keyAliasEnv.isNullOrBlank() && !keyPass.isNullOrBlank() &&
+            file(ksPath).exists()) {
+            create("publish") {
+                storeFile = file(ksPath)
+                storePassword = storePass
+                keyAlias = keyAliasEnv
+                keyPassword = keyPass
+            }
+        }
+    }
+
     buildTypes {
         debug { applicationIdSuffix = ".debug" }
         release {
+            signingConfigs.findByName("publish")?.let { signingConfig = it }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

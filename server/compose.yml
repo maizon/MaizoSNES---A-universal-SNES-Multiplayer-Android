@@ -1,0 +1,11 @@
+services:
+  maizosnes-relay:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787/tcp"
+      - "8788:8788/tcp"
+    environment:
+      MAIZO_HTTP_PORT: "8787"
+      MAIZO_TCP_PORT: "8788"
+      MAIZO_BIND: "0.0.0.0"
