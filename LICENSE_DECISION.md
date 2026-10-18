@@ -14,3 +14,19 @@ Planned safeguards:
 - Keep the core's license and copyright headers unchanged; document any local patches.
 
 This document records project precautions, not legal advice or a final license determination. Revisit it after selecting the exact upstream core revision.
+
+
+## Snes9x 1.63 — avaliação preliminar (2026-10-18)
+
+- Repositório upstream: https://github.com/snes9xgit/snes9x
+- Tag pretendida: `1.63`
+- Commit informado para verificação: `921f9f7b83660eb44ad263022a57a4a029057c37` (confirmar contra a referência Git da tag antes de vendorização).
+- Licença: o texto da tag inclui uma concessão de permissão para uso, cópia, modificação e distribuição para fins não comerciais e a cláusula “Under no circumstances will commercial rights be given”.
+- Estado: **avaliação preliminar; não considerar autorização jurídica definitiva**.
+- Política de projeto proposta: sem monetização, anúncios ou cobrança; não publicar em loja comercial sem autorização/parecer jurídico específico.
+- GitHub Releases e F-Droid não são automaticamente considerados permitidos só por serem gratuitos ou de código aberto; avaliar o modelo de distribuição e os termos aplicáveis antes de publicar.
+- Fontes vendorizadas: nenhuma até a confirmação do SHA, revisão da licença completa e definição do conjunto mínimo.
+- Modificações: nenhuma.
+- Próximo passo: validar a referência da tag e copiar somente fontes comprovadamente necessárias, preservando cabeçalhos e o texto integral da licença em `LICENSES/snes9x.txt`.
+
+Esta nota documenta cautela técnica do projeto, não constitui aconselhamento jurídico nem conclui que um canal de distribuição específico esteja liberado.
