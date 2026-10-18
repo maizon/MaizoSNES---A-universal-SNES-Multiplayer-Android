@@ -15,6 +15,20 @@ class RelayDirectoryTest {
         assertEquals("https://room.example/api/rooms",
             RelayDirectory.endpoint("https://room.example").toString())
     }
+    @Test fun cloudTcpHostCanDifferFromDirectoryHost() {
+        assertEquals("proxy.rlwy.net",
+            RelayDirectory.validateRelayHost("rooms.up.railway.app", "proxy.rlwy.net"))
+        assertEquals("rooms.up.railway.app",
+            RelayDirectory.validateRelayHost("rooms.up.railway.app", ""))
+    }
+    @Test fun rejectUnsafeCloudTcpHost() {
+        assertThrows(IllegalArgumentException::class.java) {
+            RelayDirectory.validateRelayHost("directory.example", "https://attacker.example/")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RelayDirectory.validateRelayHost("directory.example", "someone@another.example")
+        }
+    }
     @Test fun rejectInjectedCredentialsAndPaths() {
         assertThrows(IllegalArgumentException::class.java) {
             RelayDirectory.endpoint("http://admin:pass@host:8787")
