@@ -8,6 +8,10 @@ import android.provider.OpenableColumns
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
+import kotlin.math.abs
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -143,6 +147,53 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun snesButtonForKey(keyCode: Int): Int? = when (keyCode) {
+        KeyEvent.KEYCODE_DPAD_UP -> 4
+        KeyEvent.KEYCODE_DPAD_DOWN -> 5
+        KeyEvent.KEYCODE_DPAD_LEFT -> 6
+        KeyEvent.KEYCODE_DPAD_RIGHT -> 7
+        KeyEvent.KEYCODE_BUTTON_B -> 0
+        KeyEvent.KEYCODE_BUTTON_Y -> 1
+        KeyEvent.KEYCODE_BUTTON_SELECT -> 2
+        KeyEvent.KEYCODE_BUTTON_START -> 3
+        KeyEvent.KEYCODE_BUTTON_A -> 8
+        KeyEvent.KEYCODE_BUTTON_X -> 9
+        KeyEvent.KEYCODE_BUTTON_L1 -> 10
+        KeyEvent.KEYCODE_BUTTON_R1 -> 11
+        KeyEvent.KEYCODE_BUTTON_L2 -> 12
+        KeyEvent.KEYCODE_BUTTON_R2 -> 13
+        KeyEvent.KEYCODE_BUTTON_THUMBL -> 14
+        KeyEvent.KEYCODE_BUTTON_THUMBR -> 15
+        else -> null
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val bit = snesButtonForKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> updateInput(bit, true)
+            KeyEvent.ACTION_UP -> updateInput(bit, false)
+            else -> return super.dispatchKeyEvent(event)
+        }
+        return true
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        val isJoystick = event.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
+        if (isJoystick && event.action == MotionEvent.ACTION_MOVE) {
+            val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+            val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            val stickX = if (abs(hatX) > 0.5f) hatX else event.getAxisValue(MotionEvent.AXIS_X)
+            val stickY = if (abs(hatY) > 0.5f) hatY else event.getAxisValue(MotionEvent.AXIS_Y)
+            val deadZone = 0.55f
+            updateInput(6, stickX < -deadZone)
+            updateInput(7, stickX > deadZone)
+            updateInput(4, stickY < -deadZone)
+            updateInput(5, stickY > deadZone)
+            return true
+        }
+        return super.dispatchGenericMotionEvent(event)
     }
 
     private fun updateInput(bit: Int, pressed: Boolean) {
@@ -282,6 +333,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // Clear physical/touch input so a key released while unfocused cannot remain stuck.
+        pressedInputs.set(0)
+        runCatching { NativeBridge.nativeSetInput(0) }
         activityResumed = false
         syncPlaybackState()
         super.onPause()

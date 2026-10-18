@@ -86,13 +86,14 @@ internal class AudioOutput(private val requestedSampleRate: Int) {
 
     fun stop() {
         running = false
+        val output = track
+        // Stopping the AudioTrack first helps unblock a worker inside WRITE_BLOCKING.
+        if (output != null) runCatching { output.stop() }
         worker?.interrupt()
-        runCatching { worker?.join(500) }
+        runCatching { worker?.join(1_000) }
         worker = null
-        track?.let { output ->
-            runCatching { output.pause() }
+        if (output != null) {
             runCatching { output.flush() }
-            runCatching { output.stop() }
             output.release()
         }
         track = null
