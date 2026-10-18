@@ -8,8 +8,12 @@ concurrency:
 on:
   push:
     branches: [main, work/android-foundation]
+    paths-ignore:
+      - 'docs/CI_PERFORMANCE.md'
   pull_request:
     branches: [main, work/android-foundation]
+    paths-ignore:
+      - 'docs/CI_PERFORMANCE.md'
 
 permissions:
   contents: read
@@ -66,17 +70,7 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Cache Android NDK and CMake
-        uses: actions/cache@v4
-        id: cache-ndk-cmake
-        with:
-          path: |
-            ${{ steps.android-sdk.outputs.root }}/ndk
-            ${{ steps.android-sdk.outputs.root }}/cmake
-          key: ndk-cmake-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts', 'app/src/main/cpp/CMakeLists.txt') }}-v1
-
       - name: Install pinned NDK and CMake
-        if: steps.cache-ndk-cmake.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -99,10 +93,20 @@ jobs:
           grep -Eq 'lib/arm64-v8a/libnative-lib\.so$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
+          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+ /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
             exit 1
           fi
+          stat -c 'APK_SIZE_BYTES=%s' "$APK"
+          sha256sum "$APK" | awk '{ print "APK_SHA256=" $1 }'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
