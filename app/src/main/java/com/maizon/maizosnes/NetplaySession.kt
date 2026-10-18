@@ -58,7 +58,9 @@ internal class NetplaySession(
         private const val VERSION = 4
         private const val MAX_ROM = 64 * 1024 * 1024
         private const val MAX_STATE = 64 * 1024 * 1024 + 28
-        private const val HASH_INTERVAL = 120
+        // Avoid heavy full-state snapshots every 2 seconds on slow ARM SoCs.
+        // Still verify both emulators deterministically every ~5 seconds.
+        private const val HASH_INTERVAL = 300
         private const val TRANSFER = 1
         private const val READY = 2
         private const val DENIED = 0
@@ -220,7 +222,7 @@ internal class NetplaySession(
         // Core source is pinned by scripts/fetch_snes9x.sh. No binary identity
         // guarantee across APKs; tested compatibility is still required.
         val manifest = buildString {
-            append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp2\n")
+            append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp4\n")
             options.toSortedMap().forEach { (key, value) ->
                 append(key).append('=').append(value).append('\n')
             }
