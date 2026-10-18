@@ -1012,12 +1012,14 @@ class MainActivity : ComponentActivity() {
             refreshAutoRooms()
             return
         }
+        autoNetworkStatus.value = "Preparando sua sala no servidor ${fastest.relay.name}…"
         startRelayRoom(null, fastest.relay.endpoint)
     }
 
     private fun joinAutomatic(room: AutoRoom) {
         if (netplaySession != null) return
         if (!canJoinOnlineRoom(room.romHash, room.cheats)) return
+        autoNetworkStatus.value = "Entrando na sala ${room.id}…"
         startRelayRoom(room.id, room.endpoint)
     }
 
@@ -1102,11 +1104,13 @@ class MainActivity : ComponentActivity() {
         serverEndpoint: String = relayAddress.value) {
         if (serverEndpoint.isBlank()) {
             lanStatus.value = "Informe primeiro o IP ou URL do servidor."
+            autoNetworkStatus.value = lanStatus.value
             return
         }
         lifecycleScope.launch {
             try {
                 lanStatus.value = "Consultando servidor de salas…"
+                autoNetworkStatus.value = lanStatus.value
                 val listing = withContext(Dispatchers.IO) {
                     RelayDirectory.list(serverEndpoint)
                 }
@@ -1114,6 +1118,7 @@ class MainActivity : ComponentActivity() {
                     .toString().replace("-", "").take(16)
                 if (joinRoomId != null && listing.rooms.none { it.id == roomId }) {
                     lanStatus.value = "A sala não está mais disponível. Atualize a lista."
+                    autoNetworkStatus.value = lanStatus.value
                     return@launch
                 }
                 startNetplay(
@@ -1125,6 +1130,7 @@ class MainActivity : ComponentActivity() {
             } catch (error: Exception) {
                 lanStatus.value = "Falha ao conectar servidor: " +
                     (error.message ?: "erro de rede")
+                autoNetworkStatus.value = lanStatus.value
             }
         }
     }
@@ -1681,6 +1687,8 @@ class MainActivity : ComponentActivity() {
         lastNetworkMetrics.value = null
         val current = currentRomFile.value
         lateinit var session: NetplaySession
+        val originalCoreOptions = coreSettings.toMap()
+        var sessionCoreOptionsWereChanged = false
         session = NetplaySession(
             rom = current,
             coreOptions = coreSettings.toMap(),
@@ -1696,6 +1704,24 @@ class MainActivity : ComponentActivity() {
                 cheatEntries.value.filter { it.id in activeCheatIds.value }
                     .map { it.code }.take(64) else emptyList(),
             applyOnlineCheats = { codes -> NativeBridge.nativeApplyOnlineCheats(codes) },
+            applyHostCoreOptions = { received ->
+                // Never persist host options to local profiles. Validate every
+                // core key/value before touching native state, and restore on exit.
+                val allowed = CoreOptionDefinitions.all.associateBy { it.key }
+                if (received.keys != originalCoreOptions.keys ||
+                    received.any { (key, value) -> value !in (allowed[key]?.values ?: emptyList()) }) {
+                    false
+                } else {
+                    val ok = runCatching {
+                        received.forEach { (key, value) ->
+                            NativeBridge.nativeSetCoreOption(key, value)
+                        }
+                        true
+                    }.getOrDefault(false)
+                    sessionCoreOptionsWereChanged = true // restore even on partial failure
+                    ok
+                }
+            },
             mode = connectionMode.value,
             onMetrics = { metrics ->
                 runOnUiThread {
@@ -1717,6 +1743,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (netplaySession === session) {
                         lanStatus.value = message
+                        autoNetworkStatus.value = message
                         if (message.startsWith("Conectado como")) {
                             userPaused = false
                             localPlayer2Enabled.value = false
@@ -1736,7 +1763,13 @@ class MainActivity : ComponentActivity() {
                         lastNetworkMetrics.value = null
                         runCatching { hostWifiLock?.release() }
                         hostWifiLock = null
+                        if (sessionCoreOptionsWereChanged) {
+                            originalCoreOptions.forEach { (key, value) ->
+                                runCatching { NativeBridge.nativeSetCoreOption(key, value) }
+                            }
+                        }
                         lanStatus.value = message
+                        autoNetworkStatus.value = message
                         statusMessage.value = message
                         userPaused = true
                         paused.value = true
@@ -1757,6 +1790,7 @@ class MainActivity : ComponentActivity() {
         netplaySession = session
         if (host == null && relayRoomId == null) hostWifiLock = createDiscoveryLock()
         lanStatus.value = if (host == null) "Abrindo sala…" else "Conectando…"
+        autoNetworkStatus.value = lanStatus.value
         if (relayRoomId != null && relayServerHost != null) {
             if (host == null) session.hostViaRelay(relayServerHost, port, relayRoomId,
                 current?.nameWithoutExtension ?: "SNES")
@@ -1765,6 +1799,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopMultiplayer() {
+        if (netplaySession == null) return
+        lanStatus.value = "Cancelando sessão e liberando sala…"
+        autoNetworkStatus.value = lanStatus.value
         netplaySession?.stop()
     }
 
@@ -1794,7 +1831,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        netplaySession?.stop()
+        // A temporary Activity pause (rotation, dialogs, app switching)
+        // must NOT silently cancel a hosted room. onDestroy will close it.
         pressedInputs.set(0)
         gamepadAxisMasks.clear()
         gamepadKeyMasks.clear()
