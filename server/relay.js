@@ -11,7 +11,21 @@ const http = require("node:http");
 const net = require("node:net");
 const crypto = require("node:crypto");
 
-function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0" } = {}) {
+function createRelayServer({
+  httpPort = 8787, relayPort = 8788, bind = "0.0.0.0",
+  publicTcpHost = "", publicTcpPort = null,
+} = {}) {
+  // Hosted TCP proxy ports can differ from the relay's internal listening port.
+  // Advertise only values explicitly configured by the operator.
+  const advertisedHost = String(publicTcpHost).trim();
+  const advertisedPort = publicTcpPort == null ? null : Number(publicTcpPort);
+  if (advertisedHost && !/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,251}[a-zA-Z0-9]$/.test(advertisedHost)) {
+    throw new Error("Invalid MAIZO_PUBLIC_TCP_HOST");
+  }
+  if (advertisedPort != null &&
+      (!Number.isInteger(advertisedPort) || advertisedPort < 1 || advertisedPort > 65535)) {
+    throw new Error("Invalid MAIZO_PUBLIC_TCP_PORT");
+  }
   const rooms = new Map();
   const maxRooms = 100;
   const roomLifetimeMs = 5 * 60 * 1000;
@@ -27,7 +41,8 @@ function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0"
     if (req.url === "/health") { res.end(JSON.stringify({ ok: true })); return; }
     res.end(JSON.stringify({
       protocol: "maizo-relay-v1",
-      relayPort: tcp.address()?.port || relayPort,
+      relayPort: advertisedPort || tcp.address()?.port || relayPort,
+      ...(advertisedHost ? { relayHost: advertisedHost } : {}),
       rooms: [...rooms.values()].filter(r => !r.host.destroyed).map(r => ({
         id: r.id, game: r.game, createdAt: r.createdAt,
         romHash: r.romHash, cheats: r.cheats
@@ -126,6 +141,8 @@ if (require.main === module) {
     httpPort: Number(process.env.MAIZO_HTTP_PORT || 8787),
     relayPort: Number(process.env.MAIZO_TCP_PORT || 8788),
     bind: process.env.MAIZO_BIND || "0.0.0.0",
+    publicTcpHost: process.env.MAIZO_PUBLIC_TCP_HOST || "",
+    publicTcpPort: process.env.MAIZO_PUBLIC_TCP_PORT || null,
   });
   instance.start().then(ports => console.log("MaizoSNES relay ready", ports))
     .catch(error => { console.error(error); process.exitCode = 1; });
