@@ -845,7 +845,8 @@ class MainActivity : ComponentActivity() {
                 currentRomHashPrefix.value = romPrefix
                 userPaused = false
                 paused.value = false
-                audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate()).also {
+                audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate(),
+                    appSettings.value.audioBufferMs).also {
                     it.setVolume(appSettings.value.volume)
                     it.setEnabled(appSettings.value.audioEnabled)
                 }
@@ -1302,12 +1303,16 @@ class MainActivity : ComponentActivity() {
                     ?: GpuShader.NEAREST.name) }.getOrDefault(GpuShader.NEAREST),
             performanceHud = prefs.getBoolean(key("performance_hud"), false),
             automaticCovers = prefs.getBoolean("library_covers_enabled", true),
-            automaticBackup = prefs.getBoolean("automatic_netplay_backups", true)
+            automaticBackup = prefs.getBoolean("automatic_netplay_backups", true),
+            audioBufferMs = prefs.getInt(key("audio_buffer_ms"), 40).takeIf {
+                it in setOf(25, 40, 60)
+            } ?: 40
         )
     }
 
     private fun persistSettings(next: AppSettings) {
         val backendChanged = appSettings.value.renderBackend != next.renderBackend
+        val audioBufferChanged = appSettings.value.audioBufferMs != next.audioBufferMs
         if (backendChanged) {
             surfaceAttached = false
             runCatching { NativeBridge.nativeSetPaused(true) }
@@ -1319,6 +1324,7 @@ class MainActivity : ComponentActivity() {
         prefs.edit()
             .putString(prefix + "aspect", next.aspect.name)
             .putString(prefix + "video_filter", next.filter.name)
+            .putInt(prefix + "audio_buffer_ms", next.audioBufferMs)
             .putInt(prefix + "video_output_scale", next.outputScale.coerceIn(1, 4))
             .putString(prefix + "video_backend", next.renderBackend.name)
             .putString(prefix + "gpu_shader", next.gpuShader.name)
@@ -1338,6 +1344,12 @@ class MainActivity : ComponentActivity() {
             .putBoolean(prefix + "audio_enabled", next.audioEnabled)
             .putFloat(prefix + "audio_volume", next.volume)
             .apply()
+        if (audioBufferChanged && hasLoadedRom) {
+            audioOutput?.stop()
+            audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate(),
+                next.audioBufferMs)
+            syncPlaybackState()
+        }
         audioOutput?.setEnabled(next.audioEnabled)
         audioOutput?.setVolume(next.volume)
         runCatching {
