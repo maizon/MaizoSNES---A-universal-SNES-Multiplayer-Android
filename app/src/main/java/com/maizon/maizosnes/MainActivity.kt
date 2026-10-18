@@ -1,5 +1,11 @@
 package com.maizon.maizosnes
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.graphics.Bitmap
 import android.content.pm.ActivityInfo
 import android.net.Uri
@@ -87,6 +93,18 @@ class MainActivity : ComponentActivity() {
     private val scanRomTreeLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) scanRomTree(uri)
     }
+    private val allFilesPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager())
+                scanAllSharedStorage()
+            else statusMessage.value = "Acesso a todos os arquivos não autorizado. " +
+                "Use a busca por pasta, que não requer acesso especial."
+        }
+    private val legacyStoragePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) scanAllSharedStorage()
+            else statusMessage.value = "Permissão negada. Use busca por pasta."
+        }
     private val patchRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) applyRomPatch(uri)
     }
@@ -192,6 +210,7 @@ class MainActivity : ComponentActivity() {
                     onChooseAddRom = { openRomLauncher.launch(arrayOf("*/*")) },
                     onScanRomFolder = { scanRomTreeLauncher.launch(null) },
                     onApplyRomPatch = { patchRomLauncher.launch(arrayOf("*/*")) },
+                    onScanAllDevice = ::requestGlobalRomScan,
                     onOpenInstagram = {
                         val uri = Uri.parse("https://www.instagram.com/maicon_nasciment0/")
                         runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
@@ -451,8 +470,139 @@ class MainActivity : ComponentActivity() {
     /**
      * Android 11+ restricts whole-device enumeration. SAF allows the user to
      * select a folder and grants scoped, revocable read access to its subtree.
-     * No MANAGE_EXTERNAL_STORAGE, no bypass of Android privacy controls.
+     * Folder selection uses no special permission; all-files access is an
+     * OPTIONAL second path that requires explicit Android system approval.
      */
+    /**
+     * Optional, user-approved all-files inventory of SHARED storage. Android
+     * still disallows private app directories and protected /Android/data.
+     * Never upload or enumerate content on a server. Only .smc/.sfc/ZIP copied.
+     */
+    private fun requestGlobalRomScan() {
+        if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+            statusMessage.value = "Para buscar em todo armazenamento compartilhado, " +
+                "autorize explicitamente acesso a todos os arquivos no Android."
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:$packageName"))
+            try { allFilesPermissionLauncher.launch(intent) }
+            catch (_: Exception) {
+                allFilesPermissionLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            }
+            return
+        }
+        if (Build.VERSION.SDK_INT in 23..29 &&
+            checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) !=
+                PackageManager.PERMISSION_GRANTED) {
+            legacyStoragePermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+            return
+        }
+        scanAllSharedStorage()
+    }
+
+    private fun scanAllSharedStorage() {
+        lifecycleScope.launch {
+            statusMessage.value = "Varrendo o armazenamento compartilhado… " +
+                "O Android restringe pastas protegidas."
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val roots = mutableSetOf<File>()
+                    @Suppress("DEPRECATION")
+                    roots.add(Environment.getExternalStorageDirectory())
+                    getExternalFilesDirs(null).filterNotNull().forEach { file ->
+                        var cursor: File? = file
+                        while (cursor != null && cursor.name != "Android") {
+                            cursor = cursor.parentFile
+                        }
+                        cursor?.parentFile?.let { roots.add(it) }
+                    }
+                    val pending = ArrayDeque<Triple<File, Int, String>>()
+                    roots.filter { it.isDirectory }.forEach { root ->
+                        pending.add(Triple(root, 0, root.canonicalPath))
+                    }
+                    val seen = HashSet<String>()
+                    var inspected = 0
+                    var imported = 0
+                    var ignored = 0
+                    while (pending.isNotEmpty() && inspected < 30000 && imported < 500) {
+                        val (folder, depth, storageRoot) = pending.removeFirst()
+                        val folderCanonical = runCatching { folder.canonicalPath }.getOrNull()
+                            ?: continue
+                        if (!folderCanonical.startsWith(storageRoot) ||
+                            !seen.add(folderCanonical)) continue
+                        val contents = runCatching { folder.listFiles()?.toList() }
+                            .getOrNull() ?: continue
+                        for (child in contents) {
+                            if (++inspected > 30000 || imported >= 500) break
+                            if (child.isDirectory && depth < 12) {
+                                val skip = child.name in setOf(
+                                    ".Trash", ".thumbnails", ".git", "LOST.DIR") ||
+                                    (folder.name == "Android" && child.name in
+                                        setOf("data", "obb"))
+                                if (!skip) pending.add(
+                                    Triple(child, depth + 1, storageRoot))
+                                continue
+                            }
+                            if (!child.isFile) continue
+                            if (child.extension.lowercase() !in setOf("smc", "sfc", "zip") ||
+                                child.length() !in 1..(64L * 1024L * 1024L)) continue
+                            try {
+                                val (romName, bytes) = if (child.extension.lowercase() == "zip") {
+                                    var chosen: Pair<String, ByteArray>? = null
+                                    ZipInputStream(child.inputStream().buffered()).use { zip ->
+                                        var expanded = 0L
+                                        var entries = 0
+                                        while (true) {
+                                            val item = zip.nextEntry ?: break
+                                            check(++entries <= 128) { "ZIP com muitas entradas." }
+                                            val name = safeFileName(item.name)
+                                            val isRom = !item.isDirectory &&
+                                                name.substringAfterLast('.', "").lowercase() in
+                                                    setOf("sfc", "smc")
+                                            check(!isRom || chosen == null) { "ZIP com múltiplas ROMs." }
+                                            val bytesOut = if (isRom) ByteArrayOutputStream() else null
+                                            val chunk = ByteArray(65536)
+                                            while (true) {
+                                                val n = zip.read(chunk)
+                                                if (n < 0) break
+                                                expanded += n
+                                                check(expanded <= 64L * 1024L * 1024L) {
+                                                    "ZIP grande demais."
+                                                }
+                                                bytesOut?.write(chunk, 0, n)
+                                            }
+                                            if (isRom) chosen = name to
+                                                (bytesOut?.toByteArray() ?: ByteArray(0))
+                                            zip.closeEntry()
+                                        }
+                                    }
+                                    chosen ?: error("ZIP sem ROM.")
+                                } else safeFileName(child.name) to child.readBytes()
+                                if (bytes.isEmpty()) continue
+                                val target = File(romDirectory, romName)
+                                if (target.exists()) { ignored++; continue }
+                                val tmp = File.createTempFile("scan-all-", ".tmp", romDirectory)
+                                try {
+                                    tmp.writeBytes(bytes)
+                                    check(tmp.renameTo(target)) { "Arquivo não movido." }
+                                } finally { tmp.delete() }
+                                imported++
+                            } catch (_: Exception) { ignored++ }
+                        }
+                    }
+                    Triple(imported, inspected, ignored)
+                }
+                refreshLibrary()
+                statusMessage.value = "Busca concluída: ${result.first} ROM(s) " +
+                    "importada(s) • ${result.second} itens verificados • " +
+                    "${result.third} ignorados. Pastas privadas do Android não são acessíveis."
+            } catch (error: Exception) {
+                statusMessage.value = "Falha ao pesquisar dispositivo: " +
+                    (error.message ?: "armazenamento inacessível")
+            }
+        }
+    }
+
     private fun scanRomTree(uri: Uri) {
         lifecycleScope.launch {
             statusMessage.value = "Procurando ROMs na pasta autorizada…"

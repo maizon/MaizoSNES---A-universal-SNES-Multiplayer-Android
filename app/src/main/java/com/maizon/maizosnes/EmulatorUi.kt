@@ -212,6 +212,7 @@ internal fun MaizoEmulatorApp(
     onChooseAddRom: () -> Unit,
     onScanRomFolder: () -> Unit,
     onApplyRomPatch: () -> Unit,
+    onScanAllDevice: () -> Unit,
     onOpenInstagram: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
@@ -291,7 +292,8 @@ internal fun MaizoEmulatorApp(
             AppScreen.LIBRARY -> LibraryScreen(
                 Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
-                onScanRomFolder, onApplyRomPatch, onOpenRom, onContinueGame, onRenameRom
+                onScanRomFolder, onApplyRomPatch, onScanAllDevice,
+                onOpenRom, onContinueGame, onRenameRom
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
@@ -369,6 +371,7 @@ private fun LibraryScreen(
     onChooseAddRom: () -> Unit,
     onScanRomFolder: () -> Unit,
     onApplyRomPatch: () -> Unit,
+    onScanAllDevice: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
     onRenameRom: (String, String) -> Unit
@@ -409,6 +412,13 @@ private fun LibraryScreen(
                 OutlinedButton(onClick = onScanRomFolder, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Text("PROCURAR ROMS EM PASTA DO APARELHO")
                 }
+                OutlinedButton(onClick = onScanAllDevice,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    Text("PROCURAR EM TODO O APARELHO", fontSize = 12.sp)
+                }
+                Text("Busca completa requer autorização especial do Android e só " +
+                    "acessa armazenamento compartilhado, não dados privados de outros apps.",
+                    fontSize = 10.sp, color = Muted, lineHeight = 14.sp)
                 if (hasLoadedRom) OutlinedButton(onClick = onApplyRomPatch,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
                     Text("APLICAR MOD .IPS / .BPS À ROM ATUAL", fontSize = 11.sp)
