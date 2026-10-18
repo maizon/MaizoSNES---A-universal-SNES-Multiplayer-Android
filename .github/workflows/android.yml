@@ -26,7 +26,8 @@ jobs:
             echo "sdkmanager not found under $SDK_ROOT/cmdline-tools" >&2
             exit 1
           fi
-          yes | "$SDKMANAGER" --licenses
+          # Feed a finite set of answers: the sdkmanager may close stdin once all licenses are accepted.
+          yes | head -n 100 | "$SDKMANAGER" --licenses
           "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
