@@ -52,3 +52,24 @@ test("room listing and bidirectional relay over outbound connections", async () 
     await relay.close();
   }
 });
+
+test("directory advertises external TCP proxy separately from its HTTP hostname", async () => {
+  const relay = createRelayServer({
+    httpPort: 0, relayPort: 0, bind: "127.0.0.1",
+    publicTcpHost: "example.proxy.rlwy.net", publicTcpPort: 15140,
+  });
+  const ports = await relay.start();
+  try {
+    const response = await fetch("http://127.0.0.1:" + ports.httpPort + "/api/rooms");
+    const listing = await response.json();
+    assert.equal(listing.protocol, "maizo-relay-v1");
+    assert.equal(listing.relayHost, "example.proxy.rlwy.net");
+    assert.equal(listing.relayPort, 15140);
+  } finally {
+    await relay.close();
+  }
+});
+test("reject invalid advertised TCP destinations", () => {
+  assert.throws(() => createRelayServer({ publicTcpHost: "http://not-allowed", publicTcpPort: 8788 }));
+  assert.throws(() => createRelayServer({ publicTcpHost: "proxy.example.net", publicTcpPort: 65536 }));
+});
