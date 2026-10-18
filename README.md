@@ -33,8 +33,8 @@ The Snes9x license grants rights for **non-commercial purposes** and states that
 
 ## Roadmap
 
-1. Test the APK on a physical Android device with a known-good ROM: boot, image, sound, input, rotation and lifecycle.
-2. Fix runtime issues and add save-state/restore, controller mapping and aspect-ratio options.
+1. Test the APK on a physical Android device with a known-good ROM: boot, image, sound, input, save/restore, rotation and lifecycle.
+2. Fix runtime issues and add controller mapping and aspect-ratio options.
 3. Add a dedicated GPU renderer, shaders and frame-time diagnostics after baseline behavior is stable.
 4. Implement local Wi-Fi multiplayer only after game-state determinism and input synchronization have been tested.
 5. Consider internet netplay/rollback after LAN synchronization works.

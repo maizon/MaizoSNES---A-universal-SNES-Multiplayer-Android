@@ -97,6 +97,16 @@ class MainActivity : ComponentActivity() {
         if (uri != null) loadRom(uri)
     }
 
+    private val saveStateLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) saveState(uri)
+    }
+
+    private val loadStateLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) restoreState(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(9, 13, 24)
@@ -120,6 +130,14 @@ class MainActivity : ComponentActivity() {
                     statusMessage = statusMessage.value,
                     licenseText = licenseText,
                     onOpenRom = { openRomLauncher.launch(arrayOf("*/*")) },
+                    onSaveState = {
+                        if (hasLoadedRom) saveStateLauncher.launch("maizosnes.state")
+                        else statusMessage.value = "Carregue uma ROM antes de salvar um estado."
+                    },
+                    onLoadState = {
+                        if (hasLoadedRom) loadStateLauncher.launch(arrayOf("*/*"))
+                        else statusMessage.value = "Carregue a ROM correspondente antes de restaurar um estado."
+                    },
                     onSurfaceChanged = ::updateEmulatorSurface,
                     onInputChanged = ::updateInput
                 )
@@ -197,6 +215,55 @@ class MainActivity : ComponentActivity() {
         return bytes to name
     }
 
+    private fun saveState(uri: Uri) {
+        if (!hasLoadedRom) {
+            statusMessage.value = "Carregue uma ROM antes de salvar um estado."
+            return
+        }
+        lifecycleScope.launch {
+            statusMessage.value = "Salvando estado..."
+            try {
+                val bytes = withContext(Dispatchers.Default) {
+                    NativeBridge.nativeSerializeState()
+                } ?: throw IllegalStateException("o núcleo não conseguiu serializar o jogo")
+                withContext(Dispatchers.IO) {
+                    contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+                        ?: throw IllegalStateException("não foi possível gravar o arquivo escolhido")
+                }
+                statusMessage.value = "Estado salvo (${bytes.size / 1024} KiB)."
+            } catch (error: Exception) {
+                statusMessage.value = "Falha ao salvar estado: ${error.message ?: "erro desconhecido"}"
+            }
+        }
+    }
+
+    private fun restoreState(uri: Uri) {
+        if (!hasLoadedRom) {
+            statusMessage.value = "Carregue a ROM correspondente antes de restaurar um estado."
+            return
+        }
+        lifecycleScope.launch {
+            statusMessage.value = "Lendo estado salvo..."
+            try {
+                val (bytes, name) = withContext(Dispatchers.IO) { readRom(uri) }
+                // Stop the PCM consumer before native code discards stale queued samples.
+                audioOutput?.stop()
+                val result = withContext(Dispatchers.Default) {
+                    NativeBridge.nativeUnserializeState(bytes)
+                }
+                syncPlaybackState()
+                statusMessage.value = if (result == 0) {
+                    "Estado restaurado: $name"
+                } else {
+                    "O núcleo recusou o estado ($result). Use a mesma ROM que gerou o arquivo."
+                }
+            } catch (error: Exception) {
+                syncPlaybackState()
+                statusMessage.value = "Falha ao restaurar estado: ${error.message ?: "arquivo inválido"}"
+            }
+        }
+    }
+
     private fun updateEmulatorSurface(surface: Surface?) {
         surfaceAttached = surface != null
         runCatching { NativeBridge.nativeSetSurface(surface) }
@@ -271,6 +338,8 @@ private fun MaizoApp(
     statusMessage: String,
     licenseText: String,
     onOpenRom: () -> Unit,
+    onSaveState: () -> Unit,
+    onLoadState: () -> Unit,
     onSurfaceChanged: (Surface?) -> Unit,
     onInputChanged: (Int, Boolean) -> Unit
 ) {
@@ -298,6 +367,7 @@ private fun MaizoApp(
                     item { HeroCard(onOpen = { onOpenRom(); notice = "Selecione uma ROM SNES no armazenamento do aparelho." }) }
                     item { EmulatorSurface(onSurfaceChanged) }
                     item { VirtualController(onInputChanged) }
+                    item { SaveStateActions(onSaveState, onLoadState) }
                     item { SectionTitle("CENTRAL DE JOGO", "Seu SNES, do seu jeito") }
                     item { FeatureCard(Icons.Default.Bolt, "Desempenho primeiro", "Núcleo nativo ARM64, com foco em frame pacing estável.", Mint) }
                     item { FeatureCard(Icons.Default.Groups, "Jogue junto", "A sala local e o netplay ainda estão em desenvolvimento.", Violet) }
@@ -342,6 +412,36 @@ private fun MaizoApp(
     }
 }
 
+
+@Composable
+private fun SaveStateActions(onSaveState: () -> Unit, onLoadState: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = onSaveState,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = Violet)
+            ) {
+                Text("SALVAR ESTADO", fontSize = 10.sp)
+            }
+            Button(
+                onClick = onLoadState,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF252C43))
+            ) {
+                Text("CARREGAR ESTADO", fontSize = 10.sp)
+            }
+        }
+        Text(
+            "Para restaurar, mantenha carregada a mesma ROM usada ao salvar.",
+            color = Muted,
+            fontSize = 11.sp
+        )
+    }
+}
 
 @Composable
 private fun EmulatorSurface(onSurfaceChanged: (Surface?) -> Unit) {

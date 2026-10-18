@@ -19,6 +19,7 @@ namespace {
 constexpr char kLogTag[] = "MaizoSNES";
 constexpr size_t kAudioCapacity = 65536; // int16 values; SPSC ring buffer.
 constexpr size_t kMaxRomBytes = 64u * 1024u * 1024u;
+constexpr size_t kMaxStateBytes = 64u * 1024u * 1024u;
 
 std::string g_appDataPath;
 std::string g_romName;
@@ -379,6 +380,64 @@ Java_com_maizon_maizosnes_NativeBridge_nativeGetAudioSampleRate(JNIEnv*, jobject
     return (rate >= 8000 && rate <= 192000) ? rate : 32040;
 }
 
+
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSerializeState(JNIEnv* env, jobject) {
+    std::vector<uint8_t> stateBytes;
+    {
+        std::lock_guard<std::mutex> lock(g_coreMutex);
+        if (!g_initialized.load(std::memory_order_acquire) ||
+            !g_gameLoaded.load(std::memory_order_acquire)) {
+            return nullptr;
+        }
+        const size_t size = retro_serialize_size();
+        if (size == 0 || size > kMaxStateBytes) {
+            logMessage(ANDROID_LOG_WARN, "Invalid save-state size: %zu", size);
+            return nullptr;
+        }
+        stateBytes.resize(size);
+        if (!retro_serialize(stateBytes.data(), stateBytes.size())) {
+            logMessage(ANDROID_LOG_ERROR, "Core failed to serialize save state");
+            return nullptr;
+        }
+    }
+
+    jbyteArray output = env->NewByteArray(static_cast<jsize>(stateBytes.size()));
+    if (!output) return nullptr;
+    env->SetByteArrayRegion(
+        output, 0, static_cast<jsize>(stateBytes.size()),
+        reinterpret_cast<const jbyte*>(stateBytes.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    return output;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeUnserializeState(
+    JNIEnv* env, jobject, jbyteArray stateArray) {
+    if (!g_initialized.load(std::memory_order_acquire) || !stateArray) return -1;
+
+    const jsize length = env->GetArrayLength(stateArray);
+    if (length <= 0 || static_cast<size_t>(length) > kMaxStateBytes) return -2;
+
+    std::vector<uint8_t> stateBytes(static_cast<size_t>(length));
+    env->GetByteArrayRegion(
+        stateArray, 0, length, reinterpret_cast<jbyte*>(stateBytes.data()));
+    if (env->ExceptionCheck()) return -3;
+
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire)) return -4;
+    if (!retro_unserialize(stateBytes.data(), stateBytes.size())) {
+        logMessage(ANDROID_LOG_WARN, "Core rejected save state (%d bytes)", length);
+        return -5;
+    }
+
+    // Kotlin stops the audio consumer before restore, so this ring reset is race-free.
+    const uint64_t latestWrite = g_audioWrite.load(std::memory_order_acquire);
+    g_audioRead.store(latestWrite, std::memory_order_release);
+    logMessage(ANDROID_LOG_INFO, "Save state restored (%d bytes)", length);
+    return 0;
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetPaused(JNIEnv*, jobject, jboolean paused) {
