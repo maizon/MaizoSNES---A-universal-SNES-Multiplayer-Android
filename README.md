@@ -11,7 +11,7 @@
 - CMake uses an explicit list based on upstream `libretro/Makefile.common`, with the libretro frontend as the portable core host.
 - ROMs are selected through Android's Storage Access Framework and read into memory. The app does not bundle or download games. The first ROM path accepts raw `.sfc` / `.smc` files, not ZIP archives.
 - The current build targets `arm64-v8a` only. ARMv7 is not enabled.
-- The app includes a native-window video surface, touch controls, a libretro audio callback queue and Android `AudioTrack` output. Rendering currently copies into a native window; a dedicated GPU renderer/shader pipeline is not implemented yet.
+- The app includes a native-window video surface, touch controls, a libretro audio callback queue, Android `AudioTrack` output and an in-app viewer for the full third-party license texts. The emulation and audio output pause when the activity or game surface is not active. Rendering currently copies into a native-window buffer; a dedicated GPU renderer/shader pipeline is not implemented yet.
 - The frame loop derives its interval from the core's reported timing where available. Hardware frame pacing and audio sync still need device tests.
 
 ## Build

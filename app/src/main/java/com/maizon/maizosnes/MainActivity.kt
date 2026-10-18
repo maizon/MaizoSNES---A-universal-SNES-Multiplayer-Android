@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
     private val pressedInputs = AtomicInteger(0)
     private var audioOutput: AudioOutput? = null
     private var hasLoadedRom = false
+    private var activityResumed = false
+    private var surfaceAttached = false
 
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadRom(uri)
@@ -118,7 +120,7 @@ class MainActivity : ComponentActivity() {
                     statusMessage = statusMessage.value,
                     licenseText = licenseText,
                     onOpenRom = { openRomLauncher.launch(arrayOf("*/*")) },
-                    onSurfaceChanged = { NativeBridge.nativeSetSurface(it) },
+                    onSurfaceChanged = ::updateEmulatorSurface,
                     onInputChanged = ::updateInput
                 )
             }
@@ -152,11 +154,11 @@ class MainActivity : ComponentActivity() {
                     // Recreate the output using the rate reported after this ROM was loaded.
                     audioOutput?.stop()
                     audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate())
-                    audioOutput?.start()
+                    syncPlaybackState()
                     statusMessage.value = "ROM carregada: $name"
                 } else {
                     hasLoadedRom = false
-                    audioOutput?.stop()
+                    syncPlaybackState()
                     statusMessage.value = "O núcleo recusou a ROM ($result). Use uma ROM SNES válida, sem ZIP."
                 }
             } catch (error: Exception) {
@@ -195,17 +197,33 @@ class MainActivity : ComponentActivity() {
         return bytes to name
     }
 
+    private fun updateEmulatorSurface(surface: Surface?) {
+        surfaceAttached = surface != null
+        runCatching { NativeBridge.nativeSetSurface(surface) }
+        syncPlaybackState()
+    }
+
+    /**
+     * A running emulation requires a loaded game, a resumed Activity and a live SurfaceView.
+     * Stop the audio consumer before pausing the core so the native ring can be safely drained.
+     */
+    private fun syncPlaybackState() {
+        val shouldRun = activityResumed && surfaceAttached && hasLoadedRom
+        if (!shouldRun) audioOutput?.stop()
+        runCatching { NativeBridge.nativeSetPaused(!shouldRun) }
+        if (shouldRun) audioOutput?.start()
+    }
+
     override fun onPause() {
-        // Stop the ring-buffer consumer before native pause discards queued samples.
-        audioOutput?.stop()
-        runCatching { NativeBridge.nativeSetPaused(true) }
+        activityResumed = false
+        syncPlaybackState()
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
-        runCatching { NativeBridge.nativeSetPaused(false) }
-        if (hasLoadedRom) audioOutput?.start()
+        activityResumed = true
+        syncPlaybackState()
     }
 
     private fun readBundledLicenses(): String {
@@ -224,8 +242,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        audioOutput?.stop()
-        runCatching { NativeBridge.nativeSetPaused(true) }
+        activityResumed = false
+        surfaceAttached = false
+        syncPlaybackState()
         audioOutput = null
         runCatching { NativeBridge.nativeShutdown() }
         super.onDestroy()

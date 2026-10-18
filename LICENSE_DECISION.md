@@ -13,7 +13,7 @@ Planned safeguards:
 - Do not claim Google Play, F-Droid, or any other distribution channel is legally cleared without reviewing its terms and the core's exact license.
 - Keep the core's license and copyright headers unchanged; document any local patches.
 
-This document records project precautions, not legal advice or a final license determination. Revisit it after selecting the exact upstream core revision.
+This document records project precautions, not legal advice or a final license determination. Revisit it before any public distribution; the core revision is pinned, but the legal/distribution review remains open.
 
 
 ## Snes9x 1.63 — avaliação preliminar (2026-10-18)
@@ -27,9 +27,9 @@ This document records project precautions, not legal advice or a final license d
 - Estado: **avaliação preliminar; não considerar autorização jurídica definitiva**.
 - Política de projeto proposta: sem monetização, anúncios ou cobrança; não publicar em loja comercial sem autorização/parecer jurídico específico.
 - GitHub Releases e F-Droid não são automaticamente considerados permitidos só por serem gratuitos ou de código aberto; avaliar o modelo de distribuição e os termos aplicáveis antes de publicar.
-- Fontes vendorizadas: nenhuma até a revisão da licença completa e definição do conjunto mínimo.
+- Código do núcleo: não é commitado neste repositório; o script de build obtém a revisão exata e verifica o hash e os avisos de licença antes de compilar.
 - Modificações: nenhuma.
-- Próximo passo: inventariar a árvore e os Makefiles da revisão confirmada; selecionar fontes comprovadamente necessárias, preservando cabeçalhos e o texto integral da licença em `LICENSES/snes9x.txt`.
+- Próximos passos: validar carregamento, vídeo, áudio, entrada e ciclo de vida em dispositivo físico; reavaliar a licença e o modelo de distribuição antes de qualquer publicação.
 
 Esta nota documenta cautela técnica do projeto, não constitui aconselhamento jurídico nem conclui que um canal de distribuição específico esteja liberado.
 
