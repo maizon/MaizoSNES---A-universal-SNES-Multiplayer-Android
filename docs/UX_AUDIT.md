@@ -11,7 +11,7 @@ A tela inicial continha o SurfaceView dentro de uma coluna rolável, controles a
 | Requisito | Estado no código | Verificação humana pendente / limite |
 | --- | --- | --- |
 | R1 Biblioteca in-app | Implementado no código: importa .sfc/.smc para filesDir/roms, lista, renomeia e abre. Picker usado apenas na importação inicial. | Testar duplicatas, arquivos grandes e renomeação em device. ZIP não é suportado. |
-| R2 Gameplay dedicado | Implementado no código: rota separada, landscape, superfície principal, pausa/menu/back para biblioteca. | Validar orientação e retorno das barras em versões Android distintas. |
+| R2 Gameplay dedicado | Implementado no código: rota separada, landscape, superfície principal, pausa/menu/back para biblioteca. | O Manifest declara orientation|screenSize|keyboardHidden para não recriar a Activity ao entrar em landscape; validar orientação e retorno das barras em versões Android distintas. |
 | R3 Aspect ratio | Implementado no código: escala inteira de referência 256×224, 4:3, 16:9, esticar e preencher/crop; aplica em runtime. | Modos Hi-Res e geometria variante requerem teste; não há renderer GPU especializado. |
 | R4 Menu do núcleo | Implementado no código: opções expostas pelo Snes9x 1.63 agrupadas em vídeo/áudio/núcleo; GET_VARIABLE e GET_VARIABLE_UPDATE conectados ao bridge JNI. | Confirmar cada efeito em gameplay. Algumas opções podem alterar geometria ou temporização. |
 | R5 Controles flutuantes | Implementado no código: D-pad, ABXY, L/R, Select/Start sobre o vídeo; alvos de toque independentes e semi-transparentes. | Testar multitouch e conforto em hardware. |

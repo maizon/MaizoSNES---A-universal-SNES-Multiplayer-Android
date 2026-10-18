@@ -294,6 +294,7 @@ class MainActivity : ComponentActivity() {
         userPaused = true
         paused.value = true
         activeScreen.value = AppScreen.LIBRARY
+        appSettings.value = readSettings("profile_global_")
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
