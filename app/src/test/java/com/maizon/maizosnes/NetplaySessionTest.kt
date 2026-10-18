@@ -280,4 +280,50 @@ class NetplaySessionTest {
             rom.delete()
         }
     }
+
+    @Test fun mismatchedCoreSettingsAdoptHostsAllowedOptionsBeforePlaying() {
+        val rom = File.createTempFile("maizosnes-options", ".sfc")
+        rom.writeBytes(ByteArray(512) { (it % 42).toByte() })
+        val port = availablePort()
+        val hostReady = CountDownLatch(1)
+        val joined = CountDownLatch(2)
+        val ended = CountDownLatch(2)
+        val adopted = java.util.concurrent.atomic.AtomicReference<Map<String, String>>()
+        val hostValues = mapOf("snes9x_region" to "ntsc")
+        val localValues = mapOf("snes9x_region" to "auto")
+        fun newPeer(isHost: Boolean) = NetplaySession(
+            rom = rom,
+            coreOptions = if (isHost) hostValues else localValues,
+            localInput = { 0 },
+            prepare = { },
+            saveState = { ByteArray(96) { 9 } },
+            loadState = { if (it.size == 96) 0 else -1 },
+            step = { _, _ -> 0 },
+            stateHash = { 12 },
+            framePeriodNs = { 16666667L },
+            onStatus = {
+                if (isHost && it.startsWith("Sala disponível")) hostReady.countDown()
+                if (it.startsWith("Conectado")) joined.countDown()
+            },
+            onFinish = { ended.countDown() },
+            applyHostCoreOptions = { options ->
+                adopted.set(options)
+                options == hostValues
+            }
+        )
+        val server = newPeer(true)
+        val client = newPeer(false)
+        try {
+            server.host(port)
+            assertTrue(hostReady.await(5, TimeUnit.SECONDS))
+            client.join("127.0.0.1", port)
+            assertTrue("Config sync should let both peers connect", joined.await(8, TimeUnit.SECONDS))
+            assertEquals(hostValues, adopted.get())
+        } finally {
+            server.stop()
+            client.stop()
+            assertTrue(ended.await(5, TimeUnit.SECONDS))
+            rom.delete()
+        }
+    }
 }
