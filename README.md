@@ -1,34 +1,44 @@
 # MaizoSNES
 
-**Android-first SNES emulator and multiplayer project.** The goal is a polished, lightweight interface, fast native emulation, GPU-assisted shaders/upscaling, and low-latency multiplayer over Wi-Fi and the internet.
+**Android-first SNES emulator project**, built around the pinned Snes9x 1.63 libretro core.
 
-> **Current status: foundation / prototype.** The Android UI and project structure are being established. The SNES core, ROM loading, rendering pipeline, and real netplay are not integrated yet; this repository must not be described as a working emulator until those parts are implemented and tested.
+> **Status: experimental integration.** The Android shell, native core build path, SAF ROM picker, SurfaceView video bridge, touch controls and PCM audio queue are being integrated. A green CI build only confirms compilation/package checks; a real game still requires device validation. Do not describe the app as fully tested until ROM loading, image, sound, input and lifecycle have been exercised on hardware.
 
-## Project goals
-- Native Android app with a modern, responsive interface.
-- Snes9x evaluation/integration, with ABI builds for **arm64-v8a** and **armeabi-v7a**.
-- OpenGL ES rendering, configurable aspect ratio and shader/filter pipeline.
-- Touch controls with customizable layout, plus Bluetooth/USB controller support.
-- Wi-Fi LAN sessions first, then internet netplay with deterministic input synchronization and rollback.
-- Performance HUD for FPS, frame time, input/network latency, and dropped frames.
-- No copyrighted game ROMs or BIOS files bundled.
+## Current technical direction
+
+- Upstream: [snes9xgit/snes9x](https://github.com/snes9xgit/snes9x), tag **1.63**, pinned commit `921f9f7b83660eb44ad263022a57a4a029057c37`.
+- The build script fetches the exact upstream revision at build time; third-party source code is not committed to this application repository.
+- CMake uses an explicit source list following upstream `libretro/Makefile.common`; the core is compiled with `__LIBRETRO__` and the required upstream include directories.
+- ROMs are selected through Android's Storage Access Framework. The app does not bundle or download games.
+- The initial native build targets `arm64-v8a`; `armeabi-v7a` has not been enabled yet.
+- Touch input and a native window output are part of the first integration slice. Multiplayer, save-state UI, configurable shaders and a formal performance HUD remain future work.
 
 ## Build
-Open this repository in a recent Android Studio version with Android SDK Platform 35 and JDK 17. The project uses Gradle Kotlin DSL and Jetpack Compose. A Gradle wrapper will be added once its binary wrapper files can be generated and verified.
 
-## Core and licensing gate
-Snes9x is available at https://github.com/snes9xgit/snes9x. Its published license contains non-commercial-use restrictions and specific conditions. Before distributing a build containing Snes9x or derivatives, review the complete license and obtain any permission needed for the intended distribution. The project will not silently bundle a core or claim redistribution rights that have not been established.
+Requirements: JDK 17, Android SDK Platform 35, NDK `26.3.11579264`, CMake `3.22.1`, and Git.
 
-## Milestones
-1. **Android foundation:** application shell, navigation, settings surfaces, build configuration.
-2. **Emulation vertical slice:** legally reviewed core integration, ROM picker, native bridge, audio/video output, save states.
-3. **Controls and graphics:** configurable touch layout, controller mapping, OpenGL ES shaders and scaling.
-4. **LAN netplay:** packet protocol, session discovery/connection, input synchronization, desync diagnostics.
-5. **Internet netplay:** rollback, NAT traversal/relay strategy, latency and packet-loss tests.
-6. **Release quality:** CI builds, ABI checks, compatibility matrix, license notices, crash/performance testing.
+From the repository root:
 
-## Reuse policy
-Other projects may be used as references or sources only after reviewing their license and preserving required notices. Do not copy assets, code, or layouts with incompatible licenses. Game ROMs remain the user's responsibility; the app will not download ROMs from third-party sites.
+```bash
+bash scripts/fetch_snes9x.sh
+./gradlew --no-daemon assembleDebug
+```
 
-## License
-The application code's license will be finalized after the core integration and dependency/license audit. This does **not** relicense third-party components.
+The script verifies the source commit and compares the upstream Snes9x and NTSC-filter licenses with the notices retained under `LICENSES/`. The source checkout and generated Android license assets are ignored by Git and are not meant to be committed. GitHub Actions runs the same preparation step before compiling.
+
+## Licensing and distribution restrictions
+
+The Snes9x license grants rights for **non-commercial purposes** and states that commercial rights are not granted. The NTSC filter has its own license. See `LICENSE_DECISION.md`, `THIRD_PARTY_NOTICES.md`, and `LICENSES/`. Do not monetize or publish an APK until the intended distribution has been reviewed against all applicable license conditions. This README is not legal advice.
+
+## Roadmap
+
+1. Validate the first core-linked Android build and fix any compile/link issues.
+2. Test loading known-good `.sfc` / `.smc` files, video, audio, touch input, rotation and lifecycle on devices.
+3. Add save-state/restore UI, controller mapping, aspect-ratio settings and frame-time diagnostics.
+4. Implement LAN multiplayer only after deterministic input and state behavior are tested.
+5. Consider internet netplay and rollback after LAN synchronization is reliable.
+6. Revisit ARMv7 support, compatibility matrix, package contents and licensing before release.
+
+## ROM policy
+
+No ROMs, BIOS files or copyrighted game assets are included. Users must select game files they are legally entitled to use. ZIP archives are not accepted by the initial raw-ROM path.

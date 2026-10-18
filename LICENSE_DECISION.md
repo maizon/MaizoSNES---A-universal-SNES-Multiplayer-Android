@@ -1,10 +1,10 @@
 # License decision log
 
-Status: **upstream revision verified; license/distribution review remains open; no Snes9x code is vendored or linked yet**.
+Status: **upstream revision verified; technical integration is being attempted for non-commercial development; distribution/legal review remains open**.
 
 This project must not assume that being free of charge or omitting ROM files automatically resolves every licensing question. Before integrating or redistributing a Snes9x version, record the exact upstream repository/tag/commit, preserve its original source headers and copyright notices, include the complete applicable license text in `LICENSES/snes9x.txt`, and review the conditions with qualified counsel if distribution terms remain unclear.
 
-Decision deadline: select and record the exact upstream Snes9x tag/commit and review its applicable license **before Phase 2 is marked complete and before any core source is copied or linked**. Until that decision is recorded, core integration is blocked.
+The upstream revision is now selected and pinned. Technical CI integration may proceed using the upstream non-commercial license terms, while public APK distribution, monetization, stores, or other release claims remain blocked pending review of the complete license and the intended distribution model. This is a project safeguard, not legal advice.
 
 Planned safeguards:
 - No bundled commercial ROMs, BIOS files, game assets, or copyrighted game data.
@@ -32,3 +32,11 @@ This document records project precautions, not legal advice or a final license d
 - Próximo passo: inventariar a árvore e os Makefiles da revisão confirmada; selecionar fontes comprovadamente necessárias, preservando cabeçalhos e o texto integral da licença em `LICENSES/snes9x.txt`.
 
 Esta nota documenta cautela técnica do projeto, não constitui aconselhamento jurídico nem conclui que um canal de distribuição específico esteja liberado.
+
+
+## Technical integration update (2026-10-18)
+
+- The build fetches tag `1.63` and rejects it unless the resulting commit equals `921f9f7b83660eb44ad263022a57a4a029057c37`.
+- The native target follows the upstream libretro source list, including `filter/snes_ntsc.c`, and uses the libretro frontend API rather than reimplementing every core platform callback.
+- `LICENSES/snes9x.txt` and `LICENSES/snes_ntsc-license.txt` are checked against the fetched upstream license files before compilation. Copies are generated into Android assets for the APK.
+- This is not a final legal determination. Do not publish/monetize builds until the planned distribution model is reviewed.

@@ -1,6 +1,25 @@
 package com.maizon.maizosnes
 
 import android.os.Bundle
+
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -62,12 +81,109 @@ private val Mint = Color(0xFF6EF0C2)
 private val Muted = Color(0xFF9AA6BE)
 
 class MainActivity : ComponentActivity() {
+    private val statusMessage = mutableStateOf("Preparando o núcleo Snes9x...")
+    private val pressedInputs = AtomicInteger(0)
+    private var audioOutput: AudioOutput? = null
+
+    private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) loadRom(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(9, 13, 24)
         window.navigationBarColor = android.graphics.Color.rgb(9, 13, 24)
-        val nativeInitResult = runCatching { NativeBridge.nativeInit() }.getOrElse { -999 }
-        setContent { MaizoTheme { MaizoApp(nativeInitResult) } }
+
+        val initResult = runCatching { NativeBridge.nativeInit(filesDir.absolutePath) }.getOrElse {
+            statusMessage.value = "Falha ao iniciar Snes9x: ${it.message ?: "erro JNI"}"
+            -999
+        }
+        if (initResult == 0) {
+            statusMessage.value = "Snes9x 1.63 inicializado. Abra uma ROM própria (.smc/.sfc)."
+            audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate())
+        } else if (statusMessage.value.startsWith("Preparando")) {
+            statusMessage.value = "Falha na inicialização do núcleo: $initResult"
+        }
+
+        setContent {
+            MaizoTheme {
+                MaizoApp(
+                    statusMessage = statusMessage.value,
+                    onOpenRom = { openRomLauncher.launch(arrayOf("*/*")) },
+                    onSurfaceChanged = { NativeBridge.nativeSetSurface(it) },
+                    onInputChanged = ::updateInput
+                )
+            }
+        }
+    }
+
+    private fun updateInput(bit: Int, pressed: Boolean) {
+        if (bit !in 0..15) return
+        val mask = 1 shl bit
+        var previous: Int
+        var next: Int
+        do {
+            previous = pressedInputs.get()
+            next = if (pressed) previous or mask else previous and mask.inv()
+        } while (!pressedInputs.compareAndSet(previous, next))
+        runCatching { NativeBridge.nativeSetInput(next) }
+    }
+
+    private fun loadRom(uri: Uri) {
+        lifecycleScope.launch {
+            statusMessage.value = "Lendo arquivo de ROM..."
+            try {
+                val (bytes, name) = withContext(Dispatchers.IO) { readRom(uri) }
+                val result = withContext(Dispatchers.Default) {
+                    NativeBridge.nativeLoadRom(bytes, name)
+                }
+                if (result == 0) {
+                    audioOutput?.start()
+                    statusMessage.value = "ROM carregada: $name"
+                } else {
+                    statusMessage.value = "O núcleo recusou a ROM ($result). Use uma ROM SNES válida, sem ZIP."
+                }
+            } catch (error: Exception) {
+                statusMessage.value = "Não foi possível abrir a ROM: ${error.message ?: "erro de leitura"}"
+            }
+        }
+    }
+
+    private fun readRom(uri: Uri): Pair<ByteArray, String> {
+        val name = contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && column >= 0) cursor.getString(column) else null
+        }?.substringAfterLast('/')?.take(128)?.takeIf { it.isNotBlank() } ?: "game.sfc"
+
+        val bytes = contentResolver.openInputStream(uri)?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                require(total <= 64 * 1024 * 1024) { "arquivo maior que 64 MiB" }
+                output.write(buffer, 0, count)
+            }
+            output.toByteArray()
+        } ?: throw IllegalStateException("o Android não conseguiu abrir o arquivo escolhido")
+
+        require(bytes.isNotEmpty()) { "arquivo vazio" }
+        return bytes to name
+    }
+
+    override fun onDestroy() {
+        audioOutput?.stop()
+        audioOutput = null
+        runCatching { NativeBridge.nativeShutdown() }
+        super.onDestroy()
     }
 }
 
@@ -87,9 +203,14 @@ private fun MaizoTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun MaizoApp(nativeInitResult: Int) {
+private fun MaizoApp(
+    statusMessage: String,
+    onOpenRom: () -> Unit,
+    onSurfaceChanged: (Surface?) -> Unit,
+    onInputChanged: (Int, Boolean) -> Unit
+) {
     var tab by remember { mutableIntStateOf(0) }
-    var notice by remember { mutableStateOf(if (nativeInitResult == 0) "JNI retornou 0" else "Falha na inicialização JNI: $nativeInitResult") }
+    var notice by remember(statusMessage) { mutableStateOf(statusMessage) }
     Scaffold(
         containerColor = Ink,
         contentWindowInsets = WindowInsets(0),
@@ -108,10 +229,12 @@ private fun MaizoApp(nativeInitResult: Int) {
             item { Spacer(Modifier.height(10.dp)); Header() }
             when (tab) {
                 0 -> {
-                    item { HeroCard(onOpen = { notice = "O carregador de ROM será conectado na próxima etapa." }) }
+                    item { HeroCard(onOpen = { onOpenRom(); notice = "Selecione uma ROM SNES no armazenamento do aparelho." }) }
+                    item { EmulatorSurface(onSurfaceChanged) }
+                    item { VirtualController(onInputChanged) }
                     item { SectionTitle("CENTRAL DE JOGO", "Seu SNES, do seu jeito") }
-                    item { FeatureCard(Icons.Default.Bolt, "Desempenho primeiro", "Base nativa ARM64/ARMv7 e foco em frame pacing estável.", Mint) }
-                    item { FeatureCard(Icons.Default.Groups, "Jogue junto", "A sala local e o netplay serão ativados após a integração do núcleo.", Violet) }
+                    item { FeatureCard(Icons.Default.Bolt, "Desempenho primeiro", "Núcleo nativo ARM64, com foco em frame pacing estável.", Mint) }
+                    item { FeatureCard(Icons.Default.Groups, "Jogue junto", "A sala local e o netplay ainda estão em desenvolvimento.", Violet) }
                     item { StatusBanner(notice) }
                 }
                 1 -> {
@@ -131,6 +254,91 @@ private fun MaizoApp(nativeInitResult: Int) {
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
+    }
+}
+
+
+@Composable
+private fun EmulatorSurface(onSurfaceChanged: (Surface?) -> Unit) {
+    AndroidView(
+        modifier = Modifier.fillMaxWidth().height(250.dp),
+        factory = { context ->
+            SurfaceView(context).apply {
+                holder.addCallback(object : SurfaceHolder.Callback {
+                    override fun surfaceCreated(holder: SurfaceHolder) {
+                        onSurfaceChanged(holder.surface)
+                    }
+
+                    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                        onSurfaceChanged(holder.surface)
+                    }
+
+                    override fun surfaceDestroyed(holder: SurfaceHolder) {
+                        onSurfaceChanged(null)
+                    }
+                })
+            }
+        }
+    )
+}
+
+@Composable
+private fun VirtualController(onInputChanged: (Int, Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ControllerButton("↑", 4, onInputChanged)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ControllerButton("←", 6, onInputChanged)
+                ControllerButton("↓", 5, onInputChanged)
+                ControllerButton("→", 7, onInputChanged)
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                ControllerButton("Y", 1, onInputChanged)
+                ControllerButton("X", 9, onInputChanged)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                ControllerButton("B", 0, onInputChanged)
+                ControllerButton("A", 8, onInputChanged)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                ControllerButton("SEL", 2, onInputChanged)
+                ControllerButton("START", 3, onInputChanged, width = 66)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControllerButton(
+    label: String,
+    bit: Int,
+    onInputChanged: (Int, Boolean) -> Unit,
+    width: Int = 52
+) {
+    Box(
+        modifier = Modifier
+            .size(width = width.dp, height = 48.dp)
+            .background(Color(0xFF252C43), RoundedCornerShape(14.dp))
+            .pointerInput(bit) {
+                awaitEachGesture {
+                    awaitFirstDown()
+                    onInputChanged(bit, true)
+                    try {
+                        waitForUpOrCancellation()
+                    } finally {
+                        onInputChanged(bit, false)
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = Color.White, fontSize = if (label.length > 3) 9.sp else 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 
