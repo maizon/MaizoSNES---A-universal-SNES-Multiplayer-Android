@@ -604,7 +604,10 @@ Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStateHash(JNIEnv*, jobject) 
     if (!g_gameLoaded.load(std::memory_order_acquire)) return 0;
     const size_t size = retro_serialize_size();
     if (size == 0 || size > kMaxStateBytes) return 0;
-    std::vector<uint8_t> bytes(size);
+    // Reuse one buffer per netplay thread instead of reallocating it at
+    // every periodic deterministic-state verification.
+    thread_local std::vector<uint8_t> bytes;
+    bytes.resize(size);
     if (!retro_serialize(bytes.data(), bytes.size())) return 0;
     return static_cast<jlong>(fingerprintBytes(bytes.data(), bytes.size()));
 }
