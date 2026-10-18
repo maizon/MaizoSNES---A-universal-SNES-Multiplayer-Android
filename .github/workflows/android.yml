@@ -92,6 +92,8 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
           unzip -l "$APK" | tee /tmp/apk-contents.txt
           grep -Eq 'lib/arm64-v8a/libnative-lib\.so$' /tmp/apk-contents.txt
+          grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
+          grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
           if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
             exit 1

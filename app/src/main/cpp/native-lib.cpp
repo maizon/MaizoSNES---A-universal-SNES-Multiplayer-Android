@@ -37,6 +37,7 @@ ANativeWindow* g_window = nullptr;
 int g_surfaceWidth = 0;
 int g_surfaceHeight = 0;
 std::thread g_frameThread;
+std::atomic<int64_t> g_frameDurationNs{16683333};
 
 void logMessage(int priority, const char* format, ...) {
     va_list args;
@@ -218,7 +219,8 @@ void startFrameThread() {
     g_runFrames.store(true, std::memory_order_release);
     g_frameThread = std::thread([] {
         using clock = std::chrono::steady_clock;
-        constexpr auto frameDuration = std::chrono::microseconds(16667);
+        const auto frameDuration = std::chrono::nanoseconds(
+            g_frameDurationNs.load(std::memory_order_acquire));
         while (g_runFrames.load(std::memory_order_acquire)) {
             const auto frameStart = clock::now();
             {
@@ -299,7 +301,19 @@ Java_com_maizon_maizosnes_NativeBridge_nativeLoadRom(
     const uint64_t currentWrite = g_audioWrite.load(std::memory_order_acquire);
     g_audioRead.store(currentWrite, std::memory_order_release);
     if (loaded) {
-        logMessage(ANDROID_LOG_INFO, "ROM loaded: %s (%d bytes)", g_romName.c_str(), length);
+        // Respect the core's reported region timing (NTSC/PAL) instead of forcing 60 Hz.
+        retro_system_av_info avInfo{};
+        retro_get_system_av_info(&avInfo);
+        const double fps = avInfo.timing.fps;
+        if (fps >= 20.0 && fps <= 75.0) {
+            g_frameDurationNs.store(
+                static_cast<int64_t>(1000000000.0 / fps),
+                std::memory_order_release);
+        } else {
+            g_frameDurationNs.store(16683333, std::memory_order_release);
+        }
+        logMessage(ANDROID_LOG_INFO, "ROM loaded: %s (%d bytes), core FPS %.3f",
+                   g_romName.c_str(), length, fps);
         startFrameThread();
         return 0;
     }

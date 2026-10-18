@@ -138,6 +138,9 @@ class MainActivity : ComponentActivity() {
                     NativeBridge.nativeLoadRom(bytes, name)
                 }
                 if (result == 0) {
+                    // Recreate the output using the rate reported after this ROM was loaded.
+                    audioOutput?.stop()
+                    audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate())
                     audioOutput?.start()
                     statusMessage.value = "ROM carregada: $name"
                 } else {
