@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
                         if (hasLoadedRom) loadStateLauncher.launch(arrayOf("*/*"))
                         else statusMessage.value = "Carregue a ROM correspondente antes de restaurar um estado."
                     },
+                    onResetGame = ::resetGame,
                     onSurfaceChanged = ::updateEmulatorSurface,
                     onInputChanged = ::updateInput
                 )
@@ -264,6 +265,29 @@ class MainActivity : ComponentActivity() {
 
         require(bytes.isNotEmpty()) { "arquivo vazio" }
         return bytes to name
+    }
+
+    private fun resetGame() {
+        if (!hasLoadedRom) {
+            statusMessage.value = "Carregue uma ROM antes de reiniciar o jogo."
+            return
+        }
+        lifecycleScope.launch {
+            statusMessage.value = "Reiniciando jogo..."
+            audioOutput?.stop()
+            try {
+                val result = withContext(Dispatchers.Default) { NativeBridge.nativeResetGame() }
+                syncPlaybackState()
+                statusMessage.value = if (result == 0) {
+                    "Jogo reiniciado. O progresso não salvo foi perdido."
+                } else {
+                    "Falha ao reiniciar o jogo ($result)."
+                }
+            } catch (error: Exception) {
+                syncPlaybackState()
+                statusMessage.value = "Falha ao reiniciar: ${error.message ?: "erro desconhecido"}"
+            }
+        }
     }
 
     private fun saveState(uri: Uri) {
@@ -398,12 +422,14 @@ private fun MaizoApp(
     onOpenRom: () -> Unit,
     onSaveState: () -> Unit,
     onLoadState: () -> Unit,
+    onResetGame: () -> Unit,
     onSurfaceChanged: (Surface?) -> Unit,
     onInputChanged: (Int, Boolean) -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var notice by remember(statusMessage) { mutableStateOf(statusMessage) }
     var showLicenses by remember { mutableStateOf(false) }
+    var showResetConfirmation by remember { mutableStateOf(false) }
     Scaffold(
         containerColor = Ink,
         contentWindowInsets = WindowInsets(0),
@@ -426,6 +452,13 @@ private fun MaizoApp(
                     item { EmulatorSurface(onSurfaceChanged) }
                     item { VirtualController(onInputChanged) }
                     item { SaveStateActions(onSaveState, onLoadState) }
+                    item {
+                        ActionCard(
+                            "Reiniciar jogo",
+                            "Volte ao início da ROM atual. O progresso não salvo será perdido.",
+                            "REINICIAR"
+                        ) { showResetConfirmation = true }
+                    }
                     item { SectionTitle("CENTRAL DE JOGO", "Seu SNES, do seu jeito") }
                     item { FeatureCard(Icons.Default.Bolt, "Desempenho primeiro", "Núcleo nativo ARM64, com foco em frame pacing estável.", Mint) }
                     item { FeatureCard(Icons.Default.Groups, "Jogue junto", "A sala local e o netplay ainda estão em desenvolvimento.", Violet) }
@@ -449,6 +482,22 @@ private fun MaizoApp(
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
+    }
+    if (showResetConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirmation = false },
+            title = { Text("Reiniciar o jogo?") },
+            text = { Text("O jogo voltará ao estado inicial. Qualquer progresso ainda não salvo será perdido.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetConfirmation = false
+                    onResetGame()
+                }) { Text("REINICIAR") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirmation = false }) { Text("CANCELAR") }
+            }
+        )
     }
     if (showLicenses) {
         AlertDialog(

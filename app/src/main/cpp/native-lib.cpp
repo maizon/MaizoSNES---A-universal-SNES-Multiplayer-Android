@@ -420,6 +420,22 @@ Java_com_maizon_maizosnes_NativeBridge_nativeGetAudioSampleRate(JNIEnv*, jobject
 
 
 
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeResetGame(JNIEnv*, jobject) {
+    if (!g_initialized.load(std::memory_order_acquire)) return -1;
+
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire)) return -2;
+
+    retro_reset();
+    // Kotlin stops the audio consumer before calling reset, so dropping old queued audio is safe.
+    const uint64_t latestWrite = g_audioWrite.load(std::memory_order_acquire);
+    g_audioRead.store(latestWrite, std::memory_order_release);
+    logMessage(ANDROID_LOG_INFO, "Game reset requested");
+    return 0;
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSerializeState(JNIEnv* env, jobject) {
     std::vector<uint8_t> stateBytes;

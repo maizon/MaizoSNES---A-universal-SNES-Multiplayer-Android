@@ -15,6 +15,7 @@ object NativeBridge {
     /** Copies interleaved stereo PCM16 values into [buffer]. Returns the number of values written. */
     external fun nativeReadAudio(buffer: ShortArray): Int
     external fun nativeGetAudioSampleRate(): Int
+    external fun nativeResetGame(): Int
     external fun nativeSerializeState(): ByteArray?
     external fun nativeUnserializeState(state: ByteArray): Int
     external fun nativeShutdown()
