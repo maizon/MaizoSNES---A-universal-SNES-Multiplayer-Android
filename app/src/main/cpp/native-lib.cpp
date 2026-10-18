@@ -139,7 +139,7 @@ void RETRO_CALLCONV inputPoll() {}
 
 int16_t RETRO_CALLCONV inputState(unsigned port, unsigned device, unsigned index, unsigned id) {
     if (port != 0 || index != 0 || device != RETRO_DEVICE_JOYPAD ||
-        id >= RETRO_DEVICE_ID_JOYPAD_LAST) {
+        id > RETRO_DEVICE_ID_JOYPAD_R3) {
         return 0;
     }
     return (g_inputMask.load(std::memory_order_relaxed) & (1u << id)) ? 1 : 0;
