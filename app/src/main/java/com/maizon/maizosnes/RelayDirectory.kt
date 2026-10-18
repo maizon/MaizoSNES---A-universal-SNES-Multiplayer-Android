@@ -45,6 +45,18 @@ internal object RelayDirectory {
         return URL("${parsed.scheme}://$authority/api/rooms")
     }
 
+    /** The public TCP proxy may be on a different hostname than the HTTPS API.
+     * Reject URL, path, user-info and port injection in relayHost metadata.
+     */
+    internal fun validateRelayHost(directoryHost: String, advertisedHost: String): String {
+        val host = advertisedHost.trim()
+        if (host.isBlank()) return directoryHost
+        require(host.length <= 253 && host.matches(Regex("[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]"))) {
+            "Endereço TCP anunciado pelo servidor é inválido."
+        }
+        return host
+    }
+
     fun list(address: String): RelayListing {
         val url = endpoint(address)
         val parsed = URI(url.toExternalForm())
@@ -89,6 +101,7 @@ internal object RelayDirectory {
                 romHash.takeIf { it.matches(Regex("[a-f0-9]{16}")) } ?: "",
                 item.optBoolean("cheats", false)))
         }
-        return RelayListing(parsed.host, port, rooms)
+        val relayHost = validateRelayHost(parsed.host, json.optString("relayHost", ""))
+        return RelayListing(relayHost, port, rooms)
     }
 }
