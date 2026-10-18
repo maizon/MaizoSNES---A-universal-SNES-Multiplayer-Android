@@ -35,5 +35,14 @@ class CheatAndDiscoveryTest {
         assertEquals("192.168.1.10", room?.host)
         assertEquals(55435, room?.port)
         assertEquals("Test Homebrew", room?.game)
+        assertEquals("", room?.romHash)
+        assertFalse(room?.cheats ?: true)
+        val newer = LanDiscovery.parseOffer(
+            "MZOFFER2|55435|Test Homebrew|0123456789abcdef|1", "192.168.1.10")
+        assertEquals("0123456789abcdef", newer?.romHash)
+        assertTrue(newer?.cheats ?: false)
+        val incompatible = LanDiscovery.parseOffer(
+            "MZOFFER2|55435|Test Homebrew|not-a-checksum|0", "192.168.1.10")
+        assertEquals("", incompatible?.romHash)
     }
 }

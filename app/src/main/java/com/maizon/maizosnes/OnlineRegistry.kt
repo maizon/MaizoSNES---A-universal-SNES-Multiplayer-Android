@@ -152,6 +152,12 @@ internal object OnlineRegistry {
                 runCatching {
                     val start = System.nanoTime()
                     val listing = RelayDirectory.list(server.endpoint)
+                    // The directory can be up while its TCP game relay is
+                    // blocked by a firewall/CDN. Probe the actual game port.
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress(
+                            listing.serverHost, listing.relayPort), 1800)
+                    }
                     val elapsed = ((System.nanoTime() - start) / 1_000_000L)
                         .coerceIn(1L, 120000L)
                     val rooms = listing.rooms.map { room ->

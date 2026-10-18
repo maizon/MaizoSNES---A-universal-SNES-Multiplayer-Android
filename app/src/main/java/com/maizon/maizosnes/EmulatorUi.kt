@@ -204,6 +204,7 @@ internal fun MaizoEmulatorApp(
     autoScanActive: Boolean,
     onRefreshAutoRooms: () -> Unit,
     onHostAutomatic: () -> Unit,
+    onQuickMatch: () -> Unit,
     onJoinAutomatic: (AutoRoom) -> Unit,
     onlineCheatsOptIn: Boolean,
     onOnlineCheatsChanged: (Boolean) -> Unit,
@@ -315,7 +316,7 @@ internal fun MaizoEmulatorApp(
                 onRelayAddressChanged, onRefreshRelayRooms,
                 onHostRelay, onJoinRelay,
                 autoRooms, autoServers, autoStatus, autoScanActive,
-                onRefreshAutoRooms, onHostAutomatic, onJoinAutomatic,
+                onRefreshAutoRooms, onHostAutomatic, onQuickMatch, onJoinAutomatic,
                 onlineCheatsOptIn, onOnlineCheatsChanged,
                 shareRomAllowed, receiveRomAllowed,
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
@@ -592,6 +593,7 @@ private fun MultiplayerScreen(
     autoScanActive: Boolean,
     onRefreshAutoRooms: () -> Unit,
     onHostAutomatic: () -> Unit,
+    onQuickMatch: () -> Unit,
     onJoinAutomatic: (AutoRoom) -> Unit,
     onlineCheatsOptIn: Boolean,
     onOnlineCheatsChanged: (Boolean) -> Unit,
@@ -691,6 +693,16 @@ private fun MultiplayerScreen(
                 Text("Lista automática dos servidores oficiais MaizoSNES cadastrados. " +
                     "Sem IP, URLs ou configurações para o jogador.", color = Muted,
                     fontSize = 12.sp, lineHeight = 17.sp)
+                Button(onClick = onQuickMatch,
+                    enabled = ready && !active,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Mint)) {
+                    Text("JOGO RÁPIDO • ENTRAR OU CRIAR", color = Color(0xFF111827),
+                        fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                }
+                Text("Prioriza salas LAN com o mesmo título, depois salas online " +
+                    "com ROM compatível. Se não houver adversários, cria uma sala.",
+                    color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = {
@@ -800,21 +812,39 @@ private fun MultiplayerScreen(
                     Text("A busca começa automaticamente. Se o Wi-Fi bloquear descoberta, use IP/porta abaixo.",
                         color = Muted, fontSize = 11.sp)
                 } else lanRooms.forEach { room ->
+                    val hashCompatible = room.romHash.isBlank() ||
+                        localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
+                    val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                     Card(
                         colors = CardDefaults.cardColors(containerColor = PanelRaised),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().clickable(enabled = !active) {
+                        modifier = Modifier.fillMaxWidth().clickable(
+                            enabled = !active && (ready || receiveRomAllowed) &&
+                                hashCompatible && cheatsAllowed
+                        ) {
                             remoteHost = room.host
                             portText = room.port.toString()
-                            if (ready || receiveRomAllowed) onJoin(room.host, room.port)
+                            onJoin(room.host, room.port)
                         }
                     ) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("${room.host}:${room.port}", color = Muted, fontSize = 11.sp)
+                                if (connectionMode == NetworkMode.AUTO)
+                                    Text("Conexão local • Wi-Fi / LAN", color = Muted, fontSize = 11.sp)
+                                else Text("${room.host}:${room.port}", color = Muted, fontSize = 11.sp)
+                                Text(when {
+                                    !hashCompatible -> "ROM/MOD DIFERENTE"
+                                    !cheatsAllowed -> "CHEATS — autorize nas configurações"
+                                    room.cheats -> "CHEATS SINCRONIZADOS"
+                                    room.romHash.isNotBlank() -> "ROM COMPATÍVEL POR SHA-256"
+                                    else -> "Compatibilidade conferida ao entrar"
+                                }, color = if (hashCompatible && cheatsAllowed) Mint
+                                    else Color(0xFFFFBD85), fontSize = 10.sp)
                             }
-                            Text("ENTRAR ›", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("ENTRAR ›", color = Mint, fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold)
                         }
                     }
                 }

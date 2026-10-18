@@ -204,6 +204,7 @@ class MainActivity : ComponentActivity() {
                     autoScanActive = autoScanActive.value,
                     onRefreshAutoRooms = ::refreshAutoRooms,
                     onHostAutomatic = ::hostAutomatic,
+                    onQuickMatch = ::quickMatch,
                     onJoinAutomatic = ::joinAutomatic,
                     onlineCheatsOptIn = onlineCheatsOptIn.value,
                     onOnlineCheatsChanged = ::setOnlineCheatsOptIn,
@@ -951,6 +952,49 @@ class MainActivity : ComponentActivity() {
             } finally {
                 autoScanActive.value = false
             }
+        }
+    }
+
+    /** One-tap matchmaking: prefer nearby LAN, then compatible online room,
+     * then host online, finally open an offline LAN room. No IP input.
+     */
+    private fun quickMatch() {
+        if (netplaySession != null) return
+        val rom = currentRomFile.value
+        if (!hasLoadedRom || rom == null) {
+            autoNetworkStatus.value = "Abra primeiro o jogo para buscar adversários."
+            return
+        }
+        val currentTitle = rom.nameWithoutExtension
+            .lowercase().replace(Regex("[^a-z0-9]"), "")
+        val lanCandidate = availableLanRooms.value.firstOrNull { room ->
+            val sameHash = room.romHash.isNotBlank() &&
+                room.romHash == currentRomHashPrefix.value
+            val title = room.game.lowercase().replace(Regex("[^a-z0-9]"), "")
+            val sameLegacyTitle = room.romHash.isBlank() &&
+                title.isNotBlank() && title == currentTitle
+            (sameHash || sameLegacyTitle) &&
+                (!room.cheats || onlineCheatsOptIn.value)
+        }
+        if (lanCandidate != null) {
+            lanStatus.value = "Tentando conexão LAN automática…"
+            startNetplay(lanCandidate.host, lanCandidate.port)
+            return
+        }
+        val compatibleRoom = autoRooms.value.firstOrNull { room ->
+            (room.romHash.isBlank() || room.romHash == currentRomHashPrefix.value) &&
+                (!room.cheats || onlineCheatsOptIn.value)
+        }
+        if (compatibleRoom != null) {
+            joinAutomatic(compatibleRoom)
+            return
+        }
+        if (autoServers.value.isNotEmpty()) {
+            hostAutomatic()
+        } else {
+            lanStatus.value = "Nenhum servidor público disponível. " +
+                "Abrindo sala na sua rede Wi-Fi…"
+            startNetplay(null, 55435)
         }
     }
 

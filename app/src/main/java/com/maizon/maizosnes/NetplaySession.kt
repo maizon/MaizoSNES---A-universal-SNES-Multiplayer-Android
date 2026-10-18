@@ -76,7 +76,11 @@ internal class NetplaySession(
         ServerSocket(port).use { listener ->
             server = listener
             listener.soTimeout = 60000
-            announcement = LanDiscovery.announce(port, rom.nameWithoutExtension)
+            val romHash = romDigest(rom).take(8).joinToString("") {
+                "%02x".format(it)
+            }
+            announcement = LanDiscovery.announce(port, rom.nameWithoutExtension,
+                romHash, allowOnlineCheats && hostCheatCodes.isNotEmpty())
             onStatus("Sala disponível na rede local (TCP $port). Aguardando P2…")
             listener.accept().use { connection ->
                 announcement?.close()

@@ -4,6 +4,8 @@ Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.6
 
 ## Atualização 0.7 Preview — Auto Lobby + cheats online sincronizados
 
+- LAN automática identifica prefixo SHA-256 e uso de cheats, além do título; evita entrar em salas com mods diferentes. IP/porta aparecem apenas nos modos avançados.
+- **Jogo Rápido**: botão de 1 toque tenta conexão LAN do mesmo jogo, sala online compatível e, sem outras salas, cria uma automaticamente; sem servidor publicado, cria sala LAN.
 - Modo **Automático (recomendado)** reúne salas LAN e servidores oficiais cadastrados pelo próprio MaizoSNES. Nenhum IP/URL é solicitado ao jogador comum. O catálogo `server/registry.json` começa vazio até operadores autorizados realmente implantarem instâncias. Listas de terceiros não são servidores compatíveis automaticamente.
 - Pesquisa simultânea em relays HTTPS autorizados (até 8 endpoints), lista salas por região, mostra tempo de resposta HTTP, hash parcial da ROM e aviso de cheats; pré-verificação de compatibilidade por SHA-256 da ROM antes de entrar. A versão MZNP v3 ainda valida o SHA-256 **completo**.
 - **Cheats online opcionais, sincronizados ANTES do primeiro quadro**: o host seleciona os códigos na biblioteca; ambos precisam autorizar nas opções multiplayer. Os dois núcleos aplicam a mesma lista validada ou encerram a conexão antes de jogar. Mudança de cheats durante a partida permanece bloqueada.

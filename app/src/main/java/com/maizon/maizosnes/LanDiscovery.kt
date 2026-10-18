@@ -10,7 +10,13 @@ import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal data class LanRoom(val host: String, val port: Int, val game: String)
+internal data class LanRoom(
+    val host: String,
+    val port: Int,
+    val game: String,
+    val romHash: String = "",
+    val cheats: Boolean = false
+)
 
 /**
  * Local-only UDP broadcast discovery. It neither uses the internet nor requires
@@ -30,7 +36,8 @@ internal object LanDiscovery {
         }
     }
 
-    fun announce(tcpPort: Int, gameName: String): Announcement? {
+    fun announce(tcpPort: Int, gameName: String,
+        romHash: String = "", cheats: Boolean = false): Announcement? {
         if (tcpPort !in 1024..65535) return null
         val socket = try {
             DatagramSocket(UDP_PORT).apply {
@@ -42,6 +49,8 @@ internal object LanDiscovery {
         }
         val announcement = Announcement(socket)
         val display = gameName.replace(Regex("[^\\p{L}\\p{N} ._()-]"), "_").take(76)
+        val safeHash = romHash.lowercase().takeIf { it.matches(Regex("[a-f0-9]{16}")) }
+            ?: ""
         Thread({
             val buffer = ByteArray(MAX_PACKET)
             try {
@@ -51,8 +60,10 @@ internal object LanDiscovery {
                         socket.receive(packet)
                         val message = String(packet.data, packet.offset, packet.length, Charsets.US_ASCII)
                         if (message != PROBE || !packet.address.isSiteLocalAddress) continue
-                        val response = "$OFFER$tcpPort|$display".toByteArray(Charsets.UTF_8)
-                        socket.send(DatagramPacket(response, response.size, packet.address, packet.port))
+                        val response = "$OFFER$tcpPort|$display|$safeHash|" +
+                            (if (cheats) "1" else "0")
+                        val encoded = response.toByteArray(Charsets.UTF_8)
+                        socket.send(DatagramPacket(encoded, encoded.size, packet.address, packet.port))
                     } catch (_: SocketTimeoutException) {
                         // Poll once per second to allow fast graceful close.
                     }
@@ -70,13 +81,15 @@ internal object LanDiscovery {
 
     internal fun parseOffer(message: String, address: String): LanRoom? {
         if (!message.startsWith(OFFER)) return null
-        val fields = message.removePrefix(OFFER).split('|', limit = 2)
-        if (fields.size != 2) return null
+        val fields = message.removePrefix(OFFER).split('|', limit = 4)
+        if (fields.size !in 2..4) return null
         val port = fields[0].toIntOrNull() ?: return null
         if (port !in 1024..65535) return null
         val game = fields[1].take(76).trim()
         if (game.isBlank()) return null
-        return LanRoom(address, port, game)
+        val hash = fields.getOrNull(2).orEmpty().lowercase()
+            .takeIf { it.matches(Regex("[a-f0-9]{16}")) } ?: ""
+        return LanRoom(address, port, game, hash, fields.getOrNull(3) == "1")
     }
 
     fun scan(timeoutMillis: Long = 1750): List<LanRoom> {
