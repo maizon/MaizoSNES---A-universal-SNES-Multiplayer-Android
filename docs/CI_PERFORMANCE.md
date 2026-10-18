@@ -16,6 +16,12 @@ Last updated: 2026-10-18. Times are from GitHub Actions job/step timestamps (UTC
 | --- | --- | --- | --- |
 | [39147670614](https://github.com/maizon/MaizoSNES---A-universal-SNES-Multiplayer-Android/actions/runs/39147670614) | `b3710ca6` | Failed before a job started | The automated workflow edit split the native-runtime grep block and duplicated the upload section, causing the YAML workflow to be invalid. No runner job or APK was created. The next commit rewrites the workflow file as a complete known-good block and will be checked in CI. |
 
+### Follow-up workflow correction
+
+
+| [39147743992](https://github.com/maizon/MaizoSNES---A-universal-SNES-Multiplayer-Android/actions/runs/39147743992) | `20519aaf` | Failed at `Locate Android SDK tools` | Workflow generation incorrectly inserted a literal backslash before the `${ANDROID_HOME:-...}` shell expression, preventing SDK path expansion. Replaced by a fully rewritten workflow with the shell variable intact. |
+| [39147739984](https://github.com/maizon/MaizoSNES---A-universal-SNES-Multiplayer-Android/actions/runs/39147739984) | `20519aaf` | Cancelled | Push run superseded by the matching pull-request workflow for the same head. |
+
 ### Attempts superseded during branch updates
 
 | Run | Commit | Result | Explanation |

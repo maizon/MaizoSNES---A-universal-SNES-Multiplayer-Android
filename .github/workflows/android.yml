@@ -2,7 +2,7 @@ name: Android CI
 
 concurrency:
   # A push and its matching pull-request event share the head branch name.
-  group: android-ci-\${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: android-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 on:
@@ -22,31 +22,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
-
       - name: Validate Gradle Wrapper
         uses: gradle/actions/wrapper-validation@v4
-
       - name: Locate Android SDK tools
         id: android-sdk
         shell: bash
         run: |
           set -euo pipefail
-          SDK_ROOT="\${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
           if [ -z "$SDKMANAGER" ]; then
             echo "sdkmanager not found under $SDK_ROOT/cmdline-tools" >&2
@@ -54,46 +49,36 @@ jobs:
           fi
           echo "root=$SDK_ROOT" >> "$GITHUB_OUTPUT"
           echo "sdkmanager=$SDKMANAGER" >> "$GITHUB_OUTPUT"
-
       - name: Accept Android SDK licenses
         shell: bash
         run: |
           set -euo pipefail
           for _ in {1..100}; do printf 'y\n'; done > /tmp/android-sdk-licenses.txt
-          "\${{ steps.android-sdk.outputs.sdkmanager }}" --licenses < /tmp/android-sdk-licenses.txt
-
+          "${{ steps.android-sdk.outputs.sdkmanager }}" --licenses < /tmp/android-sdk-licenses.txt
       - name: Install Android platform, build tools, pinned NDK and CMake
         shell: bash
         run: |
           set -euo pipefail
-          "\${{ steps.android-sdk.outputs.sdkmanager }}" --install \\
-            "platforms;android-35" \\
-            "build-tools;35.0.0" \\
-            "ndk;26.3.11579264" \\
-            "cmake;3.22.1"
-
+          "${{ steps.android-sdk.outputs.sdkmanager }}" --install "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264" "cmake;3.22.1"
       - name: Prepare pinned Snes9x source and license assets
         run: bash scripts/fetch_snes9x.sh
-
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
-
       - name: Verify native library is packaged
         shell: bash
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           unzip -l "$APK" | tee /tmp/apk-contents.txt
-          grep -Eq 'lib/arm64-v8a/libnative-lib\\.so$' /tmp/apk-contents.txt
+          grep -Eq 'lib/arm64-v8a/libnative-lib\.so$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\\+\\+_shared\\.so$' /tmp/apk-contents.txt; then
+          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
             exit 1
           fi
           stat -c 'APK_SIZE_BYTES=%s' "$APK"
           sha256sum "$APK" | awk '{ print "APK_SHA256=" $1 }'
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
