@@ -95,6 +95,63 @@ internal class NetplaySession(
         }
     }
 
+    /**
+     * Outbound TCP relay transport. Both endpoints connect to the same public
+     * server; no inbound ports on either phone, so NAT/CGNAT works. The relay
+     * sends READY before we run the unmodified MZNP v2 handshake.
+     */
+    fun hostViaRelay(serverHost: String, relayPort: Int, roomId: String, title: String) = launch {
+        require(rom?.isFile == true) { "O anfitrião precisa abrir uma ROM." }
+        val safeTitle = android.util.Base64.encodeToString(
+            title.take(75).toByteArray(Charsets.UTF_8),
+            android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE or
+                android.util.Base64.NO_PADDING)
+        relayConnect(serverHost, relayPort, "HOST $roomId $safeTitle", true, roomId)
+    }
+
+    fun joinViaRelay(serverHost: String, relayPort: Int, roomId: String) = launch {
+        require(rom?.isFile == true || receiveAllowedByClient) {
+            "Abra a mesma ROM para entrar na sala."
+        }
+        relayConnect(serverHost, relayPort, "JOIN $roomId", false, roomId)
+    }
+
+    private fun relayConnect(
+        serverHost: String, relayPort: Int, hello: String,
+        hosting: Boolean, roomId: String
+    ) {
+        require(serverHost.isNotBlank() && serverHost.length <= 253 &&
+            relayPort in 1..65535) { "Servidor ou porta inválida." }
+        require(roomId.matches(Regex("[a-f0-9]{12,24}"))) { "Código de sala inválido." }
+        prepare(true)
+        Socket().use { connection ->
+            socket = connection
+            connection.tcpNoDelay = true
+            onStatus(if (hosting) "Criando sala $roomId no servidor…" else
+                "Entrando na sala $roomId…")
+            connection.connect(InetSocketAddress(serverHost, relayPort), 10000)
+            connection.soTimeout = if (hosting) 310000 else 20000
+            connection.getOutputStream().write((hello + "\n").toByteArray(Charsets.UTF_8))
+            connection.getOutputStream().flush()
+            if (hosting) onStatus("Sala $roomId disponível na lista do servidor. Aguardando P2…")
+            // Read exactly the line, not a buffered reader that could steal
+            // the beginning of the following binary MZNP handshake.
+            val reply = StringBuilder()
+            while (reply.length < 80) {
+                val char = connection.getInputStream().read()
+                require(char >= 0) { "Servidor desconectado." }
+                if (char == 10) break
+                reply.append(char.toChar())
+            }
+            require(reply.toString() == "READY") {
+                "Servidor não conectou a sala: $reply"
+            }
+            connection.soTimeout = 20000
+            onStatus("Túnel TCP estabelecido. Sincronizando emuladores…")
+            runSession(connection, host = hosting)
+        }
+    }
+
     private fun launch(action: () -> Unit) {
         check(thread == null) { "A sessão já foi iniciada." }
         thread = Thread({

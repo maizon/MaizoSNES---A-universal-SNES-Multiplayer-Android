@@ -47,6 +47,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
@@ -128,6 +129,7 @@ internal data class AppSettings(
     val audioEnabled: Boolean = true,
     val volume: Float = 1f,
     val filter: VideoFilter = VideoFilter.ORIGINAL,
+    val outputScale: Int = 1,
     val performanceHud: Boolean = false,
     val automaticCovers: Boolean = true,
     val automaticBackup: Boolean = true
@@ -182,6 +184,13 @@ internal fun MaizoEmulatorApp(
     lanRooms: List<LanRoom>,
     scanningLan: Boolean,
     onScanLan: () -> Unit,
+    relayAddress: String,
+    relayRooms: List<InternetRoom>,
+    scanningRelay: Boolean,
+    onRelayAddressChanged: (String) -> Unit,
+    onRefreshRelayRooms: () -> Unit,
+    onHostRelay: () -> Unit,
+    onJoinRelay: (String) -> Unit,
     shareRomAllowed: Boolean,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
@@ -281,6 +290,9 @@ internal fun MaizoEmulatorApp(
                 connectionMode, onConnectionModeChanged,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
                 lanRooms, scanningLan, onScanLan,
+                relayAddress, relayRooms, scanningRelay,
+                onRelayAddressChanged, onRefreshRelayRooms,
+                onHostRelay, onJoinRelay,
                 shareRomAllowed, receiveRomAllowed,
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
                 onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
@@ -529,6 +541,13 @@ private fun MultiplayerScreen(
     lanRooms: List<LanRoom>,
     scanningLan: Boolean,
     onScanLan: () -> Unit,
+    relayAddress: String,
+    relayRooms: List<InternetRoom>,
+    scanningRelay: Boolean,
+    onRelayAddressChanged: (String) -> Unit,
+    onRefreshRelayRooms: () -> Unit,
+    onHostRelay: () -> Unit,
+    onJoinRelay: (String) -> Unit,
     shareRomAllowed: Boolean,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
@@ -543,6 +562,7 @@ private fun MultiplayerScreen(
     val port = portText.toIntOrNull()
     LaunchedEffect(connectionMode) {
         if (connectionMode == NetworkMode.LAN_AUTO) onScanLan()
+        if (connectionMode == NetworkMode.RELAY && relayAddress.isNotBlank()) onRefreshRelayRooms()
     }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -550,7 +570,7 @@ private fun MultiplayerScreen(
             fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Text("Jogue junto, onde estiver.", fontSize = 25.sp,
             lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold)
-        Text("LAN sem internet • Descoberta automática • IP manual • 2 controles locais",
+        Text("LAN local • IP manual • salas pela internet com relay • 2 controles locais",
             color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
 
         Card(colors = CardDefaults.cardColors(containerColor = Panel),
@@ -633,7 +653,73 @@ private fun MultiplayerScreen(
             }
         }
 
-        if (connectionMode != NetworkMode.LOCAL) Card(
+        if (connectionMode == NetworkMode.RELAY) Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("SALAS PELA INTERNET", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("O anfitrião e o convidado conectam ao servidor pela saída TCP. " +
+                    "Funciona atrás de NAT/CGNAT, sem abrir porta no roteador. " +
+                    "O servidor precisa estar online com as portas HTTP e TCP liberadas.",
+                    fontSize = 11.sp, color = Muted, lineHeight = 16.sp)
+                TextField(
+                    value = relayAddress,
+                    onValueChange = onRelayAddressChanged,
+                    label = { Text("IP ou URL do servidor") },
+                    placeholder = { Text("http://meu-servidor:8787") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onRefreshRelayRooms,
+                        enabled = !scanningRelay && !active && relayAddress.isNotBlank(),
+                        modifier = Modifier.weight(1f)) {
+                        Text(if (scanningRelay) "BUSCANDO…" else "ATUALIZAR SALAS", fontSize = 11.sp)
+                    }
+                    Button(onClick = onHostRelay,
+                        enabled = ready && !active && relayAddress.isNotBlank(),
+                        modifier = Modifier.weight(1f)) {
+                        Text("CRIAR SALA", fontSize = 11.sp)
+                    }
+                }
+                Text("${relayRooms.size} sala(s) encontrada(s)", color = Mint, fontSize = 12.sp)
+                if (relayRooms.isEmpty()) {
+                    Text("Sem salas listadas. Abra uma ROM e crie a primeira sala.",
+                        color = Muted, fontSize = 12.sp)
+                }
+                relayRooms.forEach { room ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !active && ready) {
+                            onJoinRelay(room.id)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = PanelRaised)
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Sala " + room.id, color = Muted, fontSize = 10.sp)
+                            }
+                            Text("ENTRAR ›", color = Mint, fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp)
+                        }
+                    }
+                }
+                if (active) OutlinedButton(onClick = onStop,
+                    modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR SESSÃO") }
+                Surface(color = Color(0xFF242C3B), shape = RoundedCornerShape(12.dp)) {
+                    Text(status, modifier = Modifier.padding(12.dp), color = Mint, fontSize = 12.sp)
+                }
+                Text("Relay TCP experimental sem criptografia: para jogar com " +
+                    "desconhecidos use servidor de confiança e VPN privada. " +
+                    "Este modo não transfere ROMs; os dois jogadores precisam da mesma imagem.",
+                    fontSize = 11.sp, color = Color(0xFFFFBD85), lineHeight = 16.sp)
+            }
+        }
+
+        if (connectionMode != NetworkMode.LOCAL && connectionMode != NetworkMode.RELAY) Card(
             colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)
         ) {
@@ -1131,7 +1217,21 @@ private fun EmulatorSettings(
                         "O núcleo SNES renderiza na resolução nativa (normalmente 256×224 ou 512×448). " +
                             "A saída é ampliada pela superfície Android; mudar proporção NÃO cria " +
                             "detalhes nem widescreen real. Upscale por shader exigirá backend GPU.")
-                    SettingSectionTitle("Filtros leves", "Sem Vulkan/OpenGL adicional. Desative para desempenho máximo.")
+                    SettingSectionTitle("Framebuffer ampliado (CPU RGB565)",
+                        "Escala de SAÍDA por duplicação nítida dos pixels, sem criar detalhes " +
+                            "novos nem alterar a resolução interna do SNES. " +
+                            "Em aparelhos fracos mantenha 1x.")
+                    for (factor in 1..4) {
+                        ChoiceRow("Saída " + factor + "×",
+                            if (factor == 1) "Resolução original, máxima velocidade."
+                            else "Framebuffer RGB565 " + factor + "×, sem shader GPU. " +
+                                "Pode consumir mais CPU/memória; Hi-Res reduz escala automaticamente.",
+                            settings.outputScale == factor) {
+                            onSettingsChanged(settings.copy(outputScale = factor))
+                        }
+                    }
+                    SettingSectionTitle("Filtros RGB565", "Filtros por CPU sobre a imagem " +
+                        "original antes de ampliar. Original + 1x oferece menor consumo.")
                     VideoFilter.values().forEach { filter ->
                         ChoiceRow(filter.label, filter.description,
                             settings.filter == filter) {

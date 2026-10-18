@@ -1,0 +1,124 @@
+"use strict";
+/**
+ * MaizoSNES experimental public-directory TCP relay.
+ * Hosts and clients both make OUTBOUND TCP connections, so carrier-grade NAT
+ * does not require port forwarding. This is a relay, not direct WebRTC P2P.
+ * No ROM content is retained by this server. Traffic is NOT encrypted.
+ * Production deployments must use firewall/rate limiting and a trusted VPN
+ * or encrypted TCP transport. HTTP directory should sit behind HTTPS.
+ */
+const http = require("node:http");
+const net = require("node:net");
+const crypto = require("node:crypto");
+
+function createRelayServer({ httpPort = 8787, relayPort = 8788, bind = "0.0.0.0" } = {}) {
+  const rooms = new Map();
+  const maxRooms = 100;
+  const roomLifetimeMs = 5 * 60 * 1000;
+  const header = (r, code) => {
+    r.writeHead(code, { "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+  };
+  const directory = http.createServer((req, res) => {
+    if (req.method !== "GET" || !["/api/rooms", "/health"].includes(req.url)) {
+      header(res, 404); res.end(JSON.stringify({ error: "Not found" })); return;
+    }
+    header(res, 200);
+    if (req.url === "/health") { res.end(JSON.stringify({ ok: true })); return; }
+    res.end(JSON.stringify({
+      protocol: "maizo-relay-v1",
+      relayPort: tcp.address()?.port || relayPort,
+      rooms: [...rooms.values()].filter(r => !r.host.destroyed).map(r => ({
+        id: r.id, game: r.game, createdAt: r.createdAt
+      }))
+    }));
+  });
+
+  const tcp = net.createServer((socket) => {
+    socket.setNoDelay(true);
+    socket.setTimeout(roomLifetimeMs, () => socket.destroy());
+    let incoming = Buffer.alloc(0);
+    let ownedId = null;
+    function cleanup() {
+      if (ownedId && rooms.get(ownedId)?.host === socket) rooms.delete(ownedId);
+    }
+    socket.on("close", cleanup);
+    socket.on("error", () => {});
+    function handshake(chunk) {
+      incoming = Buffer.concat([incoming, chunk]);
+      if (incoming.length > 512) { socket.destroy(); return; }
+      const newline = incoming.indexOf(10);
+      if (newline < 0) return;
+      socket.off("data", handshake);
+      const line = incoming.subarray(0, newline).toString("utf8").trim();
+      const rest = incoming.subarray(newline + 1);
+      const parts = line.split(" ");
+      const id = parts[1];
+      if (!/^[a-f0-9]{12,24}$/.test(id || "") || rest.length) {
+        socket.end("ERR INVALID\n"); return;
+      }
+      if (parts[0] === "HOST") {
+        if (rooms.size >= maxRooms || parts.length !== 3 || rooms.has(id)) {
+          socket.end("ERR FULL_OR_DUPLICATE\n"); return;
+        }
+        let title;
+        try {
+          title = Buffer.from(parts[2], "base64url").toString("utf8")
+            .replace(/[\r\n\x00-\x1f]/g, "").slice(0, 75);
+        } catch (_) { title = "SNES"; }
+        if (!title) title = "SNES";
+        ownedId = id;
+        rooms.set(id, { id, game: title, createdAt: Date.now(), host: socket });
+        socket.pause();
+        return;
+      }
+      if (parts[0] === "JOIN" && parts.length === 2) {
+        const room = rooms.get(id);
+        if (!room || room.host.destroyed) { socket.end("ERR NO_ROOM\n"); return; }
+        rooms.delete(id);
+        room.host.removeAllListeners("timeout");
+        room.host.setTimeout(0);
+        socket.setTimeout(0);
+        // Both clients wait for this exact line before starting the MZNP v2 bytes.
+        room.host.write("READY\n");
+        socket.write("READY\n");
+        room.host.pipe(socket);
+        socket.pipe(room.host);
+        room.host.resume();
+        socket.on("close", () => room.host.destroy());
+        room.host.on("close", () => socket.destroy());
+        return;
+      }
+      socket.end("ERR BAD_ROLE\n");
+    }
+    socket.on("data", handshake);
+  });
+
+  return {
+    directory, tcp,
+    async start() {
+      await new Promise((resolve, reject) => tcp.once("error", reject)
+        .listen(relayPort, bind, resolve));
+      await new Promise((resolve, reject) => directory.once("error", reject)
+        .listen(httpPort, bind, resolve));
+      return { httpPort: directory.address().port, relayPort: tcp.address().port };
+    },
+    async close() {
+      for (const room of rooms.values()) room.host.destroy();
+      await Promise.all([directory, tcp].map(server => new Promise(resolve => {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      })));
+    },
+  };
+}
+module.exports = { createRelayServer };
+if (require.main === module) {
+  const instance = createRelayServer({
+    httpPort: Number(process.env.MAIZO_HTTP_PORT || 8787),
+    relayPort: Number(process.env.MAIZO_TCP_PORT || 8788),
+    bind: process.env.MAIZO_BIND || "0.0.0.0",
+  });
+  instance.start().then(ports => console.log("MaizoSNES relay ready", ports))
+    .catch(error => { console.error(error); process.exitCode = 1; });
+}

@@ -48,7 +48,8 @@ int g_surfaceWidth = 0;
 int g_surfaceHeight = 0;
 std::thread g_frameThread;
 std::atomic<int64_t> g_frameDurationNs{16683333};
-std::atomic<int> g_videoFilter{0}; // 0=original, 1=scanlines, 2=soft, 3=soft+scanlines
+std::atomic<int> g_videoFilter{0}; // 0..8 selectable video filters
+std::atomic<int> g_outputScale{1}; // 1x..4x display framebuffer, not SNES internal resolution
 std::atomic<uint64_t> g_emuFrames{0};
 std::atomic<uint64_t> g_emuNs{0};
 std::atomic<uint64_t> g_presentFrames{0};
@@ -247,22 +248,31 @@ void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned heig
     std::lock_guard<std::mutex> guard(g_surfaceMutex);
     if (!g_window) return;
 
-    if (g_surfaceWidth != static_cast<int>(width) ||
-        g_surfaceHeight != static_cast<int>(height)) {
+    // SNES PPU resolution does not increase; display framebuffer is nearest-neighbor
+    // replicated to preserve crisp pixel edges. Cap memory bandwidth on hires modes.
+    const int requestedScale = g_outputScale.load(std::memory_order_relaxed);
+    const int scale = (width * requestedScale <= 2048 &&
+                       height * requestedScale <= 1536) ? requestedScale : 1;
+    const unsigned outputWidth = width * static_cast<unsigned>(scale);
+    const unsigned outputHeight = height * static_cast<unsigned>(scale);
+    if (g_surfaceWidth != static_cast<int>(outputWidth) ||
+        g_surfaceHeight != static_cast<int>(outputHeight)) {
         if (ANativeWindow_setBuffersGeometry(
-                g_window, static_cast<int32_t>(width),
-                static_cast<int32_t>(height), WINDOW_FORMAT_RGB_565) != 0) {
+                g_window, static_cast<int32_t>(outputWidth),
+                static_cast<int32_t>(outputHeight), WINDOW_FORMAT_RGB_565) != 0) {
             return;
         }
-        g_surfaceWidth = static_cast<int>(width);
-        g_surfaceHeight = static_cast<int>(height);
+        g_surfaceWidth = static_cast<int>(outputWidth);
+        g_surfaceHeight = static_cast<int>(outputHeight);
     }
 
     ANativeWindow_Buffer buffer{};
     if (ANativeWindow_lock(g_window, &buffer, nullptr) != 0 || !buffer.bits) return;
 
-    const unsigned copyWidth = std::min(width, static_cast<unsigned>(buffer.width));
-    const unsigned copyHeight = std::min(height, static_cast<unsigned>(buffer.height));
+    const unsigned copyWidth = std::min(width,
+        static_cast<unsigned>(buffer.width / scale));
+    const unsigned copyHeight = std::min(height,
+        static_cast<unsigned>(buffer.height / scale));
     auto* destination = static_cast<uint16_t*>(buffer.bits);
     const auto* sourceBytes = static_cast<const uint8_t*>(data);
     const size_t sourceBpp = g_pixelFormat == RETRO_PIXEL_FORMAT_XRGB8888 ? 4u : 2u;
@@ -275,36 +285,76 @@ void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned heig
 
     const int filter = g_videoFilter.load(std::memory_order_relaxed);
     const auto presentBegin = std::chrono::steady_clock::now();
+    auto to565 = [&](const uint8_t* row, unsigned index) -> uint16_t {
+        if (g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565)
+            return reinterpret_cast<const uint16_t*>(row)[index];
+        if (g_pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555)
+            return convert1555(reinterpret_cast<const uint16_t*>(row)[index]);
+        return convertXrgb8888(reinterpret_cast<const uint32_t*>(row)[index]);
+    };
     for (unsigned y = 0; y < copyHeight; ++y) {
-        uint16_t* dst = destination + static_cast<size_t>(y) * buffer.stride;
+        uint16_t* dst = destination + static_cast<size_t>(y) * scale * buffer.stride;
         const uint8_t* src = sourceBytes + static_cast<size_t>(y) * pitch;
-        if (filter == 0 && g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
-            // Fast path: no extra per-pixel work or intermediate buffer.
+        if (filter == 0 && scale == 1 && g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
             std::memcpy(dst, src, static_cast<size_t>(copyWidth) * sizeof(uint16_t));
             continue;
         }
         uint16_t previous = 0;
         for (unsigned x = 0; x < copyWidth; ++x) {
-            uint16_t pixel;
-            if (g_pixelFormat == RETRO_PIXEL_FORMAT_RGB565) {
-                pixel = reinterpret_cast<const uint16_t*>(src)[x];
-            } else if (g_pixelFormat == RETRO_PIXEL_FORMAT_0RGB1555) {
-                pixel = convert1555(reinterpret_cast<const uint16_t*>(src)[x]);
-            } else {
-                pixel = convertXrgb8888(reinterpret_cast<const uint32_t*>(src)[x]);
-            }
+            const uint16_t pixel = to565(src, x);
             uint16_t result = pixel;
-            if ((filter & 2) != 0 && x > 0) {
+            if ((filter == 2 || filter == 3) && x > 0) {
                 result = static_cast<uint16_t>(((pixel & 0xF7DEu) >> 1) +
                                                ((previous & 0xF7DEu) >> 1));
             }
-            previous = pixel;
-            if ((filter & 1) != 0 && (y & 1u) != 0) {
-                // Lightweight scanline darkening, no OpenGL shaders or allocations.
+            if ((filter == 1 || filter == 3) && (y & 1u) != 0) {
                 result = static_cast<uint16_t>(((result & 0xF7DEu) >> 1) +
                                                ((result & 0xE79Cu) >> 2));
             }
-            dst[x] = result;
+            if (filter == 4 && (x % 3 == 2 || y % 3 == 2)) {
+                // LCD light grid, no textures/shaders required.
+                result = static_cast<uint16_t>(((pixel & 0xF7DEu) >> 1) +
+                                               ((pixel & 0xE79Cu) >> 2));
+            }
+            if (filter == 5 || filter == 6) {
+                const int red = ((pixel >> 11) & 31) * 255 / 31;
+                const int green = ((pixel >> 5) & 63) * 255 / 63;
+                const int blue = (pixel & 31) * 255 / 31;
+                const int lum = (77 * red + 150 * green + 29 * blue) >> 8;
+                if (filter == 5) {
+                    result = static_cast<uint16_t>(((lum >> 3) << 11) |
+                                                   ((lum >> 2) << 5) | (lum >> 3));
+                } else {
+                    result = static_cast<uint16_t>((lum >> 3) << 11 |
+                        ((std::min(255, lum + 48) >> 2) << 5) | (lum >> 4));
+                }
+            }
+            if (filter == 7 && x > 0 && x + 1 < copyWidth) {
+                // RGB565 unsharp mask over neighbors; avoids allocations.
+                const uint16_t next = to565(src, x + 1);
+                const int r = (pixel >> 11) & 31, g = (pixel >> 5) & 63, b = pixel & 31;
+                const int nr = (((previous >> 11) & 31) + ((next >> 11) & 31)) / 2;
+                const int ng = (((previous >> 5) & 63) + ((next >> 5) & 63)) / 2;
+                const int nb = ((previous & 31) + (next & 31)) / 2;
+                const unsigned rr = static_cast<unsigned>(std::clamp(2 * r - nr, 0, 31));
+                const unsigned gg = static_cast<unsigned>(std::clamp(2 * g - ng, 0, 63));
+                const unsigned bb = static_cast<unsigned>(std::clamp(2 * b - nb, 0, 31));
+                result = static_cast<uint16_t>((rr << 11) | (gg << 5) | bb);
+            }
+            if (filter == 8) {
+                // RGB phosphor triads: preserve dominant channel, dim the others.
+                const int channel = static_cast<int>(x % 3);
+                const uint16_t mask = channel == 0 ? 0xF800u :
+                    channel == 1 ? 0x07E0u : 0x001Fu;
+                result = static_cast<uint16_t>((pixel & mask) +
+                    (((pixel & static_cast<uint16_t>(~mask)) & 0xF7DEu) >> 1));
+            }
+            previous = pixel;
+            for (int sx = 0; sx < scale; ++sx) dst[x * scale + sx] = result;
+        }
+        for (int sy = 1; sy < scale; ++sy) {
+            std::memcpy(destination + static_cast<size_t>(y * scale + sy) * buffer.stride,
+                        dst, static_cast<size_t>(copyWidth) * scale * sizeof(uint16_t));
         }
     }
     ANativeWindow_unlockAndPost(g_window);
@@ -523,7 +573,14 @@ Java_com_maizon_maizosnes_NativeBridge_nativeNetplayStateHash(JNIEnv*, jobject) 
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetVideoFilter(
     JNIEnv*, jobject, jint filter) {
-    g_videoFilter.store(std::max(0, std::min(3, static_cast<int>(filter))),
+    g_videoFilter.store(std::max(0, std::min(8, static_cast<int>(filter))),
+                        std::memory_order_release);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetOutputScale(
+    JNIEnv*, jobject, jint scale) {
+    g_outputScale.store(std::clamp(static_cast<int>(scale), 1, 4),
                         std::memory_order_release);
 }
 

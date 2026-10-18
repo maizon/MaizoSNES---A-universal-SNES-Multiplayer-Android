@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
     private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.LAN_AUTO)
     private val savedHost = androidx.compose.runtime.mutableStateOf("")
     private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
+    private val relayAddress = androidx.compose.runtime.mutableStateOf("")
+    private val relayRooms = androidx.compose.runtime.mutableStateOf<List<InternetRoom>>(emptyList())
+    private val scanningRelay = androidx.compose.runtime.mutableStateOf(false)
     private val devUnlocked = androidx.compose.runtime.mutableStateOf(false)
     private val devShareEnabled = androidx.compose.runtime.mutableStateOf(false)
     private val lastNetworkMetrics = androidx.compose.runtime.mutableStateOf<NetworkMetrics?>(null)
@@ -119,10 +122,14 @@ class MainActivity : ComponentActivity() {
             NetworkMode.valueOf(restoredMode ?: NetworkMode.LAN_AUTO.name)
         }.getOrDefault(NetworkMode.LAN_AUTO)
         loadConnectionTarget()
+        relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
         devShareEnabled.value = prefs.getBoolean("dev_share_advanced", false) && devUnlocked.value
         if (devShareEnabled.value) shareRomAllowed.value = true
-        runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
+        runCatching {
+            NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
+            NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+        }
         refreshCovers()
         startPerformanceSampler()
         val localIp = getLocalIpv4()
@@ -154,6 +161,13 @@ class MainActivity : ComponentActivity() {
                     lanRooms = availableLanRooms.value,
                     scanningLan = scanningLan.value,
                     onScanLan = ::scanLan,
+                    relayAddress = relayAddress.value,
+                    relayRooms = relayRooms.value,
+                    scanningRelay = scanningRelay.value,
+                    onRelayAddressChanged = ::changeRelayAddress,
+                    onRefreshRelayRooms = ::refreshRelayRooms,
+                    onHostRelay = ::hostRelay,
+                    onJoinRelay = ::joinRelay,
                     shareRomAllowed = shareRomAllowed.value,
                     receiveRomAllowed = receiveRomAllowed.value,
                     onShareRomAllowedChanged = { shareRomAllowed.value = it },
@@ -557,7 +571,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         appSettings.value = readSettings(profilePrefix(file))
-        runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
+        runCatching {
+            NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
+            NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+        }
         loadRomFile(file)
     }
 
@@ -689,6 +706,78 @@ class MainActivity : ComponentActivity() {
         }
     }.getOrNull()
 
+    private fun changeRelayAddress(value: String) {
+        if (netplaySession != null) return
+        relayAddress.value = value.take(300)
+        prefs.edit().putString("relay_server_url", relayAddress.value).apply()
+        relayRooms.value = emptyList()
+    }
+
+    private fun refreshRelayRooms() {
+        if (scanningRelay.value || netplaySession != null || relayAddress.value.isBlank()) return
+        scanningRelay.value = true
+        lifecycleScope.launch {
+            try {
+                val listing = withContext(Dispatchers.IO) {
+                    RelayDirectory.list(relayAddress.value)
+                }
+                relayRooms.value = listing.rooms
+                lanStatus.value = "${listing.rooms.size} sala(s) no servidor. " +
+                    "TCP ${listing.serverHost}:${listing.relayPort}"
+            } catch (error: Exception) {
+                relayRooms.value = emptyList()
+                lanStatus.value = "Servidor de salas inacessível: " +
+                    (error.message ?: "erro na rede")
+            } finally { scanningRelay.value = false }
+        }
+    }
+
+    private fun hostRelay() {
+        if (netplaySession != null || !hasLoadedRom || currentRomFile.value == null) {
+            lanStatus.value = "Abra uma ROM antes de criar uma sala."
+            return
+        }
+        startRelayRoom(null)
+    }
+
+    private fun joinRelay(roomId: String) {
+        if (netplaySession != null || (!hasLoadedRom && !receiveRomAllowed.value)) {
+            lanStatus.value = "Abra a mesma ROM para entrar na sala."
+            return
+        }
+        startRelayRoom(roomId)
+    }
+
+    private fun startRelayRoom(joinRoomId: String?) {
+        if (relayAddress.value.isBlank()) {
+            lanStatus.value = "Informe primeiro o IP ou URL do servidor."
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                lanStatus.value = "Consultando servidor de salas…"
+                val listing = withContext(Dispatchers.IO) {
+                    RelayDirectory.list(relayAddress.value)
+                }
+                val roomId = joinRoomId ?: java.util.UUID.randomUUID()
+                    .toString().replace("-", "").take(16)
+                if (joinRoomId != null && listing.rooms.none { it.id == roomId }) {
+                    lanStatus.value = "A sala não está mais disponível. Atualize a lista."
+                    return@launch
+                }
+                startNetplay(
+                    host = if (joinRoomId == null) null else listing.serverHost,
+                    port = listing.relayPort,
+                    relayRoomId = roomId,
+                    relayServerHost = listing.serverHost
+                )
+            } catch (error: Exception) {
+                lanStatus.value = "Falha ao conectar servidor: " +
+                    (error.message ?: "erro de rede")
+            }
+        }
+    }
+
     private fun scanLan() {
         if (scanningLan.value || netplaySession != null) return
         scanningLan.value = true
@@ -742,7 +831,10 @@ class MainActivity : ComponentActivity() {
                 currentRomFile.value = installed
                 currentRomName.value = installed.name
                 appSettings.value = readSettings(profilePrefix(installed))
-                runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
+                runCatching {
+            NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
+            NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+        }
                 cheatEntries.value = emptyList()
                 activeCheatIds.value = emptySet()
                 cheatRomKey = null
@@ -783,7 +875,10 @@ class MainActivity : ComponentActivity() {
         paused.value = true
         activeScreen.value = AppScreen.LIBRARY
         appSettings.value = readSettings("profile_global_")
-        runCatching { NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId) }
+        runCatching {
+            NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
+            NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
+        }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
@@ -839,6 +934,7 @@ class MainActivity : ComponentActivity() {
             audioEnabled = prefs.getBoolean(key("audio_enabled"), true),
             volume = prefs.getFloat(key("audio_volume"), 1f),
             filter = filter,
+            outputScale = prefs.getInt(key("video_output_scale"), 1).coerceIn(1, 4),
             performanceHud = prefs.getBoolean(key("performance_hud"), false),
             automaticCovers = prefs.getBoolean("library_covers_enabled", true),
             automaticBackup = prefs.getBoolean("automatic_netplay_backups", true)
@@ -852,6 +948,7 @@ class MainActivity : ComponentActivity() {
         prefs.edit()
             .putString(prefix + "aspect", next.aspect.name)
             .putString(prefix + "video_filter", next.filter.name)
+            .putInt(prefix + "video_output_scale", next.outputScale.coerceIn(1, 4))
             .putBoolean(prefix + "performance_hud", next.performanceHud)
             .putString(prefix + "touch_preset", next.touch.preset.name)
             .putString(prefix + "touch_preset_" + next.touch.preset.name,
@@ -870,7 +967,10 @@ class MainActivity : ComponentActivity() {
             .apply()
         audioOutput?.setEnabled(next.audioEnabled)
         audioOutput?.setVolume(next.volume)
-        runCatching { NativeBridge.nativeSetVideoFilter(next.filter.nativeId) }
+        runCatching {
+            NativeBridge.nativeSetVideoFilter(next.filter.nativeId)
+            NativeBridge.nativeSetOutputScale(next.outputScale)
+        }
         if (coversChanged) refreshCovers()
     }
 
@@ -1192,7 +1292,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startNetplay(host: String?, port: Int) {
+    private fun startNetplay(host: String?, port: Int,
+        relayRoomId: String? = null, relayServerHost: String? = null) {
         if (netplaySession != null) return
         if (host == null && (!hasLoadedRom || currentRomFile.value == null)) {
             lanStatus.value = "Como host, abra uma ROM antes de criar a sala."
@@ -1281,9 +1382,13 @@ class MainActivity : ComponentActivity() {
             }
         )
         netplaySession = session
-        if (host == null) hostWifiLock = createDiscoveryLock()
+        if (host == null && relayRoomId == null) hostWifiLock = createDiscoveryLock()
         lanStatus.value = if (host == null) "Abrindo sala…" else "Conectando…"
-        if (host == null) session.host(port) else session.join(host, port)
+        if (relayRoomId != null && relayServerHost != null) {
+            if (host == null) session.hostViaRelay(relayServerHost, port, relayRoomId,
+                current?.nameWithoutExtension ?: "SNES")
+            else session.joinViaRelay(relayServerHost, port, relayRoomId)
+        } else if (host == null) session.host(port) else session.join(host, port)
     }
 
     private fun stopMultiplayer() {
