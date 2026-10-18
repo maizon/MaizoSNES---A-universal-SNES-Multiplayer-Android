@@ -4,6 +4,8 @@ Status: **open — no Snes9x code is vendored or linked yet**.
 
 This project must not assume that being free of charge or omitting ROM files automatically resolves every licensing question. Before integrating or redistributing a Snes9x version, record the exact upstream repository/tag/commit, preserve its original source headers and copyright notices, include the complete applicable license text in `LICENSES/snes9x.txt`, and review the conditions with qualified counsel if distribution terms remain unclear.
 
+Decision deadline: select and record the exact upstream Snes9x tag/commit and review its applicable license **before Phase 2 is marked complete and before any core source is copied or linked**. Until that decision is recorded, core integration is blocked.
+
 Planned safeguards:
 - No bundled commercial ROMs, BIOS files, game assets, or copyrighted game data.
 - No ads, in-app purchases, or monetization in the initial release.
