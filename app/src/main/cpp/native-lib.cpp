@@ -25,6 +25,7 @@ std::string g_romName;
 std::atomic<bool> g_initialized{false};
 std::atomic<bool> g_gameLoaded{false};
 std::atomic<bool> g_runFrames{false};
+std::atomic<bool> g_paused{false};
 std::atomic<uint32_t> g_inputMask{0};
 std::atomic<uint64_t> g_audioWrite{0};
 std::atomic<uint64_t> g_audioRead{0};
@@ -222,6 +223,10 @@ void startFrameThread() {
         const auto frameDuration = std::chrono::nanoseconds(
             g_frameDurationNs.load(std::memory_order_acquire));
         while (g_runFrames.load(std::memory_order_acquire)) {
+            if (g_paused.load(std::memory_order_acquire)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
             const auto frameStart = clock::now();
             {
                 std::lock_guard<std::mutex> lock(g_coreMutex);
@@ -244,6 +249,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeInit(JNIEnv* env, jobject, jstring 
     if (!path) return -2;
     g_appDataPath.assign(path);
     env->ReleaseStringUTFChars(appDataPath, path);
+    g_paused.store(false, std::memory_order_release);
 
     retro_set_environment(environmentCallback);
     retro_set_video_refresh(videoRefresh);
@@ -373,8 +379,22 @@ Java_com_maizon_maizosnes_NativeBridge_nativeGetAudioSampleRate(JNIEnv*, jobject
     return (rate >= 8000 && rate <= 192000) ? rate : 32040;
 }
 
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetPaused(JNIEnv*, jobject, jboolean paused) {
+    const bool shouldPause = paused == JNI_TRUE;
+    g_paused.store(shouldPause, std::memory_order_release);
+    if (shouldPause) {
+        // Wait for a currently executing retro_run() to finish, then discard queued audio.
+        std::lock_guard<std::mutex> lock(g_coreMutex);
+        const uint64_t latestWrite = g_audioWrite.load(std::memory_order_acquire);
+        g_audioRead.store(latestWrite, std::memory_order_release);
+    }
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
+    g_paused.store(true, std::memory_order_release);
     stopFrameThread();
     {
         std::lock_guard<std::mutex> lock(g_coreMutex);

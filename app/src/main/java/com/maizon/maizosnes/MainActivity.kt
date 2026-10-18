@@ -33,6 +33,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,6 +50,7 @@ import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -59,6 +63,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -84,6 +89,7 @@ class MainActivity : ComponentActivity() {
     private val statusMessage = mutableStateOf("Preparando o núcleo Snes9x...")
     private val pressedInputs = AtomicInteger(0)
     private var audioOutput: AudioOutput? = null
+    private var hasLoadedRom = false
 
     private val openRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) loadRom(uri)
@@ -105,10 +111,12 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Falha na inicialização do núcleo: $initResult"
         }
 
+        val licenseText = readBundledLicenses()
         setContent {
             MaizoTheme {
                 MaizoApp(
                     statusMessage = statusMessage.value,
+                    licenseText = licenseText,
                     onOpenRom = { openRomLauncher.launch(arrayOf("*/*")) },
                     onSurfaceChanged = { NativeBridge.nativeSetSurface(it) },
                     onInputChanged = ::updateInput
@@ -138,12 +146,15 @@ class MainActivity : ComponentActivity() {
                     NativeBridge.nativeLoadRom(bytes, name)
                 }
                 if (result == 0) {
+                    hasLoadedRom = true
                     // Recreate the output using the rate reported after this ROM was loaded.
                     audioOutput?.stop()
                     audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate())
                     audioOutput?.start()
                     statusMessage.value = "ROM carregada: $name"
                 } else {
+                    hasLoadedRom = false
+                    audioOutput?.stop()
                     statusMessage.value = "O núcleo recusou a ROM ($result). Use uma ROM SNES válida, sem ZIP."
                 }
             } catch (error: Exception) {
@@ -182,7 +193,35 @@ class MainActivity : ComponentActivity() {
         return bytes to name
     }
 
+    override fun onPause() {
+        runCatching { NativeBridge.nativeSetPaused(true) }
+        audioOutput?.stop()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        runCatching { NativeBridge.nativeSetPaused(false) }
+        if (hasLoadedRom) audioOutput?.start()
+    }
+
+    private fun readBundledLicenses(): String {
+        fun read(path: String): String = runCatching {
+            assets.open(path).bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }.getOrElse { "Arquivo de licença indisponível no pacote: $path" }
+
+        return buildString {
+            append("MaizoSNES inclui o núcleo Snes9x 1.63 e o filtro snes_ntsc. ")
+            append("O Snes9x tem restrições de uso não comercial; consulte o texto integral abaixo.\n\n")
+            append("===== LICENÇA SNES9X 1.63 =====\n\n")
+            append(read("licenses/snes9x.txt"))
+            append("\n\n===== LICENÇA DO FILTRO SNES_NTSC =====\n\n")
+            append(read("licenses/snes_ntsc-license.txt"))
+        }
+    }
+
     override fun onDestroy() {
+        runCatching { NativeBridge.nativeSetPaused(true) }
         audioOutput?.stop()
         audioOutput = null
         runCatching { NativeBridge.nativeShutdown() }
@@ -208,12 +247,14 @@ private fun MaizoTheme(content: @Composable () -> Unit) {
 @Composable
 private fun MaizoApp(
     statusMessage: String,
+    licenseText: String,
     onOpenRom: () -> Unit,
     onSurfaceChanged: (Surface?) -> Unit,
     onInputChanged: (Int, Boolean) -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var notice by remember(statusMessage) { mutableStateOf(statusMessage) }
+    var showLicenses by remember { mutableStateOf(false) }
     Scaffold(
         containerColor = Ink,
         contentWindowInsets = WindowInsets(0),
@@ -252,11 +293,30 @@ private fun MaizoApp(
                     item { FeatureCard(Icons.Default.Tune, "Vídeo e upscale", "Planejado: proporção, filtros GLSL, pixel-perfect e shaders CRT.", Violet) }
                     item { FeatureCard(Icons.Default.Gamepad, "Controles", "Planejado: layout móvel, tamanho/posição dos botões e controles Bluetooth.", Mint) }
                     item { FeatureCard(Icons.Default.Bolt, "Desempenho", "Planejado: FPS, frame time, latência de rede e diagnóstico de quedas.", Violet) }
+                    item { ActionCard("Avisos e licenças", "Consulte os textos das licenças incluídas neste APK.", "VER LICENÇAS") { showLicenses = true } }
                     item { StatusBanner("As opções serão habilitadas quando os componentes reais forem integrados.") }
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
+    }
+    if (showLicenses) {
+        AlertDialog(
+            onDismissRequest = { showLicenses = false },
+            title = { Text("Avisos e licenças de terceiros") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(licenseText, fontSize = 11.sp, lineHeight = 15.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLicenses = false }) { Text("FECHAR") }
+            }
+        )
     }
 }
 
