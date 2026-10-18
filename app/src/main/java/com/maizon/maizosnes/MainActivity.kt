@@ -66,7 +66,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(9, 13, 24)
         window.navigationBarColor = android.graphics.Color.rgb(9, 13, 24)
-        val nativeInitResult = runCatching { NativeBridge.nativeInit() }.getOrElse { -999 }\n        setContent { MaizoTheme { MaizoApp(nativeInitResult) } }
+        val nativeInitResult = runCatching { NativeBridge.nativeInit() }.getOrElse { -999 }
+        setContent { MaizoTheme { MaizoApp(nativeInitResult) } }
     }
 }
 
