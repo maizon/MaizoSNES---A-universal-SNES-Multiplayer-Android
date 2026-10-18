@@ -77,7 +77,9 @@ internal class NetplaySession(
         prepare(true)
         ServerSocket(port).use { listener ->
             server = listener
-            listener.soTimeout = 60000
+            // The host controls room lifetime; do not kill a valid LAN room after 60s.
+            // Calling stop() closes the listener and unblocks accept().
+            listener.soTimeout = 0
             val romHash = romDigest(rom).take(8).joinToString("") {
                 "%02x".format(it)
             }
@@ -103,6 +105,8 @@ internal class NetplaySession(
         prepare(true)
         Socket().use { connection ->
             socket = connection
+            connection.tcpNoDelay = true
+            connection.keepAlive = true
             onStatus("Conectando ao anfitrião $host:$port…")
             connection.connect(InetSocketAddress(host.trim(), port), 10000)
             runSession(connection, host = false)
@@ -291,8 +295,10 @@ internal class NetplaySession(
         connection.keepAlive = true
         runCatching { connection.trafficClass = 0x10 } // IPTOS_LOWDELAY best-effort
         connection.soTimeout = 20000
-        val input = DataInputStream(BufferedInputStream(connection.getInputStream(), 32768))
-        val output = DataOutputStream(BufferedOutputStream(connection.getOutputStream(), 32768))
+        // Bounded buffers avoid per-frame allocations while preserving TCP_NODELAY.
+        // A buffered output stream flushes once per complete packet below.
+        val input = DataInputStream(BufferedInputStream(connection.getInputStream(), 8192))
+        val output = DataOutputStream(BufferedOutputStream(connection.getOutputStream(), 4096))
         val ownRom = romDigest(rom)
         // A client computes its settings fingerprint AFTER applying host choices.
         if (host) {
