@@ -64,6 +64,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -141,7 +142,19 @@ internal fun MaizoEmulatorApp(
     paused: Boolean,
     settings: AppSettings,
     coreOptions: Map<String, String>,
+    cheats: List<CheatEntry>,
+    enabledCheatIds: Set<String>,
+    cheatStatus: String,
+    onToggleCheat: (String, Boolean) -> Unit,
+    onRefreshCheats: () -> Unit,
     multiplayerStatus: String,
+    lanRooms: List<LanRoom>,
+    scanningLan: Boolean,
+    onScanLan: () -> Unit,
+    shareRomAllowed: Boolean,
+    receiveRomAllowed: Boolean,
+    onShareRomAllowedChanged: (Boolean) -> Unit,
+    onReceiveRomAllowedChanged: (Boolean) -> Unit,
     localIpAddress: String,
     multiplayerActive: Boolean,
     multiplayerReady: Boolean,
@@ -199,7 +212,7 @@ internal fun MaizoEmulatorApp(
                             }
                             TextButton(onClick = { showGameMenu = false }) { Text("FECHAR") }
                         }
-                        EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onExportState, onImportState, onResetGame)
+                        EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive)
                     }
                 }
             }
@@ -226,13 +239,16 @@ internal fun MaizoEmulatorApp(
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize().padding(padding), currentRomName, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
+                lanRooms, scanningLan, onScanLan,
+                shareRomAllowed, receiveRomAllowed,
+                onShareRomAllowedChanged, onReceiveRomAllowedChanged,
                 onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
                 onLocalMultiplayerChanged
             )
             AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("AJUSTES", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Text("Configure o emulador", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 14.dp))
-                EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onExportState, onImportState, onResetGame)
+                EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive)
             }
             AppScreen.GAME -> Unit
         }
@@ -357,6 +373,13 @@ private fun MultiplayerScreen(
     localIpAddress: String,
     active: Boolean,
     localMultiplayer: Boolean,
+    lanRooms: List<LanRoom>,
+    scanningLan: Boolean,
+    onScanLan: () -> Unit,
+    shareRomAllowed: Boolean,
+    receiveRomAllowed: Boolean,
+    onShareRomAllowedChanged: (Boolean) -> Unit,
+    onReceiveRomAllowedChanged: (Boolean) -> Unit,
     onHost: (Int) -> Unit,
     onJoin: (String, Int) -> Unit,
     onStop: () -> Unit,
@@ -365,63 +388,111 @@ private fun MultiplayerScreen(
     var remoteHost by remember { mutableStateOf("") }
     var portText by remember { mutableStateOf("55435") }
     val port = portText.toIntOrNull()
+    LaunchedEffect(Unit) { onScanLan() }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("MULTIPLAYER", color = Mint, fontSize = 11.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Text("Jogue junto, onde estiver.", fontSize = 25.sp,
             lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold)
-        Text("LAN na mesma rede • Online por IP/porta • Dois controles no mesmo aparelho",
+        Text("LAN sem internet • Descoberta automática • IP manual • 2 controles locais",
             color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
 
         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("2 jogadores no mesmo aparelho", fontWeight = FontWeight.Bold)
-                Text("Um controle: toque no P1 e gamepad no P2. Dois controles: primeiro no P1 e segundo no P2. O jogo precisa suportar dois jogadores.",
+                Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
                     color = Muted, fontSize = 12.sp)
-                ToggleSettingRow("Ativar porta 2", "Funciona sem rede e sem internet.", localMultiplayer, onLocalMode)
+                ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Salas na rede Wi-Fi", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(if (scanningLan) "Procurando aparelhos na rede…" else
+                            "${lanRooms.size} sala(s) encontrada(s)", color = Muted, fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = onScanLan, enabled = !active && !scanningLan) {
+                        Text("BUSCAR", fontSize = 11.sp)
+                    }
+                }
+                if (lanRooms.isEmpty()) {
+                    Text("A busca começa automaticamente. Se o Wi-Fi bloquear descoberta, use IP/porta abaixo.",
+                        color = Muted, fontSize = 11.sp)
+                } else lanRooms.forEach { room ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = PanelRaised),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !active) {
+                            remoteHost = room.host
+                            portText = room.port.toString()
+                            if (ready || receiveRomAllowed) onJoin(room.host, room.port)
+                        }
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("${room.host}:${room.port}", color = Muted, fontSize = 11.sp)
+                            }
+                            Text("ENTRAR ›", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
 
         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                Text("Sala de dois aparelhos — experimental", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Sala por IP/porta — experimental", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text("Seu endereço IPv4 local: $localIpAddress", color = Mint, fontSize = 12.sp)
-                Text(if (ready) "Jogo selecionado: ${romName ?: "SNES"}"
-                    else "Primeiro abra a mesma ROM na biblioteca dos dois aparelhos; volte aqui para conectar.",
+                Text(if (ready) "Jogo aberto: ${romName ?: "SNES"}"
+                    else "Nenhum jogo aberto. Para criar sala, abra uma ROM. Para entrar sem a ROM, autorize o recebimento abaixo.",
                     color = if (ready) Mint else Muted, fontSize = 12.sp)
-                TextField(
-                    value = portText,
+                TextField(value = portText,
                     onValueChange = { portText = it.filter(Char::isDigit).take(5) },
                     label = { Text("Porta TCP (1024–65535)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !active
-                )
-                TextField(
-                    value = remoteHost,
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active)
+                TextField(value = remoteHost,
                     onValueChange = { remoteHost = it.take(253) },
                     label = { Text("IP ou domínio do anfitrião") },
                     placeholder = { Text("192.168.1.20") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !active
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active)
+                ToggleSettingRow(
+                    "Compartilhar minha ROM autorizada",
+                    "Host: confirme apenas para homebrew, domínio público ou ROM com permissão de redistribuição. Desligado por padrão.",
+                    shareRomAllowed,
+                    { if (!active) onShareRomAllowedChanged(it) }
+                )
+                ToggleSettingRow(
+                    "Aceitar ROM autorizada do host",
+                    "Cliente: permite salvar automaticamente a ROM na biblioteca interna, somente em rede privada. Desligado por padrão.",
+                    receiveRomAllowed,
+                    { if (!active) onReceiveRomAllowedChanged(it) }
                 )
                 if (active) {
-                    OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR SESSÃO") }
+                    OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                        Text("ENCERRAR SESSÃO")
+                    }
                 } else {
-                    Button(onClick = { port?.let(onHost) }, enabled = ready && port != null && port in 1024..65535,
+                    Button(onClick = { port?.let(onHost) },
+                        enabled = ready && port != null && port in 1024..65535,
                         modifier = Modifier.fillMaxWidth()) { Text("CRIAR SALA • JOGADOR 1") }
                     OutlinedButton(onClick = { if (port != null) onJoin(remoteHost.trim(), port) },
-                        enabled = ready && port != null && port in 1024..65535 && remoteHost.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth()) { Text("ENTRAR NA SALA • JOGADOR 2") }
+                        enabled = (ready || receiveRomAllowed) &&
+                            port != null && port in 1024..65535 && remoteHost.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()) {
+                            Text("CONECTAR VIA IP • JOGADOR 2")
+                        }
                 }
                 Surface(color = Color(0xFF242C3B), shape = RoundedCornerShape(12.dp)) {
                     Text(status, modifier = Modifier.padding(11.dp), color = Mint, fontSize = 12.sp)
                 }
             }
         }
-        Text("Sincronização por frame e estado inicial idêntico. Diferenças são detectadas; rede lenta adiciona atraso. Sem rollback, matchmaking, criptografia ou abertura automática de portas. Online remoto exige um IP/porta acessível, como via VPN confiável ou encaminhamento TCP.",
+        Text("LAN funciona sem internet, mas pode haver isolamento Wi-Fi. Compartilhamento de ROM depende de permissão legal e consentimento mútuo, não envia jogos comerciais por padrão. TCP lockstep tem atraso de rede, sem rollback nem criptografia; para acesso remoto prefira VPN privada confiável.",
             color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
     }
 }
@@ -440,27 +511,58 @@ private fun GameScreen(
     onSurfaceChanged: (Surface?) -> Unit,
     onInputChanged: (Int, Boolean) -> Unit
 ) {
+    var toolbarExpanded by remember(romName) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         VideoSurface(settings.aspect, onSurfaceChanged)
         if (settings.touch.enabled) TouchOverlay(
             settings.touch, onInputChanged, editingControls,
             onLayoutChanged = { onSettingsChanged(settings.copy(touch = it)) }
         )
-        Row(
-            modifier = Modifier.align(Alignment.TopCenter).padding(8.dp).clip(RoundedCornerShape(18.dp))
-                .background(Color(0xB51A2030)).padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onExit) { Text("‹ Biblioteca", fontSize = 12.sp) }
-            Column(Modifier.weight(1f, fill = false)) {
-                Text(File(romName).nameWithoutExtension, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
-                if (paused) Text("PAUSADO", color = Mint, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        if (!toolbarExpanded && !editingControls) {
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd)
+                    .padding(top = 9.dp, end = 12.dp)
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x503B4563))
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                    .clickable { toolbarExpanded = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Settings,
+                    contentDescription = "Expandir menu do emulador",
+                    tint = Color.White.copy(alpha = 0.60f), modifier = Modifier.size(20.dp))
             }
-            if (settings.touch.enabled) TextButton(onClick = onEditControls) {
-                Text(if (editingControls) "SALVAR" else "EDITAR", fontSize = 11.sp, color = Mint)
+        } else {
+            Row(
+                modifier = Modifier.align(Alignment.TopCenter).padding(8.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xB51A2030))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onExit) { Text("‹ Biblioteca", fontSize = 12.sp) }
+                Column(Modifier.weight(1f, fill = false)) {
+                    Text(File(romName).nameWithoutExtension,
+                        fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                    if (paused) Text("PAUSADO", color = Mint, fontSize = 9.sp)
+                }
+                if (settings.touch.enabled) TextButton(onClick = onEditControls) {
+                    Text(if (editingControls) "SALVAR" else "EDITAR",
+                        fontSize = 11.sp, color = Mint)
+                }
+                TextButton(onClick = onPause) {
+                    Text(if (paused) "▶" else "Ⅱ", fontSize = 17.sp)
+                }
+                TextButton(onClick = onOpenMenu) {
+                    Icon(Icons.Default.Settings, contentDescription = "Ajustes", tint = Color.White)
+                }
+                TextButton(onClick = {
+                    if (editingControls) onEditControls()
+                    toolbarExpanded = false
+                }) { Text("−", color = Mint, fontSize = 24.sp) }
             }
-            TextButton(onClick = onPause) { Text(if (paused) "▶" else "Ⅱ", fontSize = 17.sp) }
-            TextButton(onClick = onOpenMenu) { Icon(Icons.Default.Settings, contentDescription = "Configurações", tint = Color.White) }
         }
         if (editingControls) {
             Surface(
@@ -709,10 +811,17 @@ private fun EmulatorSettings(
     onLoadSlot: (Int) -> Unit,
     onExportState: () -> Unit,
     onImportState: () -> Unit,
-    onResetGame: () -> Unit
+    onResetGame: () -> Unit,
+    cheats: List<CheatEntry>,
+    enabledCheatIds: Set<String>,
+    cheatStatus: String,
+    onToggleCheat: (String, Boolean) -> Unit,
+    onRefreshCheats: () -> Unit,
+    cheatsLocked: Boolean
 ) {
     var category by remember { mutableStateOf("Vídeo") }
-    val categories = listOf("Vídeo", "Áudio", "Controles", "Núcleo", "Estados")
+    var cheatFilter by remember { mutableStateOf("") }
+    val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Núcleo", "Estados")
     Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -769,6 +878,68 @@ private fun EmulatorSettings(
                     SliderSetting("Tamanho", settings.touch.scale, 0.70f..1.45f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(scale = it))) }, (settings.touch.scale * 100).toInt().toString() + "%")
                     SliderSetting("Opacidade", settings.touch.opacity, 0.20f..0.90f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(opacity = it))) }, (settings.touch.opacity * 100).toInt().toString() + "%")
                     OutlinedButton(onClick = { onSettingsChanged(settings.copy(touch = TouchLayout())) }, modifier = Modifier.fillMaxWidth()) { Text("RESTAURAR LAYOUT PADRÃO") }
+                }
+                "Cheats" -> {
+                    SettingSectionTitle("Cheats para o jogo aberto",
+                        "Busca automática na libretro-database. Marque para ativar; mudanças aplicadas sem reiniciar.")
+                    Text(cheatStatus, color = Mint, fontSize = 11.sp, lineHeight = 16.sp)
+                    if (cheatsLocked) {
+                        Text("CHEATS DESATIVADOS DURANTE LAN/ONLINE para evitar dessincronização.",
+                            color = Color(0xFFFFBA72), fontSize = 11.sp)
+                    }
+                    OutlinedButton(onClick = onRefreshCheats, enabled = !cheatsLocked,
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text("ATUALIZAR PESQUISA")
+                    }
+                    if (cheats.isNotEmpty()) {
+                        TextField(
+                            value = cheatFilter,
+                            onValueChange = { cheatFilter = it.take(70) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Filtrar por nome do cheat") },
+                            placeholder = { Text("Ex.: vidas infinitas") }
+                        )
+                        val visible = remember(cheats, cheatFilter) {
+                            cheats.filter { cheatFilter.isBlank() ||
+                                it.title.contains(cheatFilter, ignoreCase = true) ||
+                                it.source.contains(cheatFilter, ignoreCase = true) }
+                        }
+                        Text("${visible.size} resultados • ${enabledCheatIds.size} ativados",
+                            color = Muted, fontSize = 11.sp)
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxWidth().height(420.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(visible, key = { it.id }) { cheat ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = PanelRaised),
+                                    shape = RoundedCornerShape(13.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(Modifier.fillMaxWidth().padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(cheat.title, fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp)
+                                            Text(cheat.source + " • " + cheat.code,
+                                                fontSize = 10.sp, color = Muted,
+                                                maxLines = 2)
+                                        }
+                                        Switch(
+                                            checked = cheat.id in enabledCheatIds,
+                                            onCheckedChange = { onToggleCheat(cheat.id, it) },
+                                            enabled = !cheatsLocked
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text("Fonte: libretro/libretro-database, cheats CC BY-SA 4.0. " +
+                        "Correspondência por nome (não por hash exato). Códigos de outra região " +
+                        "podem falhar e afetar saves; use backup.",
+                        color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
                 }
                 "Núcleo" -> {
                     SettingSectionTitle("Snes9x 1.63", "Opções reais do núcleo. Alterações são consultadas no caminho de atualização do core.")

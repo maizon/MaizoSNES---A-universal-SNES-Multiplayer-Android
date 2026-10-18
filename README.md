@@ -5,16 +5,17 @@ Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.6
 ## Funcionalidades implementadas no código
 
 - Biblioteca privada: importar ROMs `.sfc`, `.smc` ou ZIP com uma ROM, listar, renomear e abrir sem picker repetitivo.
-- Tela de jogo própria, landscape imersivo, vídeo via SurfaceView/ANativeWindow e barra de acesso ao menu de configuração.
+- Tela de jogo própria, landscape imersivo, vídeo via SurfaceView/ANativeWindow e menu superior recolhível a **círculo pequeno semitransparente** no canto superior direito.
 - Aspectos 4:3, pixel perfect com escala inteira de referência, 16:9, stretch e fill.
 - Controles táteis semitransparentes: direcional **contínuo e diagonal**, ABXY, L/R e Start/Select; suporte a toques simultâneos.
 - **Editar** diretamente na tela de jogo: arrastar grupos D-pad e botões, salvar layout; tamanho/posição/transparência ajustáveis também pelos sliders, com preferências globais e por ROM.
 - Input físico por joystick/gamepad Android e teclado; multitarefa do primeiro e segundo gamepads separada, evitando mistura de máscaras.
 - Áudio AudioTrack estéreo com buffer reduzido e modo low-latency quando o Android oferece.
-- Ajustes por categoria (vídeo, áudio, controles, núcleo e estados), opções reais expostas via libretro.
+- Ajustes por categoria (vídeo, áudio, controles, cheats, núcleo e estados), opções reais expostas via libretro.
+- **Cheats automáticos**: identifica ROM pelo nome ou título interno SNES, encontra códigos na base libretro-database CC BY-SA 4.0 via HTTPS, permite selecionar quais ativar e mantém cache para uso offline posterior. A busca é heurística: checar revisão/região.
 - Três slots de save state mais importação/exportação e bloqueio de restore com ROM divergente.
 - **Multiplayer local sem internet**: controle tátil P1 + gamepad P2, ou dois gamepads em P1/P2.
-- **Multiplayer experimental LAN/online por IP TCP**: host P1, cliente P2, SHA-256 da ROM e das opções, sincronização inicial de estado, entradas quadro a quadro e detecção periódica de divergência; conexão direta por IP e porta, sem servidores externos.
+- **Multiplayer experimental LAN/online** com **descoberta automática na rede Wi-Fi por UDP**, seleção de sala com um toque ou IP/porta manual por TCP: host P1, cliente P2, SHA-256 da ROM e das opções, sincronização inicial de estado, entradas quadro a quadro e detecção periódica de divergência; conexão direta por IP e porta, sem servidores externos. Opcionalmente envia ROM **apenas quando host e cliente autorizam e a ROM pode ser redistribuída legalmente**, somente entre IPs privados, com limite de 64 MiB e SHA-256. Desativado por padrão.
 - Testes JVM de protocolo loopback (dois peers) e rejeição de ROM divergente.
 
 ## Estado de validação
@@ -38,7 +39,11 @@ A compilação via GitHub Actions fornece o artefato `app-debug` contendo `app-d
 
 **Dois controles locais:** importe um jogo compatível com dois jogadores, abra-o, volte à aba Multiplayer, habilite "Ativar porta 2" e conecte um ou dois controles Bluetooth/USB.
 
-**Dois celulares:** em ambos, instale o mesmo APK, importe e abra a mesma ROM. No primeiro celular escolha **Criar sala**; no segundo digite o IPv4 mostrado pelo anfitrião e toque **Entrar na sala**. É necessário estar na mesma rede Wi-Fi sem isolamento entre clientes. Fora da LAN é necessária uma conexão TCP por IP/porta acessível (ex.: VPN privada). **Não exponha a porta experimental diretamente à internet pública.**
+**Dois celulares:** abra a mesma ROM em ambos e instale a mesma versão do APK. Um toca em **Criar sala**; o outro vê a sala aparecer automaticamente na rede e toca nela. Se a busca não funcionar, use **IP/porta** manual.
+
+**Importação opcional pelo host:** apenas para ROM homebrew, domínio público ou com licença para redistribuir: o host marca **Compartilhar minha ROM autorizada**, e o cliente marca **Aceitar ROM autorizada**. Quando os SHA-256 diferem, o host transfere via rede privada e o cliente grava a ROM no armazenamento interno e a abre. Sem as duas autorizações, ROMs diferentes são rejeitadas. **Não habilitar esse recurso para ROM comercial sem direito de redistribuição.** É necessário estar na mesma rede Wi-Fi sem isolamento entre clientes. Fora da LAN é necessária uma conexão TCP por IP/porta acessível (ex.: VPN privada). **Não exponha a porta experimental diretamente à internet pública.**
+
+Cheats usam internet somente no primeiro download; o catálogo e arquivos consultados ficam em cache interno. Veja [cheats e descoberta LAN](docs/CHEATS_AND_LAN.md).
 
 Detalhes e riscos: [Netplay](docs/NETPLAY.md), [referências e segurança](docs/REFERENCES_AND_SECURITY.md), [roteiro de testes reais](docs/DEVICE_SMOKE_TEST.md), [arquitetura](docs/ARCHITECTURE.md).
 

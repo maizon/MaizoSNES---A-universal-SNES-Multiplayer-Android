@@ -2,6 +2,8 @@ package com.maizon.maizosnes
 
 import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.net.wifi.WifiManager
+import android.content.Context
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.InputDevice
@@ -22,6 +24,7 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlin.math.abs
 
@@ -40,10 +43,19 @@ class MainActivity : ComponentActivity() {
     private val paused = androidx.compose.runtime.mutableStateOf(false)
     private val pressedInputs = AtomicInteger(0)
     private val lanStatus = androidx.compose.runtime.mutableStateOf("Sem sessão ativa.")
+    private val availableLanRooms = androidx.compose.runtime.mutableStateOf<List<LanRoom>>(emptyList())
+    private val scanningLan = androidx.compose.runtime.mutableStateOf(false)
+    private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(false)
+    private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(false)
+    private val cheatEntries = androidx.compose.runtime.mutableStateOf<List<CheatEntry>>(emptyList())
+    private val activeCheatIds = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
+    private val cheatStatus = androidx.compose.runtime.mutableStateOf("Abra uma ROM para consultar cheats.")
+    private var cheatRomKey: String? = null
     private val localPlayer2Enabled = androidx.compose.runtime.mutableStateOf(false)
     private val gamepadKeyMasks = ConcurrentHashMap<Int, Int>()
     private val gamepadAxisMasks = ConcurrentHashMap<Int, Int>()
     private var netplaySession: NetplaySession? = null
+    private var hostWifiLock: WifiManager.MulticastLock? = null
 
     private var audioOutput: AudioOutput? = null
     private var hasLoadedRom = false
@@ -98,6 +110,18 @@ class MainActivity : ComponentActivity() {
                     settings = appSettings.value,
                     coreOptions = coreSettings.toMap(),
                     multiplayerStatus = lanStatus.value,
+                    lanRooms = availableLanRooms.value,
+                    scanningLan = scanningLan.value,
+                    onScanLan = ::scanLan,
+                    shareRomAllowed = shareRomAllowed.value,
+                    receiveRomAllowed = receiveRomAllowed.value,
+                    onShareRomAllowedChanged = { shareRomAllowed.value = it },
+                    onReceiveRomAllowedChanged = { receiveRomAllowed.value = it },
+                    cheats = cheatEntries.value,
+                    enabledCheatIds = activeCheatIds.value,
+                    cheatStatus = cheatStatus.value,
+                    onToggleCheat = ::toggleCheat,
+                    onRefreshCheats = { searchCheats(refresh = true) },
                     localIpAddress = localIp,
                     multiplayerActive = netplaySession != null,
                     localMultiplayer = localPlayer2Enabled.value,
@@ -324,6 +348,9 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
                 hasLoadedRom = true
+                cheatEntries.value = emptyList()
+                activeCheatIds.value = emptySet()
+                cheatRomKey = null
                 currentRomFile.value = file
                 currentRomName.value = file.name
                 userPaused = false
@@ -336,11 +363,147 @@ class MainActivity : ComponentActivity() {
                 enterImmersiveGameplay()
                 statusMessage.value = "ROM carregada: " + file.name
                 syncPlaybackState()
+                searchCheats()
             } catch (error: Exception) {
                 statusMessage.value = "Falha ao carregar a ROM: " + (error.message ?: "erro de leitura")
                 syncPlaybackState()
             }
         }
+    }
+
+    private fun romSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(65536)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                digest.update(buffer, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun searchCheats(refresh: Boolean = false) {
+        val file = currentRomFile.value ?: return
+        if (netplaySession != null) return
+        cheatStatus.value = "Pesquisando cheats automaticamente para " + file.nameWithoutExtension + "…"
+        lifecycleScope.launch {
+            try {
+                val (result, hash) = withContext(Dispatchers.IO) {
+                    CheatCatalog.find(this@MainActivity, file, refresh) to romSha256(file)
+                }
+                if (currentRomFile.value?.absolutePath != file.absolutePath || netplaySession != null) return@launch
+                cheatEntries.value = result.entries
+                cheatRomKey = "cheat_selection_" + hash
+                val stored = prefs.getStringSet(cheatRomKey, emptySet())?.toSet() ?: emptySet()
+                activeCheatIds.value = stored.intersect(result.entries.map { it.id }.toSet())
+                cheatStatus.value = result.message
+                applyActiveCheats()
+            } catch (error: Exception) {
+                if (currentRomFile.value?.absolutePath == file.absolutePath) {
+                    cheatStatus.value = "Não foi possível consultar cheats: " +
+                        (error.message ?: "sem conexão").take(160) +
+                        ". Cheats já armazenados em cache podem funcionar offline."
+                }
+            }
+        }
+    }
+
+    private fun toggleCheat(id: String, enabled: Boolean) {
+        if (netplaySession != null) {
+            cheatStatus.value = "Cheats ficam desativados durante partidas LAN/online."
+            return
+        }
+        if (cheatEntries.value.none { it.id == id }) return
+        val next = if (enabled) activeCheatIds.value + id else activeCheatIds.value - id
+        if (next.size > 64) {
+            cheatStatus.value = "Limite de 64 cheats simultâneos."
+            return
+        }
+        activeCheatIds.value = next
+        cheatRomKey?.let { key -> prefs.edit().putStringSet(key, next).apply() }
+        applyActiveCheats()
+    }
+
+    private fun applyActiveCheats() {
+        if (!hasLoadedRom || netplaySession != null) return
+        val selected = cheatEntries.value.filter { it.id in activeCheatIds.value }
+            .map { it.code }.take(64).toTypedArray()
+        val result = runCatching { NativeBridge.nativeApplyCheats(selected) }.getOrDefault(-99)
+        if (result < 0) cheatStatus.value = "Não foi possível aplicar cheats (erro $result)."
+    }
+
+    private fun createDiscoveryLock(): WifiManager.MulticastLock? = runCatching {
+        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifi.createMulticastLock("MaizoSNES-LAN-discovery").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }.getOrNull()
+
+    private fun scanLan() {
+        if (scanningLan.value || netplaySession != null) return
+        scanningLan.value = true
+        lifecycleScope.launch {
+            val discoveryLock = createDiscoveryLock()
+            try {
+                availableLanRooms.value = withContext(Dispatchers.IO) { LanDiscovery.scan() }
+                if (availableLanRooms.value.isEmpty()) {
+                    lanStatus.value = "Nenhuma sala encontrada via Wi-Fi. Use IP e porta manualmente."
+                }
+            } catch (error: Exception) {
+                lanStatus.value = "Busca LAN indisponível: " + (error.message ?: "rede")
+            } finally {
+                runCatching { discoveryLock?.release() }
+                scanningLan.value = false
+            }
+        }
+    }
+
+    private fun installReceivedRom(name: String, bytes: ByteArray): Boolean {
+        // Invoked by TCP worker, never by the Android UI thread.
+        val cleaned = safeFileName(name)
+        val extension = cleaned.substringAfterLast('.', "").lowercase()
+        if (extension !in setOf("sfc", "smc") || bytes.isEmpty() ||
+            bytes.size > 64 * 1024 * 1024) return false
+        var destination = File(romDirectory, cleaned)
+        var n = 2
+        while (destination.exists()) {
+            destination = File(romDirectory,
+                cleaned.substringBeforeLast('.') + " (" + n + ")." + extension)
+            n++
+            if (n > 10000) return false
+        }
+        val temporary = File(romDirectory, destination.name + ".importing")
+        return runCatching {
+            temporary.writeBytes(bytes)
+            check(temporary.renameTo(destination)) { "Não foi possível salvar ROM recebida." }
+            val result = NativeBridge.nativeLoadRom(bytes, destination.name)
+            if (result != 0) {
+                destination.delete()
+                return@runCatching false
+            }
+            val installed = destination
+            runOnUiThread {
+                audioOutput?.stop()
+                audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate()).also {
+                    it.setVolume(appSettings.value.volume)
+                    it.setEnabled(appSettings.value.audioEnabled)
+                }
+                hasLoadedRom = true
+                currentRomFile.value = installed
+                currentRomName.value = installed.name
+                appSettings.value = readSettings(profilePrefix(installed))
+                cheatEntries.value = emptyList()
+                activeCheatIds.value = emptySet()
+                cheatRomKey = null
+                cheatStatus.value = "Cheats desativados durante o multiplayer."
+                refreshLibrary()
+                statusMessage.value = "ROM autorizada recebida na biblioteca: " + installed.name
+            }
+            true
+        }.getOrElse { temporary.delete(); false }
     }
 
     private fun continueGame() {
@@ -700,21 +863,25 @@ class MainActivity : ComponentActivity() {
     private fun joinMultiplayer(host: String, port: Int) = startNetplay(host, port)
 
     private fun startNetplay(host: String?, port: Int) {
-        if (!hasLoadedRom || currentRomFile.value == null) {
-            lanStatus.value = "Abra a mesma ROM nos dois aparelhos e volte ao Multiplayer."
+        if (netplaySession != null) return
+        if (host == null && (!hasLoadedRom || currentRomFile.value == null)) {
+            lanStatus.value = "Como host, abra uma ROM antes de criar a sala."
             return
         }
-        if (netplaySession != null) return
+        if (host != null && !hasLoadedRom && !receiveRomAllowed.value) {
+            lanStatus.value = "Abra a mesma ROM ou permita receber ROM homebrew/autorizada."
+            return
+        }
         if (port !in 1024..65535 || (host != null && host.isBlank())) {
             lanStatus.value = "Informe endereço e porta válidos (1024–65535)."
             return
         }
         userPaused = true
         syncPlaybackState()
-        val rom = currentRomFile.value ?: return
+        val current = currentRomFile.value
         lateinit var session: NetplaySession
         session = NetplaySession(
-            rom = rom,
+            rom = current,
             coreOptions = coreSettings.toMap(),
             localInput = { currentLocalInput() },
             prepare = { enabled -> NativeBridge.nativeSetNetplayMode(enabled) },
@@ -723,6 +890,9 @@ class MainActivity : ComponentActivity() {
             step = { player1, player2 -> NativeBridge.nativeNetplayStep(player1, player2) },
             stateHash = { NativeBridge.nativeNetplayStateHash() },
             framePeriodNs = { NativeBridge.nativeGetFramePeriodNs() },
+            shareAllowedByHost = shareRomAllowed.value && host == null,
+            receiveAllowedByClient = receiveRomAllowed.value && host != null,
+            onReceiveRom = ::installReceivedRom,
             onStatus = { message ->
                 runOnUiThread {
                     if (netplaySession === session) {
@@ -741,6 +911,8 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (netplaySession === session) {
                         netplaySession = null
+                        runCatching { hostWifiLock?.release() }
+                        hostWifiLock = null
                         lanStatus.value = message
                         statusMessage.value = message
                         userPaused = true
@@ -751,11 +923,16 @@ class MainActivity : ComponentActivity() {
                         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
                         publishInputs()
                         syncPlaybackState()
+                        applyActiveCheats()
+                        if (currentRomFile.value != null && cheatEntries.value.isEmpty()) {
+                            searchCheats()
+                        }
                     }
                 }
             }
         )
         netplaySession = session
+        if (host == null) hostWifiLock = createDiscoveryLock()
         lanStatus.value = if (host == null) "Abrindo sala…" else "Conectando…"
         if (host == null) session.host(port) else session.join(host, port)
     }
@@ -797,6 +974,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         netplaySession?.stop()
+        runCatching { hostWifiLock?.release() }
+        hostWifiLock = null
         activityResumed = false
         surfaceAttached = false
         audioOutput?.stop()

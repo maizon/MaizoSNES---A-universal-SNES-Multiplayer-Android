@@ -12,6 +12,13 @@ Esta revisão implementa **código** para partidas locais com dois controles fí
 - Jogos individuais não viram multiplayer; depende do suporte nativo do cartucho.
 - Ainda falta UI de remapeamento por dispositivo, testes de hot-plug e multitap 3–5 jogadores.
 
+### Descoberta automática LAN
+
+- O anfitrião anuncia sua sala na porta **UDP 55436** enquanto espera um jogador.
+- O cliente procura salas assim que entra na aba Multiplayer; o botão **BUSCAR** repete a consulta. O endereço e a porta encontrados aparecem na lista; tocar conecta.
+- Se o roteador tiver isolamento entre clientes, hotspot com bloqueios ou filtro de broadcast, use **IP/porta manual**; não exige internet.
+- Descoberta não funciona entre redes diferentes. O transporte real é TCP, padrão **55435**, porta ajustável.
+
 ### LAN e online por endereço
 
 1. Instale **exatamente a mesma versão do APK** em ambos os aparelhos.
@@ -21,13 +28,13 @@ Esta revisão implementa **código** para partidas locais com dois controles fí
 5. No cliente (P2), digite o IPv4 local indicado no anfitrião e pressione **Entrar na sala**.
 6. Após handshake e sincronização de estado, ambos entram na tela de jogo. Para sair, feche a partida pela navegação do app; sair do app/desconectar também encerra a sessão.
 
-Online remoto: exige IP/porta TCP realmente acessível, tipicamente por uma VPN privada confiável ou encaminhamento de porta; roteadores com CGNAT impedem conexão direta. O APK não oferece relay, descoberta automática, matchmaking, STUN/TURN ou TLS. **Não recomendamos expor a porta diretamente à internet aberta**, pois o protocolo experimental não tem autenticação nem criptografia.
+Online remoto: exige IP/porta TCP realmente acessível, tipicamente por uma VPN privada confiável ou encaminhamento de porta; roteadores com CGNAT impedem conexão direta. O APK oferece busca automática **LAN por broadcast UDP 55436**, mas não oferece relay, descoberta internet, matchmaking, STUN/TURN ou TLS. **Não recomendamos expor a porta diretamente à internet aberta**, pois o protocolo experimental não tem autenticação nem criptografia.
 
-## Contrato de sincronização (MZNP v1)
+## Contrato de sincronização (MZNP v2)
 
 - TCP em ordem, `TCP_NODELAY`, timeout de 10 s ao conectar e até 20 s para negociação (5 s por leitura de frame).
-- Host envia magic `MZNP`, versão 1, SHA-256 exata do arquivo ROM e SHA-256 do identificador fixo de núcleo + opções ordenadas; cliente compara e devolve os próprios dados.
-- ROM ou opções divergentes cancelam a sessão antes de um único frame.
+- Host envia magic `MZNP`, versão 2, SHA-256 exata do arquivo ROM e SHA-256 do identificador fixo de núcleo + opções ordenadas; cliente compara e devolve os próprios dados.
+- Opções divergentes impedem a partida. Quando a ROM diverge, o protocolo **não** a envia por padrão: exige opt-in simultâneo do host e do cliente, conexão entre IPs privados, tamanho máximo de 64 MiB e confirmação SHA-256 da ROM antes de importar. Destino: biblioteca interna do aplicativo. A licença da ROM precisa permitir redistribuição (homebrew/domínio público/autorização); arquivos comerciais não são compartilháveis por este recurso sem direitos. Se qualquer condição falhar, a sessão recusa o jogo.
 - Host transfere estado serializado **limitado a 64 MiB + cabeçalho**; cliente restaura e confirma.
 - Host joga na porta libretro 0, cliente na porta 1. Em cada quadro ambos enviam sequência monotônica e máscara local (16 bits), recebem a remota e executam **um único** `retro_run` após a troca, sob mutex do núcleo.
 - Periodicamente, a cada 120 frames, compara-se um fingerprint de 64 bits do save state; divergência é falha fatal informada, não é escondida.
@@ -42,6 +49,6 @@ O caminho para respostas locais muito rápidas é **predição + rollback** com 
 
 ## Testes
 
-- `./gradlew testDebugUnitTest` contém teste local TCP loopback com dois peers e rejeição de ROM divergente (sem ROM comercial).
+- `./gradlew testDebugUnitTest` contém testes TCP loopback, recusa de ROM divergente, transferência autorizada em rede privada (quando o runner tem IPv4 privado) e parsing de cheats/descoberta, sem ROM comercial.
 - CI valida compilação e protocolo básico **somente no JVM**; não mede input-lag, Wi-Fi, NAT, velocidade nem funcionamento de jogos.
 - Em hardware real, testar troca de inputs simultâneos, dez minutos por jogo, NTSC/PAL, reconnect, redes com perda/jitter, hashes e término de sessão. Registrar APK SHA, Android, modelo e logs.

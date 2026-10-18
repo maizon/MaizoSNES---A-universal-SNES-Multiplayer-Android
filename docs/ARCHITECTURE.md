@@ -23,3 +23,10 @@
 - Save RAM persistente (SRAM) independente dos save states não foi homologada.
 - No netplay, opções divergentes ou ROM diferente bloqueiam conexão; identidade do core é um identificador do build, **não hash binário**. Comparar hashes de memória serializada pode acusar dessíncronia em núcleos não determinísticos.
 - ROM e jogos não são incluídos no repositório ou APK. Obras/licenças de terceiros em LICENSES/ e THIRD_PARTY_NOTICES.md.
+
+## Recursos adicionais desta fase
+
+- CheatCatalog consulta índice fixado na árvore pública de libretro-database e baixa apenas arquivos `.cht` selecionados automaticamente pelo nome da ROM ou título ASCII do cabeçalho SNES. Dados em cache privado; fonte com atribuição CC BY-SA 4.0. JNI limpa e recompõe grupos de cheats via `retro_cheat_reset` e `retro_cheat_set`, impondo **limite de 190 bytes ASCII por código** devido ao `strcpy` vulnerável do core Snes9x 1.63. Cheats são desativados durante lockstep.
+- `LanDiscovery.kt` usa broadcast UDP 55436 (anúncio somente enquanto host espera), busca automática por interface IPv4 com fallback manual. O app utiliza Wi-Fi multicast lock durante anúncio/scan quando disponível.
+- MZNP v2 negocia hashes de ROM e opções; uma ROM divergente pode ser oferecida **apenas** para pares IPv4 privados e somente com consentimento explícito bilateral e direitos legais de distribuição. O cliente verifica SHA-256, importa na pasta privada e chama nativeLoadRom antes de confirmar o estado compartilhado.
+- A barra in-game é recolhida a círculo semitransparente de 44 dp e reabre sob toque.

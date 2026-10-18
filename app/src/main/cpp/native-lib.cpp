@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -377,6 +378,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeLoadRom(
         info.size = bytes.size();
         info.meta = nullptr;
         loaded = retro_load_game(&info);
+        if (loaded) retro_cheat_reset(); // Do not carry previous ROM's cheat groups.
         g_romFingerprint = loaded ? romFingerprint : 0;
         g_gameLoaded.store(loaded, std::memory_order_release);
     }
@@ -437,6 +439,9 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jb
         stopFrameThread();
         g_inputMask.store(0, std::memory_order_release);
         g_player2InputMask.store(0, std::memory_order_release);
+        // Cheats are not frame-deterministic across all cores/ROMs. Disable them.
+        std::lock_guard<std::mutex> lock(g_coreMutex);
+        if (g_gameLoaded.load(std::memory_order_acquire)) retro_cheat_reset();
     } else {
         stopFrameThread();
         g_netplayMode.store(false, std::memory_order_release);
@@ -495,6 +500,47 @@ Java_com_maizon_maizosnes_NativeBridge_nativeReadAudio(JNIEnv* env, jobject, jsh
     return static_cast<jint>(count);
 }
 
+
+// Rebuild from a complete selected set to allow deactivation. In pinned
+// Snes9x libretro.cpp, retro_cheat_set() uses a 256-byte unchecked strcpy:
+// reject untrusted cheat strings longer than 190 ASCII chars *before* calling.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeApplyCheats(
+    JNIEnv* env, jobject, jobjectArray codesArray) {
+    if (!codesArray) return -1;
+    const jsize count = env->GetArrayLength(codesArray);
+    if (count > 64 || count < 0) return -2;
+    std::vector<std::string> selected;
+    selected.reserve(static_cast<size_t>(count));
+    for (jsize i = 0; i < count; ++i) {
+        auto* item = static_cast<jstring>(env->GetObjectArrayElement(codesArray, i));
+        if (!item) return -3;
+        const char* chars = env->GetStringUTFChars(item, nullptr);
+        if (!chars) {
+            env->DeleteLocalRef(item);
+            return -3;
+        }
+        std::string code(chars);
+        env->ReleaseStringUTFChars(item, chars);
+        env->DeleteLocalRef(item);
+        if (code.empty() || code.size() > 190 ||
+            !std::all_of(code.begin(), code.end(), [](unsigned char c) {
+                return (c >= '0' && c <= '9') ||
+                    (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f') ||
+                    c == '-' || c == ':' || c == '+' ||
+                    c == ',' || c == '.' || c == ';' || c == ' ';
+            })) return -4;
+        selected.emplace_back(std::move(code));
+    }
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire)) return -5;
+    if (g_netplayMode.load(std::memory_order_acquire)) return -6;
+    retro_cheat_reset();
+    for (size_t i = 0; i < selected.size(); ++i) {
+        retro_cheat_set(static_cast<unsigned>(i), true, selected[i].c_str());
+    }
+    return static_cast<jint>(selected.size());
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetCoreOption(

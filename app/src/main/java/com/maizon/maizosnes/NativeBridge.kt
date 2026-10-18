@@ -9,6 +9,8 @@ object NativeBridge {
     external fun nativeLoadRom(bytes: ByteArray, displayName: String): Int
     external fun nativeSetSurface(surface: Surface?)
     external fun nativeSetInput(bits: Int)
+    /** Complete selected cheat set, rebuilt atomically. Negative value means rejection. */
+    external fun nativeApplyCheats(codes: Array<String>): Int
     external fun nativeSetPlayer2Input(bits: Int)
     external fun nativeSetNetplayMode(enabled: Boolean)
     external fun nativeNetplayStep(player1: Int, player2: Int): Int

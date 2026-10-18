@@ -19,3 +19,12 @@ Gradle Wrapper 8.11.1 is sourced from the Gradle project and distributed under t
 - This component has a separate LGPL license; retain the license and comply with the requirements applicable to the way it is linked and distributed.
 
 No ROMs or copyrighted game assets are bundled.
+
+## Catálogo de cheats baixado sob demanda (libretro-database)
+
+- Origem: https://github.com/libretro/libretro-database
+- Pasta consultada: `cht/Nintendo - Super Nintendo Entertainment System`
+- Revisão fixada: `12c21cf79f1e20eff6ac68b80875816c717d0a7a`
+- Licença do repositório: **Creative Commons Attribution–ShareAlike 4.0 International** (CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/ e https://github.com/libretro/libretro-database/blob/master/LICENSE
+- Arquivos `.cht` **não são incluídos no APK**. Somente códigos do jogo consultado são baixados pela interface e armazenados em cache interno do aparelho. O MaizoSNES modifica a apresentação dos arquivos (filtra códigos e oferece toggles de habilitação).
+- Créditos pela compilação da base: equipe e contribuidores libretro-database. As descrições de cheats são mantidas com atribuição de origem do arquivo para o usuário.
