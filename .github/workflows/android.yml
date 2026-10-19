@@ -60,8 +60,12 @@ jobs:
         run: |
           set -euo pipefail
           "${{ steps.android-sdk.outputs.sdkmanager }}" --install "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264" "cmake;3.22.1"
-      - name: Test public relay directory and bidirectional TCP stream
-        run: node --test server/relay.test.js
+      - name: Set up Node.js 22 for WebSocket integration tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test TCP, TLS, WSS and local public-smoke protocol
+        run: node --test server/*.test.js
       - name: Prepare pinned Snes9x source and license assets
         run: bash scripts/fetch_snes9x.sh
       - name: Run loopback multiplayer tests and build debug APK
@@ -88,3 +92,13 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+      - name: Probe live Railway HTTPS API and WSS (external, non-blocking)
+        id: railway_smoke
+        continue-on-error: true
+        timeout-minutes: 2
+        run: node scripts/verify_public_wss.js
+      - name: Record live relay verification separately from APK result
+        if: always()
+        run: |
+          echo "Railway public WSS smoke outcome: ${{ steps.railway_smoke.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "External uptime is not an APK build gate; see smoke step logs." >> "$GITHUB_STEP_SUMMARY"

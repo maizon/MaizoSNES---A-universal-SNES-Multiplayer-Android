@@ -33,4 +33,17 @@ class OnlineRegistryTest {
             }
         }
     }
+    @Test fun wssProbeDoesNotDependOnLegacyTcpProxy() {
+        val wssOnly = RelayListing("unreachable.proxy.example", 8788,
+            emptyList(), tls = false, wss = true)
+        assertEquals(RelayProbe.WSS, OnlineRegistry.preferredProbe(wssOnly))
+        assertEquals(RelayProbe.WSS, OnlineRegistry.preferredProbe(
+            wssOnly.copy(tls = true)))
+    }
+    @Test fun legacyTransportsStillUseTcpAndVerifyTlsWhenAdvertised() {
+        val tcp = RelayListing("legacy.example", 8788, emptyList())
+        assertEquals(RelayProbe.TCP, OnlineRegistry.preferredProbe(tcp))
+        assertEquals(RelayProbe.TLS_TCP, OnlineRegistry.preferredProbe(
+            tcp.copy(tls = true)))
+    }
 }

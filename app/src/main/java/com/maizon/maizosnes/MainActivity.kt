@@ -1049,7 +1049,7 @@ class MainActivity : ComponentActivity() {
                 autoServers.value = result.servers
                 autoNetworkStatus.value = result.error ?: (
                     "${result.rooms.size} sala(s) • ${result.servers.size} servidor(es) online. " +
-                        "O MaizoSNES prioriza o menor tempo de resposta HTTP.")
+                        "O MaizoSNES mede a conexão real ao transporte disponível.")
             } catch (error: Exception) {
                 autoRooms.value = emptyList()
                 autoServers.value = emptyList()
@@ -1182,7 +1182,8 @@ class MainActivity : ComponentActivity() {
                 }
                 relayRooms.value = listing.rooms
                 lanStatus.value = "${listing.rooms.size} sala(s) no servidor. " +
-                    "TCP ${listing.serverHost}:${listing.relayPort}"
+                    if (listing.wss) "HTTPS/WSS disponível em ${relayAddress.value}."
+                    else "TCP ${listing.serverHost}:${listing.relayPort}"
             } catch (error: Exception) {
                 relayRooms.value = emptyList()
                 lanStatus.value = "Servidor de salas inacessível: " +

@@ -41,3 +41,18 @@ mentindo sobre TLS não deve aparecer como apto a receber ROM. Ao conectar
 a sessão repete a checagem TLS. Testes de protocolo também cobrem recusa
 pela parte cliente antes da transmissão de bytes. A compatibilidade entre
 celulares remotos reais ainda precisa ser demonstrada.
+
+## Varredura WSS e diagnóstico de conexão (19/10/2026)
+
+A busca automática passa a testar diretamente o upgrade WebSocket protegido por
+TLS para servidores que anunciam WSS, sem depender de proxy TCP separado.
+Servidores TCP antigos mantêm a verificação de certificado/hostname quando
+anunciam TLS. Falhas de conexão por servidor aparecem na interface, sem apagar
+salas encontradas em outros servidores. O painel de IP manual informa quando
+a conexão disponível é HTTPS/WSS.
+
+Um teste de integração usa uma sala efêmera e bytes sintéticos, verificando
+`/api/rooms`, upgrade WSS, HOST/JOIN, READY e tráfego bidirecional. O CI
+executa também um smoke externo no Railway, com resultado separado do build
+Android para que indisponibilidade externa não invalide o APK. **Não há teste
+físico de dois Androids nem prova de transferência real de ROM nesta etapa.**

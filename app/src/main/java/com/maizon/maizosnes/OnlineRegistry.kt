@@ -48,7 +48,21 @@ internal data class AutoSearch(
  * deploys relays and adds their URLs to server/registry.json, existing APKs
  * discover them automatically on their next search without typing an IP.
  */
+internal enum class RelayProbe { WSS, TLS_TCP, TCP }
+internal data class RelayScanAttempt(
+    val status: AutoServerStatus?,
+    val rooms: List<AutoRoom>,
+    val failure: String?
+)
+
 internal object OnlineRegistry {
+    /** A WSS directory does not depend on its legacy TCP proxy. */
+    internal fun preferredProbe(listing: RelayListing): RelayProbe = when {
+        listing.wss -> RelayProbe.WSS
+        listing.tls -> RelayProbe.TLS_TCP
+        else -> RelayProbe.TCP
+    }
+
     private const val MANIFEST_BASE =
         "https://raw.githubusercontent.com/maizon/MaizoSNES---A-universal-SNES-Multiplayer-Android/"
     private const val MAIN_MANIFEST = MANIFEST_BASE +
@@ -149,29 +163,33 @@ internal object OnlineRegistry {
                 "Nenhum servidor público MaizoSNES foi publicado ainda. " +
                     "O multiplayer LAN e o servidor manual continuam disponíveis.")
         }
-        val scans = manifest.map { server ->
+        val attempts = manifest.map { server ->
             async(Dispatchers.IO) {
                 runCatching {
                     val start = System.nanoTime()
                     val listing = RelayDirectory.list(server.endpoint)
-                    // A plain TCP connect does not prove a TLS relay is safe.
-                    // Validate trusted CA and the advertised hostname while scanning,
-                    // then validate again in the actual netplay socket.
-                    java.net.Socket().use { socket ->
-                        socket.connect(java.net.InetSocketAddress(
-                            listing.serverHost, listing.relayPort), 2200)
-                        socket.soTimeout = 2500
-                        if (listing.tls) {
-                            val wrapped =
-                                (javax.net.ssl.SSLSocketFactory.getDefault()
-                                    as javax.net.ssl.SSLSocketFactory)
-                                    .createSocket(socket, listing.serverHost,
-                                        listing.relayPort, false) as javax.net.ssl.SSLSocket
-                            wrapped.use { ssl ->
-                                ssl.sslParameters = ssl.sslParameters.apply {
-                                    endpointIdentificationAlgorithm = "HTTPS"
+                    // Probe the SAME transport used for HOST/JOIN. A WSS-only
+                    // Railway deployment may not expose a public TCP proxy.
+                    when (preferredProbe(listing)) {
+                        RelayProbe.WSS -> WssRelaySocket.connect(server.endpoint).use { }
+                        RelayProbe.TLS_TCP, RelayProbe.TCP -> {
+                            java.net.Socket().use { socket ->
+                                socket.connect(java.net.InetSocketAddress(
+                                    listing.serverHost, listing.relayPort), 2200)
+                                socket.soTimeout = 2500
+                                if (listing.tls) {
+                                    val wrapped =
+                                        (javax.net.ssl.SSLSocketFactory.getDefault()
+                                            as javax.net.ssl.SSLSocketFactory)
+                                            .createSocket(socket, listing.serverHost,
+                                                listing.relayPort, false) as javax.net.ssl.SSLSocket
+                                    wrapped.use { ssl ->
+                                        ssl.sslParameters = ssl.sslParameters.apply {
+                                            endpointIdentificationAlgorithm = "HTTPS"
+                                        }
+                                        ssl.startHandshake()
+                                    }
                                 }
-                                ssl.startHandshake()
                             }
                         }
                     }
@@ -181,15 +199,26 @@ internal object OnlineRegistry {
                         AutoRoom(room.id, room.game, server.name, server.region,
                             server.endpoint, elapsed, room.romHash, room.cheats, room.tls, room.wss)
                     }
-                    AutoServerStatus(server, elapsed, rooms.size) to rooms
-                }.getOrNull()
+                    RelayScanAttempt(AutoServerStatus(server, elapsed, rooms.size),
+                        rooms, null)
+                }.getOrElse { error ->
+                    RelayScanAttempt(null, emptyList(),
+                        "${server.name}: " +
+                            (error.message ?: error.javaClass.simpleName).take(130))
+                }
             }
-        }.awaitAll().filterNotNull()
-        val status = scans.map { it.first }.sortedBy { it.latencyMs }
-        val rooms = scans.flatMap { it.second }.sortedWith(
+        }.awaitAll()
+        val status = attempts.mapNotNull { it.status }.sortedBy { it.latencyMs }
+        val rooms = attempts.flatMap { it.rooms }.sortedWith(
             compareBy<AutoRoom> { it.latencyMs }.thenBy { it.game.lowercase() })
-        AutoSearch(rooms, status, if (status.isEmpty())
-            "Os servidores cadastrados estão indisponíveis. " +
-                "Verifique sua conexão ou use LAN." else null)
+        val failures = attempts.mapNotNull { it.failure }
+        val problem = when {
+            status.isEmpty() -> "Servidores públicos inacessíveis. " +
+                failures.take(3).joinToString(" | ") + ". LAN/IP manual continuam disponíveis."
+            failures.isNotEmpty() -> "${rooms.size} sala(s) disponíveis; " +
+                "falha parcial: " + failures.take(2).joinToString(" | ")
+            else -> null
+        }
+        AutoSearch(rooms, status, problem)
     }
 }
