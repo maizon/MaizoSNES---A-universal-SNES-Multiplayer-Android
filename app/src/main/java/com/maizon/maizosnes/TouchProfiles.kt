@@ -9,6 +9,7 @@ import org.json.JSONObject
 internal enum class TouchPreset(
     val label: String, val hint: String, val diamond: Boolean = false
 ) {
+    VIRTUAL_GAMEPAD("VirtualGamePad Mobile", "Face ABXY superior direita, setas inferiores esquerdas, L/R e Start/Select no topo", true),
     MAIZO("Maizo Original", "Translúcido, clássico SNES"),
     CTR("CTR Racing", "Botões quadrados, compacto para corrida"),
     ARMS("ARMSX Compact", "Neon com bordas finas e amplo espaço livre"),
@@ -71,6 +72,9 @@ internal data class ButtonShift(val x: Float = 0f, val y: Float = 0f) {
 }
 
 internal fun TouchPreset.defaultLayout(): TouchLayout = when (this) {
+    TouchPreset.VIRTUAL_GAMEPAD -> TouchLayout(preset = this,
+        dpadX = 0f, dpadY = 0f, buttonsX = 0f, buttonsY = 0f,
+        scale = 1f, opacity = 0.78f)
     TouchPreset.MAIZO -> TouchLayout(preset = this)
     TouchPreset.CTR -> TouchLayout(preset = this,
         dpadX = 0.055f, dpadY = 0.10f, buttonsX = 0.045f, buttonsY = 0.065f,

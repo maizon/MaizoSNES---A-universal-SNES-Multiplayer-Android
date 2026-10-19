@@ -23,6 +23,18 @@ enviava input de um quadro e aguardava input remoto **a cada quadro**.
 - Teste unitário da política de jitter + teste de integração com
   **200ms RTT simulado** (limiar de FPS estável após handshake).
 
+## Interface e controles
+
+- Novo preset **VirtualGamePad Mobile** como padrão para novos usuários, com
+  dimensões proporcionais às da tela e layout próximo à referência visual:
+  D-pad na parte inferior esquerda, ABXY coloridos na parte superior direita,
+  L/R no topo e Start/Select abaixo. Entrada mapeada aos bits SNES corretos.
+- Controles permanecem multitoque, com editor de grupos/botões e ajustes
+  persistentes por jogo/preset. Os nove presets anteriores são mantidos.
+- O projeto VirtualGamePad-Mobile distribui **código GPL-3.0** que não foi
+  copiado por possíveis obrigações incompatíveis com o Snes9x não comercial.
+  O preset usa desenho vetorial próprio e atribui a inspiração de interface.
+
 ## Limitações e próximos passos
 
 - Pipelining evita serializar um RTT para cada quadro, mas **não é rollback**,

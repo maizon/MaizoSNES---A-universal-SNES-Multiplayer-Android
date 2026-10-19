@@ -1269,10 +1269,10 @@ class MainActivity : ComponentActivity() {
             else prefix + suffix
         val aspectName = prefs.getString(key("aspect"), AspectMode.CRT.name) ?: AspectMode.CRT.name
         val aspect = runCatching { AspectMode.valueOf(aspectName) }.getOrDefault(AspectMode.CRT)
-        val selectedName = prefs.getString(key("touch_preset"), TouchPreset.MAIZO.name)
-            ?: TouchPreset.MAIZO.name
+        val selectedName = prefs.getString(key("touch_preset"), TouchPreset.VIRTUAL_GAMEPAD.name)
+            ?: TouchPreset.VIRTUAL_GAMEPAD.name
         val preset = runCatching { TouchPreset.valueOf(selectedName) }
-            .getOrDefault(TouchPreset.MAIZO)
+            .getOrDefault(TouchPreset.VIRTUAL_GAMEPAD)
         val legacy = TouchLayout(
             enabled = prefs.getBoolean(key("touch_enabled"), true),
             dpadX = prefs.getFloat(key("dpad_x"), 0.02f),

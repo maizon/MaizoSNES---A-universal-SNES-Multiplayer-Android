@@ -56,6 +56,15 @@ Consulte `docs/CHANGELOG_0.8.md` e `docs/SUPER_PROMPT_PREMIUM.md`.
 O modo de rede pública é experimental: sem TLS no túnel TCP, contas ou controle de abuso. Para uso com pessoas não confiáveis configure um relay com VPN privada e autenticação adicionais. O build CI testa o servidor em loopback, mas não confirma estabilidade de GPU ou internet em smartphones reais. Não fornecemos APK comercial ou ROM.
 
 ## Versão 0.9 RC — correção de FPS no multiplayer (MZNP v5)
+ 
+**Controles visuais de fábrica:** preset VirtualGamePad Mobile. O repositório
+de referência https://github.com/kitswas/VirtualGamePad-Mobile contém
+controles como composables e código GPLv3, não um pacote de PNGs pronto para
+uso em software Snes9x não comercial. O MaizoSNES redesenha o gamepad com
+código próprio, mantendo os principais tamanhos/posicionamentos relativos e
+mapeando corretamente todas as ações do SNES; os outros nove presets e editor
+continuam disponíveis.
+
 
 **Relato real de teste do desenvolvedor:** Android + VM conectam pelo online,
 mas o gameplay reduz a aproximadamente **2 FPS**. Causa arquitetural

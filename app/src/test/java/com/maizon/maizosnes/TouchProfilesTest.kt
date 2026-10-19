@@ -23,13 +23,14 @@ class TouchProfilesTest {
     }
 
     @Test fun modernProfilesAreDifferentAndEditable() {
+        assertTrue(TouchPreset.VIRTUAL_GAMEPAD.diamond)
         assertTrue(TouchPreset.PLAYSTATION.diamond)
         assertTrue(TouchPreset.XBOX.diamond)
         assertTrue(TouchPreset.SWITCH.diamond)
         assertTrue(TouchPreset.ARCADE.diamond)
         assertTrue(TouchPreset.STEAM.diamond)
         assertFalse(TouchPreset.MAIZO.diamond)
-        assertEquals(9, TouchPreset.values().size)
+        assertEquals(10, TouchPreset.values().size)
         TouchPreset.values().forEach { preset ->
             val defaults = preset.defaultLayout()
             assertEquals(preset, defaults.preset)

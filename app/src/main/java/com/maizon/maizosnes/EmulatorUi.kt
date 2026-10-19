@@ -123,7 +123,7 @@ internal data class TouchLayout(
     val buttonsY: Float = 0.025f,
     val scale: Float = 1f,
     val opacity: Float = 0.62f,
-    val preset: TouchPreset = TouchPreset.MAIZO,
+    val preset: TouchPreset = TouchPreset.VIRTUAL_GAMEPAD,
     val buttonShifts: Map<Int, ButtonShift> = emptyMap()
 )
 
@@ -1216,6 +1216,11 @@ private fun TouchOverlay(
     editIndividual: Boolean,
     onLayoutChanged: (TouchLayout) -> Unit
 ) {
+    if (layout.preset == TouchPreset.VIRTUAL_GAMEPAD) {
+        VirtualGamepadSnesOverlay(layout, onInputChanged, editing, editIndividual,
+            onLayoutChanged)
+        return
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
@@ -1359,6 +1364,135 @@ private fun TouchOverlay(
 }
 
 /**
+ * Maizo original SNES input overlay in the *visual arrangement* of
+ * VirtualGamePad-Mobile. The upstream project has no separate button-image
+ * pack: its controls are Material Compose components licensed GPL-3.0.
+ * This is independent original code/rendering, NOT copied upstream source.
+ * Common physical control dimensions and placements are adapted:
+ * height-relative 0.45 screen-height face/D-pad cluster, 1/18 edge padding,
+ * shoulder and center buttons placed relative to 1/4 screen-height.
+ *
+ * SNES face mapping stays native: Y=bit1, X=bit9, B=bit0, A=bit8.
+ * Separate buttons (and diagonal D-pad gesture) allow multitouch.
+ */
+@Composable
+private fun VirtualGamepadSnesOverlay(
+    layout: TouchLayout,
+    onInputChanged: (Int, Boolean) -> Unit,
+    editing: Boolean,
+    editIndividual: Boolean,
+    onLayoutChanged: (TouchLayout) -> Unit
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val widthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+        val heightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+        val liveLayout by rememberUpdatedState(layout)
+        val liveUpdate by rememberUpdatedState(onLayoutChanged)
+        val edge = maxHeight / 18f
+        val cluster = maxHeight * (0.45f * layout.scale.coerceIn(0.65f, 1.45f))
+        val buttonSize = cluster.value * 0.4f
+        val miniButtonSize = (maxHeight.value * layout.scale / 7f).coerceIn(30f, 58f)
+
+        fun offsetBit(bit: Int): Modifier {
+            val shift = layout.buttonShifts[bit] ?: ButtonShift()
+            val placement = Modifier.offset(
+                x = maxWidth * shift.x.coerceIn(-0.30f, 0.30f),
+                y = maxHeight * shift.y.coerceIn(-0.30f, 0.30f)
+            )
+            val edit = if (editing && editIndividual) Modifier.pointerInput(bit) {
+                detectDragGestures { change, delta ->
+                    change.consume()
+                    val old = liveLayout.buttonShifts[bit] ?: ButtonShift()
+                    val updated = ButtonShift(old.x + delta.x / widthPx,
+                        old.y + delta.y / heightPx).sanitized()
+                    liveUpdate(liveLayout.copy(
+                        buttonShifts = liveLayout.buttonShifts + (bit to updated)))
+                }
+            } else Modifier
+            return placement.then(edit)
+        }
+        val dragDpad = if (editing) Modifier.pointerInput(editing) {
+            detectDragGestures { change, delta ->
+                change.consume()
+                liveUpdate(liveLayout.copy(
+                    dpadX = (liveLayout.dpadX + delta.x / widthPx).coerceIn(0f, 0.65f),
+                    dpadY = (liveLayout.dpadY - delta.y / heightPx).coerceIn(0f, 0.65f)))
+            }
+        } else Modifier
+        val dragFace = if (editing && !editIndividual) Modifier.pointerInput(editing) {
+            detectDragGestures { change, delta ->
+                change.consume()
+                liveUpdate(liveLayout.copy(
+                    buttonsX = (liveLayout.buttonsX - delta.x / widthPx).coerceIn(0f, 0.65f),
+                    buttonsY = (liveLayout.buttonsY + delta.y / heightPx).coerceIn(0f, 0.65f)))
+            }
+        } else Modifier
+
+        // D-pad bottom left, shifted +1/3 screen height from the left edge.
+        Box(Modifier.align(Alignment.BottomStart)
+            .offset(x = edge + maxHeight / 3f + maxWidth * layout.dpadX,
+                y = -edge - maxHeight * layout.dpadY)
+            .then(dragDpad)) {
+            GestureDpad(buttonSize, layout.opacity, onInputChanged,
+                enabled = !editing, skin = TouchPreset.VIRTUAL_GAMEPAD)
+        }
+
+        // Face controls top right, A south / B east / X west / Y north.
+        // Same screen-space diamond as the upstream reference, SNES bit mapping.
+        Box(Modifier.align(Alignment.TopEnd)
+            .offset(x = -edge - maxWidth * layout.buttonsX,
+                y = edge + maxHeight * layout.buttonsY)
+            .size(cluster)
+            .then(dragFace)) {
+            TouchButton("Y", 1, buttonSize, layout.opacity, onInputChanged,
+                enabled = !editing, skin = TouchPreset.VIRTUAL_GAMEPAD,
+                positionModifier = Modifier.align(Alignment.TopCenter).then(offsetBit(1)))
+            TouchButton("X", 9, buttonSize, layout.opacity, onInputChanged,
+                enabled = !editing, skin = TouchPreset.VIRTUAL_GAMEPAD,
+                positionModifier = Modifier.align(Alignment.CenterStart).then(offsetBit(9)))
+            TouchButton("B", 0, buttonSize, layout.opacity, onInputChanged,
+                enabled = !editing, skin = TouchPreset.VIRTUAL_GAMEPAD,
+                positionModifier = Modifier.align(Alignment.CenterEnd).then(offsetBit(0)))
+            TouchButton("A", 8, buttonSize, layout.opacity, onInputChanged,
+                enabled = !editing, skin = TouchPreset.VIRTUAL_GAMEPAD,
+                positionModifier = Modifier.align(Alignment.BottomCenter).then(offsetBit(8)))
+        }
+
+        // L/R at upper center +/-1/4 screen height. No phantom LT/RT:
+        // SNES only exposes L/R. Center controls use the same anchor system.
+        Box(Modifier.align(Alignment.TopCenter)
+            .offset(x = -(maxHeight / 4f), y = edge)
+            .then(offsetBit(10))) {
+            TouchButton("L", 10, miniButtonSize, layout.opacity,
+                onInputChanged, isPill = true, enabled = !editing,
+                skin = TouchPreset.VIRTUAL_GAMEPAD)
+        }
+        Box(Modifier.align(Alignment.TopCenter)
+            .offset(x = maxHeight / 4f, y = edge)
+            .then(offsetBit(11))) {
+            TouchButton("R", 11, miniButtonSize, layout.opacity,
+                onInputChanged, isPill = true, enabled = !editing,
+                skin = TouchPreset.VIRTUAL_GAMEPAD)
+        }
+        Box(Modifier.align(Alignment.TopCenter)
+            .offset(x = -(maxHeight / 4f), y = edge + maxHeight / 4f)
+            .then(offsetBit(2))) {
+            TouchButton("SELECT", 2, miniButtonSize * 0.7f, layout.opacity,
+                onInputChanged, isPill = true, enabled = !editing,
+                skin = TouchPreset.VIRTUAL_GAMEPAD)
+        }
+        Box(Modifier.align(Alignment.TopCenter)
+            .offset(x = maxHeight / 4f, y = edge + maxHeight / 4f)
+            .then(offsetBit(3))) {
+            TouchButton("START", 3, miniButtonSize * 0.7f, layout.opacity,
+                onInputChanged, isPill = true, enabled = !editing,
+                skin = TouchPreset.VIRTUAL_GAMEPAD)
+        }
+    }
+}
+
+/**
  * One continuous touch surface: moving the thumb changes the direction without
  * lifting it; diagonals press two real libretro joypad bits simultaneously.
  * The control does not intercept touches when the layout editor is active.
@@ -1373,7 +1507,8 @@ private fun GestureDpad(
 ) {
     val currentInput by rememberUpdatedState(onInputChanged)
     val gap = 2.dp
-    val total = (cellSize * 3).dp + gap * 2
+    val total = if (skin == TouchPreset.VIRTUAL_GAMEPAD)
+        (cellSize * 2.5f).dp else (cellSize * 3).dp + gap * 2
     Box(
         modifier = Modifier.size(total)
             .then(if (enabled) Modifier.pointerInput(Unit) {
@@ -1412,7 +1547,24 @@ private fun GestureDpad(
             } else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        Column(
+        if (skin == TouchPreset.VIRTUAL_GAMEPAD) {
+            // Compact D-pad with 4 separated direction discs. The outer
+            // gesture handler still supports continuous diagonals.
+            Box(Modifier.fillMaxSize()) {
+                TouchButton("▲", 4, cellSize, opacity, onInputChanged,
+                    enabled = false, skin = skin,
+                    positionModifier = Modifier.align(Alignment.TopCenter))
+                TouchButton("▼", 5, cellSize, opacity, onInputChanged,
+                    enabled = false, skin = skin,
+                    positionModifier = Modifier.align(Alignment.BottomCenter))
+                TouchButton("◀", 6, cellSize, opacity, onInputChanged,
+                    enabled = false, skin = skin,
+                    positionModifier = Modifier.align(Alignment.CenterStart))
+                TouchButton("▶", 7, cellSize, opacity, onInputChanged,
+                    enabled = false, skin = skin,
+                    positionModifier = Modifier.align(Alignment.CenterEnd))
+            }
+        } else Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(gap)
         ) {
@@ -1453,6 +1605,13 @@ private fun TouchButton(
             skin == TouchPreset.SWITCH) RoundedCornerShape(13.dp)
         else CircleShape
     val faceAccent = when (skin) {
+        TouchPreset.VIRTUAL_GAMEPAD -> when (bit) {
+            8 -> Color(0xFF38EF58)   // SNES A / VGP green
+            0 -> Color(0xFFFF5965)   // SNES B / VGP red
+            9 -> Color(0xFF4B9EFF)   // SNES X / VGP blue
+            1 -> Color(0xFFFFFF4D)   // SNES Y / VGP yellow
+            else -> Color(0xFFDBE5FF)
+        }
         TouchPreset.PLAYSTATION -> when (bit) {
             9 -> Color(0xFF50E6A5)  // triangle
             8 -> Color(0xFFFF646B)  // circle
@@ -1479,7 +1638,7 @@ private fun TouchButton(
     val glyph = when (skin) {
         TouchPreset.MAIZO, TouchPreset.CTR -> Color(0xFF121522)
         TouchPreset.ARMS -> Color(0xFF7FFFE3)
-        TouchPreset.PLAYSTATION -> faceAccent
+        TouchPreset.PLAYSTATION, TouchPreset.VIRTUAL_GAMEPAD -> faceAccent
         TouchPreset.PPSSPP, TouchPreset.XBOX, TouchPreset.SWITCH,
         TouchPreset.ARCADE, TouchPreset.STEAM -> Color.White
     }
@@ -1506,6 +1665,23 @@ private fun TouchButton(
             val radius = minOf(this.size.width, this.size.height) * 0.47f
             val corner = CornerRadius(radius * 0.32f, radius * 0.32f)
             when (skin) {
+                TouchPreset.VIRTUAL_GAMEPAD -> {
+                    // Deep graphite backing and colored outline like a
+                    // mobile virtual pad, independently drawn as SNES vector art.
+                    if (isPill) {
+                        drawRoundRect(color = Color(0xFF111C2D).copy(alpha = alpha * .82f),
+                            cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()))
+                        drawRoundRect(color = faceAccent.copy(alpha = alpha * .97f),
+                            cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()),
+                            style = Stroke(width = 2.2.dp.toPx()))
+                    } else {
+                        drawCircle(color = Color(0xFF121A2B).copy(alpha = alpha * .83f),
+                            center = c, radius = radius)
+                        drawCircle(color = faceAccent.copy(alpha = alpha * .98f),
+                            center = c, radius = radius * .94f,
+                            style = Stroke(width = 2.2.dp.toPx()))
+                    }
+                }
                 TouchPreset.MAIZO -> {
                     drawRoundRect(brush = Brush.linearGradient(listOf(
                         Color(0xFFFFFFFF).copy(alpha = alpha * .80f),
@@ -1798,9 +1974,10 @@ private fun EmulatorSettings(
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
                     SettingSectionTitle("Layouts de controle",
-                        "Nove layouts visuais, incluindo PlayStation, Xbox, Switch, Arcade " +
+                        "Dez estilos. Padrão VirtualGamePad Mobile: botões superiores coloridos, " +
+                            "D-pad inferior, L/R e Start/Select no topo; também inclui PlayStation, Xbox, Switch, Arcade " +
                             "e Steam Deck. Botões ABXY mantêm mapeamento do SNES. " +
-                            "Arte original, sem reutilizar imagens proprietárias.")
+                            "A arte do preset VirtualGamePad é recriada, não são arquivos GPL copiados.")
                     TouchPreset.values().forEach { preset ->
                         ChoiceRow(preset.label, preset.hint,
                             settings.touch.preset == preset) { onSelectTouchPreset(preset) }

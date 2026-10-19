@@ -29,6 +29,22 @@ No ROMs or copyrighted game assets are bundled.
 - Arquivos `.cht` **não são incluídos no APK**. Somente códigos do jogo consultado são baixados pela interface e armazenados em cache interno do aparelho. O MaizoSNES modifica a apresentação dos arquivos (filtra códigos e oferece toggles de habilitação).
 - Créditos pela compilação da base: equipe e contribuidores libretro-database. As descrições de cheats são mantidas com atribuição de origem do arquivo para o usuário.
 
+## Referência de controle VirtualGamePad-Mobile — código GPL-3.0 NÃO incorporado
+
+- Projeto: https://github.com/kitswas/VirtualGamePad-Mobile
+- Licença declarada: **GNU GPL v3.0** (`LICENCE.TXT` no repositório).
+- O layout visual do controle no preset "VirtualGamePad Mobile" foi estudado para
+  adaptar o conceito de D-pad inferior, face ABXY superior direita, botões L/R
+  e Start/Select à configuração SNES; posições proporcionais às dimensões da tela.
+- O projeto original desenha os controles por **Jetpack Compose**, não possui um
+  pacote separado de imagens dos botões para simplesmente copiar.
+- **Nenhum componente GPL, arte, imagem ou código original do VirtualGamePad-Mobile
+  está embutido** no APK MaizoSNES. O desenho e roteamento de input do novo preset
+  foram implementados independentemente em Compose para manter os termos atuais
+  de distribuição do núcleo Snes9x. Usar ou incorporar os arquivos GPL literalmente
+  demandaria revisar compatibilidade de obrigações GPL com a licença não comercial
+  do núcleo Snes9x.
+
 ## Inspiração de controles e biblioteca (nenhum código/arte importados)
 
 - [CTR Native Android](https://github.com/igawa6/ctr-native-android): referência pública do layout/ergonomia, código sob GPLv3; não copiamos componentes dele.
