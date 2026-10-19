@@ -94,3 +94,18 @@ O transporte TCP continua `TCP_NODELAY`. Em Internet/VPN há timeout de 12 segun
 O tempo de ida e volta na rede não desaparece com ajustes de socket. **Não há implementação nem alegação de rollback/predição neste release.** Um rollback correto exigiria snapshots por frame, replay com áudio/vídeo silenciados, input prediction e testes de duas plataformas por longo período; isso ficou deliberadamente fora da atualização para preservar o multiplayer lockstep funcional.
 
 Backup automático opcional antes/depois da conexão usa arquivos `states/multiplayer_<sha>_before/after.mzstate` guardados pela impressão digital da ROM, sem substituir os slots manuais. Restaure pelo menu Estados somente com a ROM correspondente carregada.
+
+
+## ROM sharing update: default-enabled LAN transfer with rights check
+
+The host/client switches now default to ON and persist across restarts.
+Before first LAN hosting with sharing enabled, the host must confirm it
+has redistribution permission. Declining disables sharing but does not
+prevent matching-ROM network play.
+
+The existing SHA-256 handshake compares the ROM and validates core options.
+A mismatched ROM may be transferred only over a private-address LAN when
+both sides allow it. The client verifies SHA-256 before using the bytes.
+Relay/internet transport is plain TCP without authentication or encryption;
+sharing ROM files across public relay remains blocked. Commercial ROM
+rights cannot be established by a matching hash. Manual IP:port is retained.
