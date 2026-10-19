@@ -93,6 +93,8 @@ class MainActivity : ComponentActivity() {
     private val localPlayer2Enabled = androidx.compose.runtime.mutableStateOf(false)
     private val gamepadKeyMasks = ConcurrentHashMap<Int, Int>()
     private val gamepadAxisMasks = ConcurrentHashMap<Int, Int>()
+    private var lastUiDirection = 0
+    private var lastUiDirectionAt = 0L
     private var netplaySession: NetplaySession? = null
     private var hostWifiLock: WifiManager.MulticastLock? = null
 
@@ -1642,61 +1644,102 @@ class MainActivity : ComponentActivity() {
                 (source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
         }.sorted()
 
+    private fun switchGamepadTab(direction: Int) {
+        if (activeScreen.value == AppScreen.GAME || shareConsentVisible.value) return
+        val tabs = arrayOf(AppScreen.LIBRARY, AppScreen.MULTIPLAYER,
+            AppScreen.SETTINGS, AppScreen.CREDITS)
+        val position = tabs.indexOf(activeScreen.value).coerceAtLeast(0)
+        activeScreen.value = tabs[(position + direction + tabs.size) % tabs.size]
+        lastUiDirection = 0
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val inGame = activeScreen.value == AppScreen.GAME
-        val isPad = event.deviceId in gamepadIds()
-        // START/MODE is a frontend hotkey, not a gameplay input. Consume UP too.
-        if (inGame && isPad && event.keyCode in setOf(
-                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_MODE, 188)) {
+        val pad = event.deviceId in gamepadIds()
+        val playing = activeScreen.value == AppScreen.GAME
+
+        // Only central PS/Xbox MODE/Guide enters the frontend menu when Android
+        // exposes it. Physical START must remain SNES Start (input bit 3).
+        if (playing && pad && GamepadKeyRouting.isMenuButton(event.keyCode)) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
                 setGameMenuOpen(!gameMenuOpen.value)
             return true
         }
-        // Never swallow navigation keys while a Compose screen or modal owns focus.
-        if (!inGame || gameMenuOpen.value) {
-            if (isPad && event.keyCode == KeyEvent.KEYCODE_BUTTON_B) {
+        if (!playing || gameMenuOpen.value) {
+            if (pad && !playing && event.keyCode in
+                setOf(KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1)) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+                    switchGamepadTab(if (event.keyCode == KeyEvent.KEYCODE_BUTTON_R1) 1 else -1)
+                return true
+            }
+            if (pad && event.keyCode == KeyEvent.KEYCODE_BUTTON_B) {
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
                     onBackPressedDispatcher.onBackPressed()
                 return true
             }
-            if (isPad && event.keyCode == KeyEvent.KEYCODE_BUTTON_A) {
-                val confirm = KeyEvent(event.downTime, event.eventTime, event.action,
-                    KeyEvent.KEYCODE_DPAD_CENTER, event.repeatCount, event.metaState,
+            if (pad && event.keyCode == KeyEvent.KEYCODE_BUTTON_A) {
+                // Compose handles ENTER for cards, Switch, Button, and FilterChip;
+                // send both key edges to preserve real click semantics.
+                val enter = KeyEvent(event.downTime, event.eventTime, event.action,
+                    KeyEvent.KEYCODE_ENTER, event.repeatCount, event.metaState,
                     event.deviceId, event.scanCode, event.flags, event.source)
-                return super.dispatchKeyEvent(confirm)
+                return super.dispatchKeyEvent(enter)
             }
             return super.dispatchKeyEvent(event)
         }
         val bit = snesButtonForKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
-        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP)
             return super.dispatchKeyEvent(event)
-        }
-        if (event.deviceId in gamepadIds()) {
+        if (pad) {
             val mask = 1 shl bit
             val previous = gamepadKeyMasks[event.deviceId] ?: 0
-            gamepadKeyMasks[event.deviceId] = if (event.action == KeyEvent.ACTION_DOWN) {
-                previous or mask
-            } else previous and mask.inv()
+            gamepadKeyMasks[event.deviceId] =
+                if (event.action == KeyEvent.ACTION_DOWN) previous or mask
+                else previous and mask.inv()
             publishInputs()
-        } else {
-            updateInput(bit, event.action == KeyEvent.ACTION_DOWN)
-        }
+        } else updateInput(bit, event.action == KeyEvent.ACTION_DOWN)
         return true
     }
 
+    private fun moveUiFocus(keyCode: Int, event: MotionEvent) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0, 0,
+            event.deviceId, 0, 0, event.source)
+        val up = KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0, 0,
+            event.deviceId, 0, 0, event.source)
+        super.dispatchKeyEvent(down)
+        super.dispatchKeyEvent(up)
+    }
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        val isJoystick = (event.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
-        if (isJoystick && event.action == MotionEvent.ACTION_MOVE) {
+        val joystick = (event.source and InputDevice.SOURCE_JOYSTICK) ==
+            InputDevice.SOURCE_JOYSTICK
+        if (joystick && event.action == MotionEvent.ACTION_MOVE) {
             val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
             val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
-            val stickX = if (abs(hatX) > 0.5f) hatX else event.getAxisValue(MotionEvent.AXIS_X)
-            val stickY = if (abs(hatY) > 0.5f) hatY else event.getAxisValue(MotionEvent.AXIS_Y)
-            val deadZone = 0.55f
+            val x = if (abs(hatX) > 0.5f) hatX else event.getAxisValue(MotionEvent.AXIS_X)
+            val y = if (abs(hatY) > 0.5f) hatY else event.getAxisValue(MotionEvent.AXIS_Y)
+            if (activeScreen.value != AppScreen.GAME || gameMenuOpen.value) {
+                val direction = when {
+                    y < -0.60f -> KeyEvent.KEYCODE_DPAD_UP
+                    y > 0.60f -> KeyEvent.KEYCODE_DPAD_DOWN
+                    x < -0.60f -> KeyEvent.KEYCODE_DPAD_LEFT
+                    x > 0.60f -> KeyEvent.KEYCODE_DPAD_RIGHT
+                    else -> 0
+                }
+                val now = android.os.SystemClock.uptimeMillis()
+                if (direction != 0 &&
+                    (direction != lastUiDirection || now - lastUiDirectionAt >= 225)) {
+                    lastUiDirection = direction
+                    lastUiDirectionAt = now
+                    moveUiFocus(direction, event)
+                } else if (direction == 0) lastUiDirection = 0
+                return true
+            }
             var mask = 0
-            if (stickX < -deadZone) mask = mask or (1 shl 6)
-            if (stickX > deadZone) mask = mask or (1 shl 7)
-            if (stickY < -deadZone) mask = mask or (1 shl 4)
-            if (stickY > deadZone) mask = mask or (1 shl 5)
+            if (x < -0.55f) mask = mask or (1 shl 6)
+            if (x > 0.55f) mask = mask or (1 shl 7)
+            if (y < -0.55f) mask = mask or (1 shl 4)
+            if (y > 0.55f) mask = mask or (1 shl 5)
             gamepadAxisMasks[event.deviceId] = mask
             publishInputs()
             return true
