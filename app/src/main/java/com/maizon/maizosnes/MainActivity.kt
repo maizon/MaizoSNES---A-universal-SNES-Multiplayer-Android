@@ -70,6 +70,9 @@ class MainActivity : ComponentActivity() {
     private val savedHost = androidx.compose.runtime.mutableStateOf("")
     private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
     private val relayAddress = androidx.compose.runtime.mutableStateOf("")
+    private val iceServerOverrides = androidx.compose.runtime.mutableStateOf("")
+    private val iceTestStatus = androidx.compose.runtime.mutableStateOf(
+        "STUN automático; TURN via Railway se configurado. Teste local não prova P2P.")
     private val relayRooms = androidx.compose.runtime.mutableStateOf<List<InternetRoom>>(emptyList())
     private val scanningRelay = androidx.compose.runtime.mutableStateOf(false)
     private val autoRooms = androidx.compose.runtime.mutableStateOf<List<AutoRoom>>(emptyList())
@@ -184,6 +187,7 @@ class MainActivity : ComponentActivity() {
             NetcodeMode.valueOf(prefs.getString("netcode_mode", NetcodeMode.ROLLBACK.name)!!)
         }.getOrDefault(NetcodeMode.ROLLBACK)
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
+        iceServerOverrides.value = prefs.getString("ice_servers_override", "") ?: ""
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
         devShareEnabled.value = prefs.getBoolean("dev_share_advanced", true)
@@ -228,6 +232,10 @@ class MainActivity : ComponentActivity() {
                     onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
                     netcodeMode = netcodeMode.value,
                     onNetcodeModeChanged = ::changeNetcodeMode,
+                    iceServerOverrides = iceServerOverrides.value,
+                    onIceOverridesChanged = ::changeIceOverrides,
+                    iceTestStatus = iceTestStatus.value,
+                    onTestIce = ::testIceSettings,
                     savedConnectionHost = savedHost.value,
                     savedConnectionPort = savedPort.value,
                     onSaveConnectionTarget = ::saveConnectionTarget,
@@ -1186,6 +1194,27 @@ class MainActivity : ComponentActivity() {
         else "Cheats online desativados. Partidas com cheats serão recusadas."
     }
 
+    private fun changeIceOverrides(value: String) {
+        if (netplaySession != null) return
+        // Private app preferences, never exported by debug.
+        iceServerOverrides.value = value.take(1500)
+        prefs.edit().putString("ice_servers_override", iceServerOverrides.value).apply()
+        iceTestStatus.value = "Configuração salva. Faça teste local ICE."
+    }
+
+    private fun testIceSettings() {
+        if (netplaySession != null) {
+            iceTestStatus.value = "Encerre a partida antes de testar ICE."
+            return
+        }
+        iceTestStatus.value = "Testando STUN/TURN (até 14 segundos)…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = WebRtcRollbackTransport.probeIce(
+                applicationContext, relayAddress.value, iceServerOverrides.value)
+            withContext(Dispatchers.Main) { iceTestStatus.value = result }
+        }
+    }
+
     private fun changeRelayAddress(value: String) {
         if (netplaySession != null) return
         relayAddress.value = value.take(300)
@@ -2012,6 +2041,7 @@ class MainActivity : ComponentActivity() {
             mode = connectionMode.value,
             netcodeMode = netcodeMode.value,
             webrtcContext = applicationContext,
+            customIceServers = iceServerOverrides.value,
             latencyMode = netplayLatencyMode.value,
             onMetrics = { metrics ->
                 runOnUiThread {
@@ -2085,7 +2115,10 @@ class MainActivity : ComponentActivity() {
                             desyncs = networkDebug.value.desyncs +
                                 if (message.contains("dessíncronia", ignoreCase = true) ||
                                     message.contains("desync", ignoreCase = true)) 1 else 0,
-                            state = message)
+                            state = message,
+                            iceState = if (message.startsWith("ICE:"))
+                                message.removePrefix("ICE:").trim()
+                                else networkDebug.value.iceState)
                         if (message.startsWith("Conectado como")) {
                             userPaused = false
                             localPlayer2Enabled.value = false

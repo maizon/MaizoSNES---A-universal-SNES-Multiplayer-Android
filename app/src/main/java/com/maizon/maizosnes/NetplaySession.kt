@@ -44,6 +44,7 @@ internal class NetplaySession(
     private val mode: NetworkMode = NetworkMode.LAN_AUTO,
     private val netcodeMode: NetcodeMode = NetcodeMode.LOCKSTEP,
     private val webrtcContext: android.content.Context? = null,
+    private val customIceServers: String = "",
     private val latencyMode: NetplayLatencyMode = NetplayLatencyMode.BALANCED,
     private val onMetrics: (NetworkMetrics) -> Unit = { },
     private val shareAllowedByHost: Boolean = false,
@@ -431,7 +432,8 @@ internal class NetplaySession(
         }
         onStatus("Verificação da ROM concluída. Procurando P2P WebRTC/ICE…")
         val rtc = WebRtcRollbackTransport.attempt(
-            context, endpoint, roomId, host, onStatus) ?: return false
+            context, endpoint, roomId, host, onStatus,
+            customIce = customIceServers) ?: return false
         rtc.use { port ->
             val delayFrames = when (latencyMode) {
                 NetplayLatencyMode.RESPONSIVE -> 0

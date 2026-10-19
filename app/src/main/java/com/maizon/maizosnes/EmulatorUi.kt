@@ -231,6 +231,10 @@ internal fun MaizoEmulatorApp(
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     netcodeMode: NetcodeMode,
     onNetcodeModeChanged: (NetcodeMode) -> Unit,
+    iceServerOverrides: String,
+    onIceOverridesChanged: (String) -> Unit,
+    iceTestStatus: String,
+    onTestIce: () -> Unit,
     savedConnectionHost: String,
     savedConnectionPort: Int,
     onSaveConnectionTarget: (String, Int) -> Unit,
@@ -383,7 +387,8 @@ internal fun MaizoEmulatorApp(
                         }) { Text(if (editingControls) "SALVAR CONTROLES" else "EDITAR CONTROLES") }
                         EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
                             onSelectTouchPreset, connectionMode, onConnectionModeChanged,
-                            devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)
+                            devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged,
+                    iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce)
                     }
                 }
             }
@@ -423,6 +428,7 @@ internal fun MaizoEmulatorApp(
                 connectionMode, onConnectionModeChanged,
                 netplayLatencyMode, onNetplayLatencyModeChanged,
                 netcodeMode, onNetcodeModeChanged,
+                iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
                 lanRooms, scanningLan, onScanLan,
                 relayAddress, relayRooms, scanningRelay,
@@ -447,7 +453,8 @@ internal fun MaizoEmulatorApp(
                 }
                 EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
                     onSelectTouchPreset, connectionMode, onConnectionModeChanged,
-                    devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)
+                    devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged,
+                    iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce)
             }
             AppScreen.CREDITS -> CreditsScreen(Modifier.fillMaxSize().padding(padding), onOpenInstagram)
             AppScreen.GAME -> Unit
@@ -791,6 +798,10 @@ private fun MultiplayerScreen(
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     netcodeMode: NetcodeMode,
     onNetcodeModeChanged: (NetcodeMode) -> Unit,
+    iceServerOverrides: String,
+    onIceOverridesChanged: (String) -> Unit,
+    iceTestStatus: String,
+    onTestIce: () -> Unit,
     savedConnectionHost: String,
     savedConnectionPort: Int,
     onSaveConnectionTarget: (String, Int) -> Unit,
@@ -911,10 +922,9 @@ private fun MultiplayerScreen(
                     }
                 }
                 if (netcodeMode == NetcodeMode.ROLLBACK) {
-                    Text("Rollback GekkoNet UDP é usado no IP manual. " +
-                        "Em salas por relay HTTPS/WSS, Lockstep continua como " +
-                        "fallback até existir túnel UDP. Save/load lento, " +
-                        "portas bloqueadas ou peer indisponível também causam fallback.",
+                    Text("Rollback GekkoNet usa UDP em LAN/IP ou " +
+                        "WebRTC DataChannel quando o ICE/STUN/TURN conecta online. " +
+                        "Caso contrário, Lockstep TCP via Railway é preservado.",
                         fontSize = 11.sp, color = Muted)
                     Text("RTT, jitter e correções aparecem nas estatísticas; " +
                         "perda de pacotes não é publicada pela API atual do GekkoNet.",
@@ -932,6 +942,9 @@ private fun MultiplayerScreen(
                         if (!active) onNetplayLatencyModeChanged(choice)
                     }
                 }
+                if (advancedNetwork) IceServerSettings(
+                    iceServerOverrides, onIceOverridesChanged,
+                    iceTestStatus, onTestIce, !active)
                 if (active) Text("O buffer não pode ser alterado no meio da sessão.",
                     color = Color(0xFFFFBD85), fontSize = 10.sp)
             }
@@ -2103,7 +2116,11 @@ private fun EmulatorSettings(
     devUnlocked: Boolean,
     devShareEnabled: Boolean,
     onDevUnlock: (String) -> Boolean,
-    onDevShareChanged: (Boolean) -> Unit
+    onDevShareChanged: (Boolean) -> Unit,
+    iceServerOverrides: String,
+    onIceOverridesChanged: (String) -> Unit,
+    iceTestStatus: String,
+    onTestIce: () -> Unit
 ) {
     var category by remember { mutableStateOf("Vídeo") }
     val firstCategoryFocus = remember { FocusRequester() }
@@ -2368,6 +2385,9 @@ private fun EmulatorSettings(
                             if (!cheatsLocked) onConnectionModeChanged(mode)
                         }
                     }
+                    IceServerSettings(
+                        iceServerOverrides, onIceOverridesChanged,
+                        iceTestStatus, onTestIce, !cheatsLocked)
                     if (cheatsLocked) Text("Para trocar modo, encerre a sessão ativa.",
                         color = Color(0xFFFFC47E), fontSize = 11.sp)
                     Text("LAN usa descoberta automática ou IP manual. Internet " +
@@ -2630,4 +2650,32 @@ private fun NetplayDebugDialog(
             }
         }
     )
+}
+ 
+@Composable
+private fun IceServerSettings(
+    overrides: String, onChange: (String) -> Unit,
+    status: String, onTest: () -> Unit, enabled: Boolean
+) {
+    SettingSectionTitle("ICE • STUN e TURN",
+        "Google/Cloudflare automáticos. TURN do Railway/Metered é buscado " +
+        "sem incluir chave de API no APK. Redes com NAT restritivo podem exigir TURN.")
+    TextField(
+        value = overrides, onValueChange = { if (enabled) onChange(it) },
+        label = { Text("Servidores próprios (opcional)") },
+        placeholder = { Text("stun:stun.example.com:3478\nturn:relay.example.com:3478|usuario|senha") },
+        maxLines = 4, enabled = enabled,
+        modifier = Modifier.fillMaxWidth().padFocusRing())
+    Text("Uma URI por linha; TURN privado: URI|usuário|senha. " +
+        "Credenciais locais ficam nas preferências do aparelho; " +
+        "não inclua chaves API de conta e não compartilhe sua configuração.",
+        fontSize = 10.sp, color = Muted)
+    OutlinedButton(onClick = onTest, enabled = enabled,
+        modifier = Modifier.fillMaxWidth().padFocusRing()) {
+        Text("TESTAR COLETA STUN/TURN (ICE)")
+    }
+    Text(status, fontSize = 11.sp, color = Mint)
+    Text("O teste coleta candidatos, mas só dois aparelhos comprovam " +
+        "P2P conectado. Em falha de ICE, o jogo usa Lockstep por WSS.",
+        fontSize = 10.sp, color = Muted)
 }
