@@ -227,7 +227,6 @@ class MainActivity : ComponentActivity() {
                     netplayLatencyMode = netplayLatencyMode.value,
                     onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
                     netcodeMode = netcodeMode.value,
-            webrtcContext = applicationContext,
                     onNetcodeModeChanged = ::changeNetcodeMode,
                     savedConnectionHost = savedHost.value,
                     savedConnectionPort = savedPort.value,
@@ -2012,6 +2011,7 @@ class MainActivity : ComponentActivity() {
             },
             mode = connectionMode.value,
             netcodeMode = netcodeMode.value,
+            webrtcContext = applicationContext,
             latencyMode = netplayLatencyMode.value,
             onMetrics = { metrics ->
                 runOnUiThread {
