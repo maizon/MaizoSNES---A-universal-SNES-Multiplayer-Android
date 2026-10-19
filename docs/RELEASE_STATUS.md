@@ -21,3 +21,13 @@ artifact and GitHub official stable release. See release workflow for gate.
 ## October 19 gamepad remediation
 
 Activity now routes the physical START key to SNES bit 3 and reserves GUIDE/MODE for the overlay. Compose outside gameplay uses A/Enter and B/Back, with L1/R1 for app tabs and D-pad/analog stick for focus movement. FocusRequester is attached to initial targets in multiplayer, settings and credits. Modal dialogs directly handle gamepad A/B. Focus indicators are applied to game cards and selected option cards. Build verification and physical controller regression tests are required before declaring support complete.
+
+
+## Conexão remota (19/10/2026)
+
+A flag TLS é agora propagada do diretório HTTPS até a conexão TLS nativa,
+inclusive após o diálogo de permissão do host. UI permite cliente sem ROM ou
+com hash diferente no relay TLS, mantendo bloqueio de ROM no relay sem TLS.
+DEV 9090 ativa avançado por padrão e pode ser desligado separadamente do
+compartilhamento LAN. Adicionado teste JVM OnlineRomJoinPolicyTest; requer
+CI e teste real de dois aparelhos via relay TLS antes da versão estável.

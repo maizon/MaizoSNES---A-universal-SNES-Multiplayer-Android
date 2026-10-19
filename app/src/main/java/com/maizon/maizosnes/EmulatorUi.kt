@@ -988,7 +988,8 @@ private fun MultiplayerScreen(
                         val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                         Card(
                             modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
-                                enabled = !active && ready && hashCompatible && cheatsAllowed
+                                enabled = !active && cheatsAllowed &&
+                                    ((ready && hashCompatible) || (receiveRomAllowed && room.tls))
                             ) {
                                 onJoinAutomatic(room)
                             },
@@ -1005,12 +1006,15 @@ private fun MultiplayerScreen(
                                         color = Muted, fontSize = 10.sp)
                                     Text(
                                         when {
-                                            !hashCompatible -> "ROM/MOD DIFERENTE — mesma versão necessária"
                                             !cheatsAllowed -> "CHEATS — autorize nas configurações"
+                                            !hashCompatible && room.tls && receiveRomAllowed ->
+                                                "ROM DIFERENTE — host pode oferecer via TLS"
+                                            !hashCompatible -> "ROM/MOD DIFERENTE — mesma versão necessária"
                                             room.cheats -> "CHEATS SINCRONIZADOS • ROM compatível"
                                             room.romHash.isNotBlank() -> "ROM compatível por SHA-256"
                                             else -> "Versão da ROM será validada ao conectar"
-                                        }, color = if (hashCompatible && cheatsAllowed) Mint
+                                        }, color = if (cheatsAllowed &&
+                                            (hashCompatible || (room.tls && receiveRomAllowed))) Mint
                                             else Color(0xFFFFBD85), fontSize = 10.sp
                                     )
                                 }
@@ -1020,8 +1024,8 @@ private fun MultiplayerScreen(
                         }
                     }
                 }
-                Text("Sem servidores? Verifique a internet ou use LAN. " +
-                    "Para conectar, confirme que ambos têm a mesma ROM e APK.",
+                Text("Sem ROM? Selecione sala TLS para receber uma oferta autorizada. " +
+                    "Salas sem TLS exigem ROM idêntica em ambos os aparelhos.",
                     color = Muted, fontSize = 10.sp)
             }
         }
@@ -1151,7 +1155,8 @@ private fun MultiplayerScreen(
                     val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                     Card(
                         modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
-                            enabled = !active && ready && hashCompatible && cheatsAllowed
+                            enabled = !active && cheatsAllowed &&
+                                ((ready && hashCompatible) || (receiveRomAllowed && room.tls))
                         ) {
                             onJoinRelay(room.id)
                         },
@@ -1165,11 +1170,14 @@ private fun MultiplayerScreen(
                                 Text("Sala " + room.id, color = Muted, fontSize = 10.sp)
                                 Text(
                                     when {
-                                        !hashCompatible -> "ROM/MOD DIFERENTE"
                                         !cheatsAllowed -> "CHEATS — autorize"
+                                        !hashCompatible && room.tls && receiveRomAllowed ->
+                                            "ROM DIFERENTE — oferta autorizada via TLS"
+                                        !hashCompatible -> "ROM/MOD DIFERENTE"
                                         room.cheats -> "CHEATS SINCRONIZADOS"
                                         else -> "ROM verificada ao entrar"
-                                    }, color = if (hashCompatible && cheatsAllowed) Mint
+                                    }, color = if (cheatsAllowed &&
+                                        (hashCompatible || (room.tls && receiveRomAllowed))) Mint
                                         else Color(0xFFFFBD85), fontSize = 10.sp
                                 )
                             }
@@ -1183,9 +1191,9 @@ private fun MultiplayerScreen(
                 Surface(color = Color(0xFF242C3B), shape = RoundedCornerShape(12.dp)) {
                     Text(status, modifier = Modifier.padding(12.dp), color = Mint, fontSize = 12.sp)
                 }
-                Text("Relay TCP experimental sem criptografia: para jogar com " +
-                    "desconhecidos use servidor de confiança e VPN privada. " +
-                    "Este modo não transfere ROMs; os dois jogadores precisam da mesma imagem.",
+                Text("Relay sem TLS: requer a mesma ROM e não compartilha arquivos. " +
+                    "Relay TLS certificado e diretório HTTPS permitem oferecer ROM " +
+                    "autorizada com confirmação do host e do cliente. Não é E2E.",
                     fontSize = 11.sp, color = Color(0xFFFFBD85), lineHeight = 16.sp)
             }
         }
@@ -1224,13 +1232,15 @@ private fun MultiplayerScreen(
                     singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active)
                 ToggleSettingRow(
                     "Compartilhar minha ROM autorizada",
-                    "ON por padrão. Na primeira sala LAN, confirme os direitos de redistribuição; restrito à rede privada.",
+                    "ON por padrão; o host confirma autorização por sessão. " +
+                        "Na Internet requer DEV 9090 e relay TLS.",
                     shareRomAllowed,
                     { if (!active) onShareRomAllowedChanged(it) }
                 )
                 ToggleSettingRow(
                     "Aceitar ROM autorizada do host",
-                    "ON por padrão; SHA-256 validado; somente LAN privada. Desative em redes desconhecidas.",
+                    "ON por padrão; cada oferta exige aceite e SHA-256. " +
+                        "Na Internet requer relay TLS confiável.",
                     receiveRomAllowed,
                     { if (!active) onReceiveRomAllowedChanged(it) }
                 )
@@ -1254,7 +1264,9 @@ private fun MultiplayerScreen(
                 }
             }
         }
-        Text("LAN funciona sem internet, mas pode haver isolamento Wi-Fi. Compartilhamento de ROM depende de permissão legal e consentimento mútuo, não envia jogos comerciais por padrão. MZNP v5 usa buffer negociado (sem rollback): RTT/jitter alto ainda aumenta atraso dos botões. Relay TCP não criptografado; para acesso remoto prefira VPN privada confiável.",
+        Text("MZNP v6: LAN e IP manual continuam disponíveis. " +
+            "Transferência entre redes exige TLS autenticado, confirmação do host " +
+            "e aceite do cliente. O relay não fornece criptografia ponta a ponta.",
             color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
     }
 }
@@ -2365,10 +2377,9 @@ private fun EmulatorSettings(
                             devShareEnabled,
                             onDevShareChanged
                         )
-                        Text("A transferência continua limitada a LAN privada, " +
-                            "com consentimento bilateral e verificação SHA-256. " +
-                            "Sem autenticação ou criptografia nativa: não exponha " +
-                            "portas à internet pública.",
+                        Text("DEV 9090: compartilhamento avançado ligado inicialmente, " +
+                            "mas pode ser desativado. A Internet exige relay TLS " +
+                            "e consentimento por sessão. O relay pode ler o tráfego.",
                             color = Color(0xFFFFC47E), fontSize = 11.sp)
                     }
                 }

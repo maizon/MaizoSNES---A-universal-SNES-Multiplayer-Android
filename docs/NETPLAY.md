@@ -109,3 +109,17 @@ both sides allow it. The client verifies SHA-256 before using the bytes.
 Relay/internet transport is plain TCP without authentication or encryption;
 sharing ROM files across public relay remains blocked. Commercial ROM
 rights cannot be established by a matching hash. Manual IP:port is retained.
+
+
+## MZNP v6: transferência online autenticada
+
+Host confirma autorização de redistribuição em cada sessão. Cliente recebe
+oferta antes dos bytes e aceita ou rejeita; cada ROM tem SHA-256 integral e
+máximo de 64 MiB. PIN DEV 9090 habilita configuração avançada inicialmente,
+mas nunca substitui direitos e consentimento. A UI permite entrar sem ROM ou
+com ROM divergente somente se o relay anuncia TLS e a opção de recebimento
+está ativa. O socket Android valida certificado e hostname TLS; a API do
+servidor deve usar HTTPS. Relay sem TLS permite jogar com ROM igual, sem
+transferência. O operador TLS pode ler os dados (não é E2E).
+
+Este código não instala automaticamente serviço TLS nem certificados válidos.

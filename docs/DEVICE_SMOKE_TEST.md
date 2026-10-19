@@ -79,3 +79,12 @@ Registre modelo, Android, versão do APK, hash SHA-256 do APK, resultado e trech
 - [ ] L1/R1 cycles app tabs without triggering in-game inputs.
 - [ ] One and two controllers preserve SNES Start and Select independently; touch gameplay remains unaltered.
 - [ ] Online gameplay opens the overlay without pausing only one peer; avoids netplay state divergence.
+
+## MZNP v6 — transferência remota
+- [ ] DEV 9090 ativa o compartilhamento avançado por padrão, OFF persiste.
+- [ ] HTTPS diretório + relay TLS com certificado válido em duas redes diferentes.
+- [ ] Cliente com ROM diferente ou sem ROM recebe oferta e pode rejeitar antes de bytes.
+- [ ] Host que rejeita mantém partida com cliente que já tem a mesma ROM.
+- [ ] SHA-256 da ROM verificado e <=64 MiB; transferência falhada não deixa arquivo parcial.
+- [ ] Relay sem TLS não transmite ROM; cliente com ROM igual ainda pode jogar.
+- [ ] Certificado inválido causa erro (nunca aceitar sem autenticação).
