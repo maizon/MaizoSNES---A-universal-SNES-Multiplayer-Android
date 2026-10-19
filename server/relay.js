@@ -12,6 +12,7 @@ const net = require("node:net");
 const tls = require("node:tls");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
+const { attachWssRelay } = require("./wss-relay");
 
 function createRelayServer({
   httpPort = 8787, relayPort = 8788, bind = "0.0.0.0",
@@ -34,6 +35,7 @@ function createRelayServer({
     throw new Error("Invalid MAIZO_PUBLIC_TCP_PORT");
   }
   const rooms = new Map();
+  const wsRooms = new Map();
   const maxRooms = 100;
   const roomLifetimeMs = 5 * 60 * 1000;
   const header = (r, code) => {
@@ -51,9 +53,14 @@ function createRelayServer({
       relayPort: advertisedPort || tcp.address()?.port || relayPort,
       relayTls: encrypted,
       ...(advertisedHost ? { relayHost: advertisedHost } : {}),
-      rooms: [...rooms.values()].filter(r => !r.host.destroyed).map(r => ({
+      websocketRelay: true,
+      rooms: [
+        ...[...rooms.values()].filter(r => !r.host.destroyed),
+        ...[...wsRooms.values()].filter(r => !r.peer.socket.destroyed)
+      ].map(r => ({
         id: r.id, game: r.game, createdAt: r.createdAt,
-        romHash: r.romHash, cheats: r.cheats
+        romHash: r.romHash, cheats: r.cheats,
+        websocketRelay: Boolean(r.peer)
       }))
     }));
   });
@@ -124,6 +131,9 @@ function createRelayServer({
     }
     socket.on("data", handshake);
   };
+  // WSS uses the public HTTPS directory (Railway edge TLS) instead of the
+  // unencrypted TCP proxy. Legacy TCP rooms remain available without ROM upload.
+  const websocket = attachWssRelay(directory, wsRooms, maxRooms);
   const tcp = encrypted
     ? tls.createServer({ key: tlsKey, cert: tlsCert, minVersion: "TLSv1.2" }, handlePeer)
     : net.createServer(handlePeer);
@@ -139,6 +149,7 @@ function createRelayServer({
     },
     async close() {
       for (const room of rooms.values()) room.host.destroy();
+      websocket.close();
       await Promise.all([directory, tcp].map(server => new Promise(resolve => {
         server.close(() => resolve());
         server.closeAllConnections?.();
