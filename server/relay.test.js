@@ -126,3 +126,99 @@ test("TLS key and certificate are required together", () => {
   assert.throws(() => createRelayServer({ tlsKey: "key-only" }), /together/);
   assert.throws(() => createRelayServer({ tlsCert: "cert-only" }), /together/);
 });
+
+
+test("HTTPS-domain WebSocket pair publishes a selectable room and streams bytes both ways", async () => {
+  const crypto = require("node:crypto");
+  const relay = createRelayServer({ httpPort: 0, relayPort: 0, bind: "127.0.0.1" });
+  const ports = await relay.start();
+  const active = [];
+  function openWebSocket() {
+    return new Promise((resolve, reject) => {
+      const socket = net.connect(ports.httpPort, "127.0.0.1");
+      active.push(socket);
+      const key = crypto.randomBytes(16).toString("base64");
+      let header = Buffer.alloc(0);
+      socket.once("error", reject);
+      socket.on("connect", () => socket.write(
+        "GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n" +
+        "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+        "Sec-WebSocket-Key: " + key + "\r\n\r\n"));
+      function handshake(chunk) {
+        header = Buffer.concat([header, chunk]);
+        const marker = header.indexOf("\r\n\r\n");
+        if (marker === -1) {
+          if (header.length > 8192) reject(new Error("Excessive WS response"));
+          return;
+        }
+        socket.off("data", handshake);
+        const result = header.subarray(0, marker).toString();
+        assert.match(result, /^HTTP\/1\.1 101 /);
+        const expected = crypto.createHash("sha1")
+          .update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+          .digest("base64");
+        assert.match(result, new RegExp("Sec-WebSocket-Accept: " + expected.replace(/[+]/g, "\\+")));
+        assert.equal(header.length, marker + 4);
+        resolve(socket);
+      }
+      socket.on("data", handshake);
+    });
+  }
+  function send(sock, payload) {
+    payload = Buffer.from(payload);
+    assert.ok(payload.length < 126);
+    const key = crypto.randomBytes(4);
+    const body = Buffer.from(payload);
+    for (let i = 0; i < body.length; i++) body[i] ^= key[i % 4];
+    sock.write(Buffer.concat([Buffer.from([0x82, 0x80 | payload.length]), key, body]));
+  }
+  function receive(sock) {
+    return new Promise((resolve, reject) => {
+      let pending = Buffer.alloc(0);
+      const timeout = setTimeout(() => { sock.off("data", listener); reject(new Error("Timed out WS")); }, 4000);
+      function listener(chunk) {
+        pending = Buffer.concat([pending, chunk]);
+        if (pending.length < 2) return;
+        assert.equal(pending[0], 0x82);
+        let length = pending[1], offset = 2;
+        if (length === 126) {
+          if (pending.length < 4) return;
+          length = pending.readUInt16BE(2); offset = 4;
+        }
+        if (pending.length < offset + length) return;
+        clearTimeout(timeout);
+        sock.off("data", listener);
+        resolve(pending.subarray(offset, offset + length));
+      }
+      sock.on("data", listener);
+    });
+  }
+  try {
+    const host = await openWebSocket();
+    const title = Buffer.from("Homebrew").toString("base64url");
+    send(host, "HOST abcdef000099 " + title + " 0123456789abcdef 0\n");
+    await new Promise(resolve => setTimeout(resolve, 60));
+    const list = await (await fetch("http://127.0.0.1:" +
+      ports.httpPort + "/api/rooms")).json();
+    assert.equal(list.websocketRelay, true);
+    assert.equal(list.rooms.length, 1);
+    assert.equal(list.rooms[0].websocketRelay, true);
+    const guest = await openWebSocket();
+    const hostReady = receive(host), guestReady = receive(guest);
+    send(guest, "JOIN abcdef000099\n");
+    assert.equal((await hostReady).toString(), "READY\n");
+    assert.equal((await guestReady).toString(), "READY\n");
+    const fromHost = receive(guest);
+    send(host, Buffer.from("first binary payload"));
+    assert.equal((await fromHost).toString(), "first binary payload");
+    const fromGuest = receive(host);
+    send(guest, Buffer.from([0, 1, 2, 254, 255]));
+    assert.deepEqual(await fromGuest, Buffer.from([0, 1, 2, 254, 255]));
+    const after = await (await fetch("http://127.0.0.1:" +
+      ports.httpPort + "/api/rooms")).json();
+    assert.equal(after.rooms.length, 0);
+  } finally {
+    active.forEach(s => s.destroy());
+    await relay.close();
+  }
+});
