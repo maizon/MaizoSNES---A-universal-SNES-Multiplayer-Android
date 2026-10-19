@@ -30,7 +30,10 @@ internal data class NetworkMetrics(
     val effectiveFps: Double,
     val stalledFrames: Long,
     val inputDelayFrames: Int = 0,
-    val sampledRttMs: Double = 0.0
+    val sampledRttMs: Double = 0.0,
+    val jitterMs: Double = 0.0,
+    val rollbackCount: Long = 0,
+    val rollback: Boolean = false
 )
 
 internal enum class VideoFilter(val label: String, val nativeId: Int, val description: String) {

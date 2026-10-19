@@ -42,6 +42,7 @@ internal class NetplaySession(
     private val onStatus: (String) -> Unit,
     private val onFinish: (String) -> Unit,
     private val mode: NetworkMode = NetworkMode.LAN_AUTO,
+    private val netcodeMode: NetcodeMode = NetcodeMode.LOCKSTEP,
     private val latencyMode: NetplayLatencyMode = NetplayLatencyMode.BALANCED,
     private val onMetrics: (NetworkMetrics) -> Unit = { },
     private val shareAllowedByHost: Boolean = false,
@@ -80,8 +81,43 @@ internal class NetplaySession(
     @Volatile private var server: ServerSocket? = null
     @Volatile private var thread: Thread? = null
     @Volatile private var announcement: LanDiscovery.Announcement? = null
+    @Volatile private var rollback: GekkoRollbackSession? = null
 
-    fun host(port: Int) = launch {
+    private fun tryRollback(host: String?, port: Int): Boolean {
+        if (netcodeMode != NetcodeMode.ROLLBACK || rom?.isFile != true ||
+            hostCheatCodes.isNotEmpty()) return false
+        if (port !in 1024..65534) {
+            onStatus("Porta sem UDP disponível; Lockstep TCP será usado.")
+            return false
+        }
+        val engine = GekkoRollbackSession(
+            rom = rom, options = coreOptions, localInput = localInput,
+            prepare = prepare, saveState = saveState, loadState = loadState,
+            step = step, framePeriodNs = framePeriodNs, onStatus = onStatus,
+            onMetrics = onMetrics, onFinish = onFinish,
+            onFallback = { reason ->
+                if (!closed.get()) {
+                    rollback = null
+                    onStatus("Rollback indisponível (" + reason +
+                        "). Voltando ao Lockstep TCP.")
+                    if (host == null) hostLockstep(port) else joinLockstep(host, port)
+                }
+            }
+        )
+        rollback = engine
+        if (host == null) engine.host(port) else engine.join(host, port)
+        return true
+    }
+
+    fun host(port: Int) {
+        if (!tryRollback(null, port)) hostLockstep(port)
+    }
+    fun join(host: String, port: Int) {
+        if (!tryRollback(host, port)) joinLockstep(host, port)
+    }
+
+
+    private fun hostLockstep(port: Int) = launch {
         require(port in 1024..65535) { "Porta deve estar entre 1024 e 65535." }
         require(rom?.isFile == true) { "O anfitrião precisa abrir uma ROM." }
         prepare(true)
@@ -106,7 +142,7 @@ internal class NetplaySession(
         }
     }
 
-    fun join(host: String, port: Int) = launch {
+    private fun joinLockstep(host: String, port: Int) = launch {
         require(host.isNotBlank() && host.length <= 253) { "Informe o IP ou domínio do anfitrião." }
         require(port in 1024..65535) { "Porta inválida." }
         require(rom?.isFile == true || receiveAllowedByClient) {
@@ -269,6 +305,7 @@ internal class NetplaySession(
 
     fun stop() {
         closed.set(true)
+        rollback?.stop()
         runCatching { announcement?.close() }
         runCatching { socket?.close() }
         runCatching { server?.close() }
