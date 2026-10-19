@@ -1,6 +1,16 @@
-# MaizoSNES — emulador SNES Android
+# MaizoSNES — emulador SNES Android ARMv7 (32 bits)
 
-Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.
+**Variante ARMv7 desta branch:** `feature/armv7-32bit` compila um APK
+`armeabi-v7a` de 32 bits para Android 6.0+, sem incluir `arm64-v8a`.
+Baseado no MaizoSNES 0.8, mantém biblioteca, estados, filtros, emulação
+Snes9x 1.63, controle touch/gamepads e multiplayer LAN/online MZNP v4.
+Instalação de testes separada `com.maizon.maizosnes.debug.armv7`, para
+não exigir desinstalar o app ARM64. Consulte **[docs/ARMV7.md](docs/ARMV7.md)**.
+
+O `main` e o release ARM64 original permanecem inalterados. Não inclui
+ROMs comerciais, BIOS ou dados proprietários. Snes9x tem licença
+não comercial; estabilidade e FPS em hardware ARMv7 ainda precisam
+de testes físicos.
 
 ## v0.8.0 Release Candidate — interface premium e salas online reparadas
 
