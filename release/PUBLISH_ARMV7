@@ -1,0 +1,2 @@
+Publish MaizoSNES 0.8.1 ARMv7 preview only if Node/JVM tests, Android native build, ELF32 and certificate checks pass.
+Commit source from feature/armv7-32bit, no ROM binaries.
