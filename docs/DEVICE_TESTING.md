@@ -31,3 +31,21 @@
 5. Antes de compartilhar, remova dados pessoais, endereços IP públicos e códigos de acesso. Nunca envie ROMs ou tokens.
 
 **Nota:** se NAT simétrico, operadora ou firewall bloquear WebRTC e não houver TURN configurado, somente Lockstep é garantido. CI verde não comprova sucesso de WebRTC em dispositivos físicos.
+
+
+## Verificação extra: ICE checking e TURN
+
+1. Abra Ajustes → Rede → TESTAR COLETA STUN/TURN (ICE). O teste mostra
+   candidatos locais, não a conectividade P2P. Candidato 'relay/TURN' indica
+   somente alocação TURN local.
+2. Em duas redes diferentes, crie a sala e aguarde a conexão. Abra Status de
+   conexão / Debug durante o jogo. WebRTC só está ativo quando tanto motor
+   Rollback GekkoNet quanto transporte WebRTC DataChannel forem mostrados.
+3. Se continuar ICE checking ou cair para TCP, inspecione logs pelo botão
+   COMPARTILHAR DIAGNÓSTICO. Uma segunda tentativa relay-only pode ocorrer
+   se os dois aparelhos tiverem TURN. Caso falhe: Lockstep TCP via Railway.
+4. Nunca trate os dados de perda RTP como perda SCTP de DataChannel.
+5. Em caso de erro, registre Android/CPU em cada aparelho, tipo de rede,
+   duração, ICE state e modo efetivo. Não envie tokens nem ROMs.
+
+Instalar/configurar Open Relay ou credenciais Metered: docs/TURN_SETUP.md.

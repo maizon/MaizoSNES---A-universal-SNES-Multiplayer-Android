@@ -164,3 +164,17 @@ Snes9x possui licença específica de **uso não comercial**; o filtro NTSC incl
 - **Menu DEV:** pode ser desbloqueado com PIN local de conveniência `9090`, habilitando configurações avançadas de compartilhamento de ROMs *cuja redistribuição seja autorizada*. O PIN não muda direitos autorais nem criptografa a rede. O app não inclui e não distribui ROMs comerciais por padrão.
 
 Referências e limites: [docs/FINAL_UPDATE.md](docs/FINAL_UPDATE.md).
+
+
+### ICE/TURN online (experimental, 19/10/2026)
+
+WebRTC P2P agora usa troca explícita de candidatos por trickle ICE via Railway WSS,
+com prazos finitos e nova tentativa relay-only quando TURN for informado.
+Google/Cloudflare STUN, Open Relay com credenciais demonstrativas públicas
+(best-effort, disponibilidade NÃO garantida) e credenciais Metered pessoais
+via GET /api/ice no serviço Railway existente. Ajustes → Rede permite URIs
+STUN/TURN próprias e TESTAR COLETA ICE. **Uma coleta bem-sucedida NÃO garante
+conexão entre dois celulares**: requer teste físico e validação do overlay.
+Em NAT/ICE indisponível, a partida usa Lockstep TCP via Railway sem inventar
+modo UDP. Não foi provisionado Fly.io pago nem existe SLA de TURN público.
+Configuração: docs/TURN_SETUP.md; teste: docs/DEVICE_TESTING.md.

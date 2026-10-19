@@ -62,3 +62,18 @@ inesperada e overlay correspondente ao transporte realmente utilizado.
 - [ ] Conferir campo ICE/TURN/NAT no overlay e compartilhar relatório usando o menu de compartilhamento do sistema.
 - [ ] Validar armv7 com arm64; desync e serialização cross-ABI são especialmente relevantes.
 - [ ] Sem credenciais TURN, redes com NAT simétrico podem NÃO completar WebRTC; a fallback TCP é esperado.
+
+
+## Validação nova do ICE/TURN e regressões (19/10/2026)
+
+- [ ] Em Ajustes → Rede, testar a coleta STUN/TURN; registrar host/srflx/relay.
+- [ ] Confirmar que uma coleta local não mostra falsamente 'peer conectado'.
+- [ ] Dois telefones em Wi-Fi/4G separados: verificar ICE checking → connected
+      e o overlay Rollback + WebRTC DataChannel; repetir por 10 minutos.
+- [ ] Restringir UDP/STUN e repetir: observação do retry relay-only TURN.
+- [ ] Desativar TURN/bloquear relay: ver Lockstep TCP via Railway, não WebRTC.
+- [ ] Rom homebrew redistribuível enviada com consentimento de ambos e SHA-256
+      antes de estabelecer rollback; repetir no fallback TCP.
+- [ ] Verificar START (jogo) e GUIDE (menu) e navegar os ajustes por gamepad.
+- [ ] Não divulgar senha de TURN, chave API, IP público ou ROM no relatório.
+- [ ] Testar ARMv7 e ARM64, 10 minutos sem desync e sem stall excessivo.

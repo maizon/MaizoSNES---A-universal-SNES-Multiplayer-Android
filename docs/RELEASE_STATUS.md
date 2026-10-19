@@ -89,3 +89,15 @@ e importação remota usam a mesma função de SHA-256 (prefixo de 8 bytes).
 Testes JVM cobrem vetor SHA-256 conhecido e igualdade com arquivo local.
 A validação da sincronização de UI e do multiplayer em dois aparelhos físicos
 permanece pendente; este patch não equivale a prova de hardware.
+
+
+## 2026-10-19 — configuração TURN e ICE em desenvolvimento
+
+Cliente Android já compila WebRTC/GekkoNet; esta rodada adicionou troca
+trickle ICE via WSS, STUN redundante, retry TURN relay-only, timeout de
+negociação e fallback TCP, diretrizes de teste ICE no app e consulta
+HTTPS de credenciais Metered no Railway (variáveis opcionais, sem chave APK).
+Credenciais compartilhadas demonstrativas do Open Relay são tentadas sem
+SLA. Documentação docs/TURN_SETUP.md e testes do servidor foram incluídos.
+Hardware P2P em duas operadoras e ARMv7 real NÃO foi validado; não publicar
+como funcional em todos os NATs até confirmação física.

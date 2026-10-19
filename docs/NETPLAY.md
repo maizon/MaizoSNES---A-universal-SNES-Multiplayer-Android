@@ -219,3 +219,27 @@ NAT simétrico só pode ser inferido com testes mais profundos, portanto N/D.
 operadoras, consumo de dados, jitter, sincronização 10 minutos, armv7
 heterogêneo, detecção/resync de desync e fallback físico. Consulte
 `docs/DEVICE_TESTING.md`. A compilação não substitui esses testes.
+
+
+## Atualização: sinalização trickle ICE e TURN best-effort
+
+A partir desta revisão, o segundo canal WSS envia explicitamente SDP e
+candidatos ICE, com limites para mensagens e prazos finitos. Primeira tentativa:
+STUN + TURN com ICE normal, até 17 s para abrir o DataChannel. Quando os dois
+participantes anunciam TURN habilitado e o canal não abre, tenta outra sala
+de sinalização para ICE relay-only, por até 14 s, antes do fallback Lockstep.
+A negociação da ROM e do estado inicial continua no WSS de jogo original.
+O GekkoNet usa seu adaptador C++20 para pacotes binários WebRTC SCTP/DTLS.
+
+A configuração do ICE prioriza STUN Google/Cloudflare e aceita opções locais.
+O serviço Railway consulta as credenciais de conta Metered em /api/ice caso
+MAIZO_METERED_APP e MAIZO_METERED_TURN_API_KEY estejam configuradas.
+Sem elas o cliente tenta credenciais públicas demonstrativas do Open Relay,
+que NÃO possuem garantia de vigência; nenhuma chave privada fica no APK.
+Consultar docs/TURN_SETUP.md. O teste ICE coleta candidatos localmente, não
+estabelece sessão sem outro aparelho. TURN e perda SCTP são reportados apenas
+quando houver dados; não inferir perda usando estatísticas RTP.
+
+**Atenção:** textos anteriores deste documento descrevem versões históricas
+sem WebRTC. O código de DataChannel agora existe, mas não foi validado ainda
+entre dois Android reais, nem fornece garantia de ausência de custo/quota TURN.
