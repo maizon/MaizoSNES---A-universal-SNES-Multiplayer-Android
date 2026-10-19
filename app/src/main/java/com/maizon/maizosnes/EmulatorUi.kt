@@ -561,7 +561,7 @@ private fun LibraryScreen(
                 Text(if (listMode) "● Lista" else "Lista", fontSize = 11.sp)
             }
         }
-        Text(visibleRoms.size.toString() + " jogo(s) • A: detalhes • B: voltar",
+        Text(visibleRoms.size.toString() + " jogo(s) • A: abrir • B: voltar • L1/R1: abas",
             color = Muted, fontSize = 11.sp)
         if (visibleRoms.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -714,18 +714,22 @@ private fun RomCard(
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp),
                 fontSize = if (compact) 11.sp else 13.sp, fontWeight = FontWeight.Bold,
                 maxLines = 2, lineHeight = 16.sp)
-            Row(
+            // In 3/4-column launcher mode the entire card is a gamepad/touch
+            // focus target. Avoid oversized buttons overflowing narrow cards.
+            if (!compact) Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!compact) TextButton(onClick = onRename, contentPadding = PaddingValues(4.dp),
+                TextButton(onClick = onRename, contentPadding = PaddingValues(4.dp),
                     modifier = Modifier.weight(1f)) { Text("EDITAR", fontSize = 10.sp) }
                 Button(onClick = onOpen,
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
                     contentPadding = PaddingValues(horizontal = 13.dp, vertical = 5.dp)) {
                     Text("ABRIR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
-            }
+            } else Text("A • DETALHES",
+                color = Mint, fontSize = 9.sp, maxLines = 1,
+                modifier = Modifier.padding(start = 8.dp, bottom = 7.dp))
         }
     }
 }
