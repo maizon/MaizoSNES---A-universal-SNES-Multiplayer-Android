@@ -22,8 +22,10 @@ import java.util.concurrent.locks.LockSupport
  * is designed for homebrew/free-redistribution content, NOT commercial games.
  *
  * Single threaded per peer: the network thread is the only source of retro_run
- * while netplay mode is enabled. Lockstep is correct-by-construction but the
- * local input-to-display delay grows with RTT; prediction/rollback is future work.
+ * while netplay mode is enabled. MZNP v5 sends frame inputs in advance using
+ * a bounded jitter buffer. Unlike v4 it does not block on a NEW network RTT
+ * for every emulated frame, allowing smooth FPS when stable one-way latency
+ * fits inside the negotiated input delay. This is not rollback/prediction.
  */
 internal class NetplaySession(
     private val rom: File?,
@@ -55,12 +57,14 @@ internal class NetplaySession(
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
-        private const val VERSION = 4
+        private const val VERSION = 5
         private const val MAX_ROM = 64 * 1024 * 1024
         private const val MAX_STATE = 64 * 1024 * 1024 + 28
         // Avoid heavy full-state snapshots every 2 seconds on slow ARM SoCs.
         // Still verify both emulators deterministically every ~5 seconds.
         private const val HASH_INTERVAL = 300
+        private const val PING_MAGIC = 0x4d5a5049 // MZPI
+        private const val BUFFER_MAGIC = 0x4d5a4246 // MZBF
         private const val TRANSFER = 1
         private const val READY = 2
         private const val DENIED = 0
@@ -222,7 +226,7 @@ internal class NetplaySession(
         // Core source is pinned by scripts/fetch_snes9x.sh. No binary identity
         // guarantee across APKs; tested compatibility is still required.
         val manifest = buildString {
-            append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp4\n")
+            append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp5\n")
             options.toSortedMap().forEach { (key, value) ->
                 append(key).append('=').append(value).append('\n')
             }
@@ -457,8 +461,59 @@ internal class NetplaySession(
 
         connection.soTimeout = if (mode == NetworkMode.INTERNET ||
             mode == NetworkMode.RELAY || mode == NetworkMode.AUTO) 12000 else 5000
-        onStatus(if (host) "Conectado como jogador 1 (host)." else "Conectado como jogador 2.")
         val period = framePeriodNs().coerceIn(10000000L, 50000000L)
+        // One RTT measurement before playback rather than one round trip
+        // PER FRAME. Host chooses the shared frame-ahead delay. A slow relay
+        // needs more input latency, but no longer limits FPS to 1 / RTT.
+        val rttSamples = LongArray(3)
+        val delay: Int
+        if (host) {
+            repeat(rttSamples.size) { index ->
+                val sent = System.nanoTime()
+                output.writeInt(PING_MAGIC)
+                output.writeLong(sent)
+                output.flush()
+                check(input.readInt() == PING_MAGIC && input.readLong() == sent) {
+                    "Falha na medição da latência."
+                }
+                rttSamples[index] = (System.nanoTime() - sent).coerceAtLeast(0L)
+            }
+            delay = NetplayPacing.suggestFrameBuffer(
+                rttSamples, period, mode)
+            output.writeInt(BUFFER_MAGIC)
+            output.writeInt(delay)
+            output.flush()
+            require(input.readBoolean()) { "Cliente não aceitou buffer de rede." }
+        } else {
+            repeat(rttSamples.size) {
+                require(input.readInt() == PING_MAGIC) {
+                    "Host não enviou medição RTT."
+                }
+                val token = input.readLong()
+                output.writeInt(PING_MAGIC)
+                output.writeLong(token)
+                output.flush()
+            }
+            require(input.readInt() == BUFFER_MAGIC) {
+                "Host não enviou configuração de buffer."
+            }
+            delay = input.readInt()
+            require(delay in 2..48) { "Buffer remoto fora do limite: $delay." }
+            output.writeBoolean(true)
+            output.flush()
+        }
+        onStatus((if (host) "Conectado como jogador 1 (host)." else
+            "Conectado como jogador 2.") +
+            " Buffer de $delay quadros (MZNP v5).")
+        // Bootstrap both peers with identical button samples for frames
+        // 0..delay-1. Then send frame+delay BEFORE consuming peer frame,
+        // keeping the TCP stream pipelined and bounded by 'delay'.
+        val localInputs = IntArray(delay) { localInput() and 0xffff }
+        for (initialFrame in 0 until delay) {
+            output.writeInt(initialFrame)
+            output.writeInt(localInputs[initialFrame])
+        }
+        output.flush()
         var nextFrameAt = System.nanoTime()
         var frame = 0
         var measureFrames = 0
@@ -467,10 +522,14 @@ internal class NetplaySession(
         var measureMaxWaitNs = 0L
         var measureStart = System.nanoTime()
         while (!closed.get()) {
-            val localMask = localInput() and 0xffff
+            val ringSlot = frame % delay
+            val localMask = localInputs[ringSlot]
+            val futureMask = localInput() and 0xffff
+            localInputs[ringSlot] = futureMask
             val waitStart = System.nanoTime()
-            output.writeInt(frame)
-            output.writeInt(localMask)
+            // Publish future inputs early; not one request/response per frame.
+            output.writeInt(frame + delay)
+            output.writeInt(futureMask)
             output.flush()
             val peerFrame = input.readInt()
             require(peerFrame == frame) { "Frame inválido: esperado $frame, veio $peerFrame." }
@@ -504,7 +563,9 @@ internal class NetplaySession(
                     peerWaitMs = if (measureFrames == 0) 0.0 else measureWaitNs / 1e6 / measureFrames,
                     maxPeerWaitMs = measureMaxWaitNs / 1e6,
                     effectiveFps = measureFrames / elapsedSeconds,
-                    stalledFrames = measureStalls
+                    stalledFrames = measureStalls,
+                    inputDelayFrames = delay,
+                    sampledRttMs = if (host) rttSamples.maxOrNull()!!.toDouble() / 1e6 else 0.0
                 ))
                 measureStart = now
                 measureFrames = 0

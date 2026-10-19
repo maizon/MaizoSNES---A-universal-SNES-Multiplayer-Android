@@ -11,7 +11,7 @@ o estado da conexão, um código e a opção **Cancelar sala / Desconectar**
 enquanto aguarda o segundo jogador. O botão Criar não parece travado: ele
 é desativado ao existir uma sessão ativa.
 
-**Dois celulares:** ambos devem usar APK com protocolo **MZNP v4** e
+**Dois celulares:** ambos devem usar APK com protocolo **MZNP v5** e
 a mesma ROM/mod (SHA-256). Quando só as opções de núcleo diferirem, o
 convidado valida e adota temporariamente os valores do host; seu perfil
 pessoal é restaurado ao desconectar. ROMs comerciais não são transferidas.
@@ -21,8 +21,7 @@ Novidades: áudio com buffer 25/40/60 ms, presets de imagem leve/GPU
 configurações do núcleo, sala LAN persistente até cancelamento e redução do
 trabalho com hash de estado durante netplay.
 
-**Importante:** netplay ainda usa lockstep; em rede móvel e RTT alto podem
-ocorrer atrasos e queda de FPS. Não há rollback nem garantia de latência
+**Importante:** MZNP v5 é lockstep com entrada antecipada, sem RTT obrigatório por quadro. Jitter acima do buffer pode reduzir FPS; não há rollback ou garantia de latência
 zero. Os testes CI verificam HTTP/TCP e jogo determinístico simulado; a
 jogabilidade em dois smartphones precisa de validação física. Relay TCP
 sem TLS fim a fim. APK da CI usa assinatura DEBUG não persistente.
@@ -33,7 +32,7 @@ Consulte `docs/CHANGELOG_0.8.md` e `docs/SUPER_PROMPT_PREMIUM.md`.
 - LAN automática identifica prefixo SHA-256 e uso de cheats, além do título; evita entrar em salas com mods diferentes. IP/porta aparecem apenas nos modos avançados.
 - **Jogo Rápido**: botão de 1 toque tenta conexão LAN do mesmo jogo, sala online compatível e, sem outras salas, cria uma automaticamente; sem servidor publicado, cria sala LAN.
 - Modo **Automático (recomendado)** reúne salas LAN e servidores oficiais cadastrados pelo próprio MaizoSNES. Nenhum IP/URL é solicitado ao jogador comum. O catálogo `server/registry.json` começa vazio até operadores autorizados realmente implantarem instâncias. Listas de terceiros não são servidores compatíveis automaticamente.
-- Pesquisa simultânea em relays HTTPS autorizados (até 8 endpoints), lista salas por região, mostra tempo de resposta HTTP, hash parcial da ROM e aviso de cheats; pré-verificação de compatibilidade por SHA-256 da ROM antes de entrar. A versão MZNP v3 ainda valida o SHA-256 **completo**.
+- Pesquisa simultânea em relays HTTPS autorizados (até 8 endpoints), lista salas por região, mostra tempo de resposta HTTP, hash parcial da ROM e aviso de cheats; pré-verificação de compatibilidade por SHA-256 da ROM antes de entrar. A versão MZNP v5 ainda valida o SHA-256 **completo**.
 - **Cheats online opcionais, sincronizados ANTES do primeiro quadro**: o host seleciona os códigos na biblioteca; ambos precisam autorizar nas opções multiplayer. Os dois núcleos aplicam a mesma lista validada ou encerram a conexão antes de jogar. Mudança de cheats durante a partida permanece bloqueada.
 - Patches IPS/BPS existentes funcionam em partidas online **quando ambos têm a mesma ROM já modificada** (SHA-256 idêntico). O programa não envia automaticamente patches/ROMs.
 - Modo antigo por IP, LAN automática e relay manual preservados; configurações avançadas recolhíveis.
@@ -56,6 +55,28 @@ Consulte `docs/CHANGELOG_0.8.md` e `docs/SUPER_PROMPT_PREMIUM.md`.
 
 O modo de rede pública é experimental: sem TLS no túnel TCP, contas ou controle de abuso. Para uso com pessoas não confiáveis configure um relay com VPN privada e autenticação adicionais. O build CI testa o servidor em loopback, mas não confirma estabilidade de GPU ou internet em smartphones reais. Não fornecemos APK comercial ou ROM.
 
+## Versão 0.9 RC — correção de FPS no multiplayer (MZNP v5)
+
+**Relato real de teste do desenvolvedor:** Android + VM conectam pelo online,
+mas o gameplay reduz a aproximadamente **2 FPS**. Causa arquitetural
+identificada: até v4 a thread de jogo envia entrada do quadro e **espera uma
+resposta TCP de ida e volta para cada quadro**. Um RTT de 500ms limita
+o jogo a cerca de 2 FPS, mesmo quando o Snes9x isoladamente roda a 60.
+
+A versão **MZNP v5** negocia o RTT **antes** da partida e transmite
+entradas para quadros futuros com *input delay* limitado de **2 a 48 quadros**.
+Assim os dois aparelhos podem continuar em ~60 quadros/s se a rede entregar
+as entradas dentro do buffer negociado e se ambos os núcleos forem rápidos.
+Existe uma troca: conexões distantes exigem mais atraso no controle.
+O cliente recebe o delay selecionado pelo host. Hash periódico mantém detecção
+de dessincronização; não foi implementado rollback/predição de entrada. O
+transporte direto LAN continua suportado; o modo Internet/CGNAT continua
+através de relay público, sem prometer perfuração de NAT para conexão direta.
+
+CI adiciona um **teste de duas sessões com 200ms de RTT artificial** para
+evitar regressão ao gargalo de um roundtrip por quadro. A validação completa
+a 60 FPS exige **teste Android+VM e dois Androids reais**.
+
 ## Funcionalidades implementadas no código
 
 - Biblioteca privada: importar ROMs `.sfc`, `.smc` ou ZIP com uma ROM, listar, renomear e abrir sem picker repetitivo.
@@ -76,7 +97,7 @@ O modo de rede pública é experimental: sem TLS no túnel TCP, contas ou contro
 
 A versão anterior do núcleo single-player foi testada pelo desenvolvedor no Android e executou jogos e save states. **O código de netplay, editor por arrasto, ROM ZIP e UI desta revisão não foi validado em dois aparelhos Android**. Apenas a CI e os testes de loopback não demonstram confiabilidade e latência de rede. Por isso o multiplayer continua rotulado **experimental**.
 
-Não existe "delay zero" pela internet: lockstep aguarda entradas remotas. Para uma experiência próxima de resposta local online é necessário implementar e validar predição/rollback. Também não existe matchmaking, NAT traversal, criptografia nem segurança para sala aberta à internet pública.
+Não existe "delay zero" pela internet: MZNP v5 antecipa entradas, mas espera quando o jitter ultrapassa o buffer. Para uma experiência próxima de resposta local online é necessário implementar e validar predição/rollback. Também não existe matchmaking, NAT traversal, criptografia nem segurança para sala aberta à internet pública.
 
 ## Build
 
@@ -110,7 +131,7 @@ Snes9x possui licença específica de **uso não comercial**; o filtro NTSC incl
 - **Presets editáveis:** Maizo Original, CTR Racing, ARMSX Compact e PPSSPP Comfort; perfis autorais, sem código ou imagens reproduzidos dos emuladores usados como referência. Posicionamento de ABXY, L/R e Start/Select individual, grupos e D-pad juntos; persistência dos presets por jogo e configurações globais.
 - **Modos sem perder progresso:** Offline local, LAN automática, LAN manual e Internet/VPN. Host/IP/porta são memorizados separadamente para cada modo. Mudanças com sessão conectada são recusadas para evitar interromper jogo.
 - **Métricas reais do app:** HUD opcional com FPS do núcleo, tempo médio gasto na emulação, tempo médio de atualização do vídeo e áudio enfileirado. Sessões remotas exibem espera pelo peer, picos, FPS efetivo e quadros atrasados. São contadores coletados em runtime, não benchmarks de dispositivos pré-testados.
-- **Pacing:** loop offline usa próximo deadline acumulado e se recupera de atrasos sem acelerar relógio do emulador. O modo Internet mantém o protocolo determinístico MZNP v2, usa TCP_NODELAY, best-effort prioridade de baixa latência e timeout tolerante a jitter; não inclui rollback ou servidor relay.
+- **Pacing:** loop offline usa próximo deadline acumulado e se recupera de atrasos sem acelerar relógio do emulador. O modo Internet mantém o protocolo determinístico MZNP v5, usa TCP_NODELAY, best-effort prioridade de baixa latência e timeout tolerante a jitter; não inclui rollback ou servidor relay.
 - **Filtros opcionais RGB565:** Original (fast path), scanlines, suavização horizontal e combinação leve. Aplicados na saída de vídeo, sem inventar suporte Vulkan/OpenGL ou forçar filtros que prejudiquem FPS.
 - **Cheats com checksum:** primeiro procura identificação No-Intro pelo tamanho + CRC32 + SHA-1 (com suporte a cabeçalho SNES de 512 bytes), usando base pública fixada; se não reconhecer, mantém a busca por nome e informa que é heurística.
 - **Capas opcionais automáticas:** consulta a biblioteca de thumbnails do Libretro por nome padronizado e guarda PNGs no cache interno. Não empacota capas de terceiros no APK. A disponibilidade e as condições de uso das artes dependem do respectivo titular.

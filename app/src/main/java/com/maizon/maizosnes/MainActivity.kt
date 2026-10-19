@@ -313,9 +313,10 @@ class MainActivity : ComponentActivity() {
                         emuMs, videoMs, counters[5])
                     performanceText.value = if (network == null) base else base +
                         String.format(java.util.Locale.US,
-                            "\nPeer espera %.1f / pico %.1f ms • %d travamentos/s",
+                            "\nPeer espera %.1f / pico %.1f ms • %d travamentos/s" +
+                                " • buffer %d quadros",
                             network.peerWaitMs, network.maxPeerWaitMs,
-                            network.stalledFrames)
+                            network.stalledFrames, network.inputDelayFrames)
                 }
                 previous = counters
                 previousAt = now
@@ -1741,10 +1742,10 @@ class MainActivity : ComponentActivity() {
                         lastNetworkMetrics.value = metrics
                         lanStatus.value = String.format(java.util.Locale.US,
                             "Quadro %d • espera peer %.1f ms (pico %.1f ms) • " +
-                                "%.1f FPS • atrasos %d/s",
+                                "%.1f FPS • atrasos %d/s • buffer %d quadros",
                             metrics.frame, metrics.peerWaitMs,
                             metrics.maxPeerWaitMs, metrics.effectiveFps,
-                            metrics.stalledFrames)
+                            metrics.stalledFrames, metrics.inputDelayFrames)
                     }
                 }
             },

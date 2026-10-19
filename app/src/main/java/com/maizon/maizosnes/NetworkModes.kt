@@ -2,7 +2,7 @@ package com.maizon.maizosnes
 
 /**
  * Mode selection changes connection discovery/timeouts and the UI profile,
- * NOT the established MZNP v2 wire protocol. Save-state/ROM progress is intact.
+ * MZNP v5 uses negotiated input pipelining. Save-state/ROM progress is intact.
  */
 internal enum class NetworkMode(val label: String, val hint: String) {
     AUTO("Automático (recomendado)", "Encontra LAN e servidores MaizoSNES online sem inserir IP ou URL"),
@@ -18,7 +18,9 @@ internal data class NetworkMetrics(
     val peerWaitMs: Double,
     val maxPeerWaitMs: Double,
     val effectiveFps: Double,
-    val stalledFrames: Long
+    val stalledFrames: Long,
+    val inputDelayFrames: Int = 0,
+    val sampledRttMs: Double = 0.0
 )
 
 internal enum class VideoFilter(val label: String, val nativeId: Int, val description: String) {
