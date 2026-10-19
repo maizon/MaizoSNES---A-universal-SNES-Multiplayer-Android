@@ -9,6 +9,8 @@ import java.security.MessageDigest
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -129,11 +131,11 @@ internal class WebRtcRollbackTransport private constructor(
             WssRelaySocket {
             val signalId = signalRoom(roomId)
             var last: Exception? = null
-            repeat(if (host) 1 else 7) { attempt ->
+            repeat(if (host) 1 else 6) { attempt ->
                 var sock: WssRelaySocket? = null
                 try {
                     sock = WssRelaySocket.connect(endpoint)
-                    sock.soTimeout = if (host) 6500 else 5000
+                    sock.soTimeout = if (host) 25000 else 4000
                     val title = "R2Vra29TaWduYWxpbmc" // GekkoSignaling, hidden from room listing
                     val greeting = if (host)
                         "HOST $signalId $title 0000000000000000 0\n"
@@ -147,14 +149,14 @@ internal class WebRtcRollbackTransport private constructor(
                         answer.append(b.toChar())
                     }
                     if (answer.toString() == "READY") {
-                        sock.soTimeout = 25000
+                        sock.soTimeout = 50000
                         return sock
                     }
                     throw java.io.IOException("Sinalização WSS: " + answer)
                 } catch (err: Exception) {
                     sock?.close()
                     last = err
-                    if (!host && attempt < 6) Thread.sleep(300)
+                    if (!host && attempt < 5) Thread.sleep(650)
                 }
             }
             throw last ?: java.io.IOException("Falha na sinalização WSS")
@@ -221,42 +223,85 @@ internal class WebRtcRollbackTransport private constructor(
          * Returns null on NAT/ICE/signaling failure without touching the main
          * MZNP connection; both peers continue lockstep automatically.
          */
+        /** Both devices should use identical ICE configuration (Railway defaults).
+         * Attempts prefer direct ICE first, then relay-only if TURN is present.
+         * Missing/invalid provider credentials never block the TCP fallback.
+         */
         fun attempt(context: Context, endpoint: String, roomId: String,
-                    hosting: Boolean, onState: (String) -> Unit):
-            WebRtcRollbackTransport? {
-            val signal = try { openSignaling(endpoint, roomId, hosting) }
-                catch (e: Exception) {
-                    onState("WebRTC sinalização indisponível: " + e.message)
-                    return null
+                    hosting: Boolean, onState: (String) -> Unit,
+                    customIce: String = ""): WebRtcRollbackTransport? {
+            val ice = IceServerConfig.load(endpoint, customIce)
+            val haveTurn = IceServerConfig.hasTurn(ice)
+            onState("ICE: verificando STUN" +
+                if (haveTurn) " + TURN autenticado." else " (TURN indisponível).")
+            val direct = attemptOnce(context, endpoint, roomId, hosting, ice,
+                relayOnly = false, onState = onState)
+            if (direct.transport != null) return direct.transport
+            if (!direct.canRetryRelay || !haveTurn) {
+                onState("ICE checking excedeu prazo; Lockstep TCP via Railway.")
+                return null
+            }
+            onState("ICE: tentando TURN relay exclusivamente antes de Lockstep…")
+            return attemptOnce(context, endpoint, roomId, hosting, ice,
+                relayOnly = true, onState = onState).transport
+        }
+
+        private data class AttemptResult(
+            val transport: WebRtcRollbackTransport? = null,
+            val canRetryRelay: Boolean = false
+        )
+
+        private fun attemptOnce(context: Context, endpoint: String, roomId: String,
+                    hosting: Boolean, ice: List<PeerConnection.IceServer>,
+                    relayOnly: Boolean, onState: (String) -> Unit): AttemptResult {
+            // Deliberately different rendezvous for retry: cannot mix stale
+            // SDP/ICE packets of a previous failed attempt.
+            val channelId = roomId + if (relayOnly) ":turn" else ":direct"
+            val signal = try { openSignaling(endpoint, channelId, hosting) }
+                catch (err: Exception) {
+                    onState("Signaling WSS indisponível: " + err.javaClass.simpleName)
+                    return AttemptResult()
                 }
-            var factory: PeerConnectionFactory? = null
             var transport: WebRtcRollbackTransport? = null
+            var success = false
+            var canRetryRelay = false
             try {
                 signal.use { ws ->
-                    factory = buildFactory(context)
-                    val gather = CountDownLatch(1)
+                    val input = DataInputStream(ws.getInputStream())
+                    val output = DataOutputStream(ws.getOutputStream())
+                    val ownTurn = IceServerConfig.hasTurn(ice)
+                    output.writeBoolean(ownTurn)
+                    output.flush()
+                    val peerTurn = input.readBoolean()
+                    canRetryRelay = ownTurn && peerTurn
+                    if (relayOnly && !canRetryRelay) return AttemptResult()
+
+                    val factory = buildFactory(context)
+                    val outgoing = LinkedBlockingQueue<IceCandidate>(256)
                     val open = CountDownLatch(1)
-                    val packets = ArrayBlockingQueue<ByteArray>(384)
-                    var connection: WebRtcRollbackTransport? = null
-                    val ice = listOf(
-                        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                        PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer()
-                    )
-                    // Public TURN is not assumed to be usable without credentials.
+                    val partnerComplete = CountDownLatch(1)
+                    val partnerAccepted = AtomicBoolean(false)
+                    val incoming = ArrayBlockingQueue<ByteArray>(384)
                     val config = PeerConnection.RTCConfiguration(ice)
-                    val peer = factory!!.createPeerConnection(config,
+                    config.iceTransportsType = if (relayOnly)
+                        PeerConnection.IceTransportsType.RELAY else
+                        PeerConnection.IceTransportsType.ALL
+                    var connection: WebRtcRollbackTransport? = null
+                    val peer = factory.createPeerConnection(config,
                         object : PeerConnection.Observer {
                             override fun onSignalingChange(s: PeerConnection.SignalingState) {}
                             override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {
                                 connection?.iceState = s.name.lowercase()
-                                onState("ICE: " + s.name.lowercase())
+                                onState("ICE: " + s.name.lowercase() +
+                                    if (relayOnly) " (TURN relay)" else " (STUN/TURN)")
                             }
                             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
                             override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {
-                                if (s == PeerConnection.IceGatheringState.COMPLETE)
-                                    gather.countDown()
+                                onState("ICE gathering: " + s.name.lowercase())
                             }
-                            override fun onIceCandidate(candidate: IceCandidate) {}
+                            override fun onIceCandidate(candidate: IceCandidate) {
+                                if (candidate.sdp.length < 4096) outgoing.offer(candidate)
+                            }
                             override fun onIceCandidatesRemoved(candidates: Array<IceCandidate>) {}
                             override fun onAddStream(stream: MediaStream) {}
                             override fun onRemoveStream(stream: MediaStream) {}
@@ -264,53 +309,103 @@ internal class WebRtcRollbackTransport private constructor(
                                 connection?.bind(dc)
                             }
                             override fun onRenegotiationNeeded() {}
-                        }) ?: error("RTC PeerConnection indisponível")
-                    transport = WebRtcRollbackTransport(peer, packets, open)
+                        }) ?: error("WebRTC PeerConnection não disponível")
+
+                    transport = WebRtcRollbackTransport(peer, incoming, open)
                     connection = transport
                     if (hosting) {
-                        val settings = DataChannel.Init()
-                        settings.ordered = false
-                        settings.maxRetransmits = 0
-                        val dc = peer.createDataChannel("gekko-udp", settings)
-                            ?: error("Não criou DataChannel")
-                        transport!!.bind(dc)
+                        val init = DataChannel.Init().apply {
+                            ordered = false
+                            maxRetransmits = 0
+                        }
+                        val dc = peer.createDataChannel("gekko-udp", init)
+                            ?: error("Falha ao criar DataChannel")
+                        connection.bind(dc)
                     }
-                    val input = DataInputStream(ws.getInputStream())
-                    val output = DataOutputStream(ws.getOutputStream())
+                    // Send SDP immediately; candidates are exchanged with
+                    // trickle ICE after the SDP offer/answer is installed.
                     if (hosting) {
                         val offer = awaitSdpCreate(peer, true)
                         setSdp(peer, offer, true)
-                        require(gather.await(10, TimeUnit.SECONDS)) { "ICE gathering excedeu prazo" }
-                        sendSdp(output, peer.localDescription ?: offer)
-                        setSdp(peer, receiveSdp(input, SessionDescription.Type.ANSWER), false)
+                        sendSdp(output, offer)
+                        setSdp(peer,
+                            receiveSdp(input, SessionDescription.Type.ANSWER), false)
                     } else {
-                        setSdp(peer, receiveSdp(input, SessionDescription.Type.OFFER), false)
+                        setSdp(peer,
+                            receiveSdp(input, SessionDescription.Type.OFFER), false)
                         val answer = awaitSdpCreate(peer, false)
                         setSdp(peer, answer, true)
-                        require(gather.await(10, TimeUnit.SECONDS)) { "ICE gathering excedeu prazo" }
-                        sendSdp(output, peer.localDescription ?: answer)
+                        sendSdp(output, answer)
                     }
-                    val ready = open.await(12, TimeUnit.SECONDS) &&
-                        transport!!.channel?.state() == DataChannel.State.OPEN
-                    // Both peers commit to rollback only after mutual success.
-                    output.writeBoolean(ready)
-                    output.flush()
-                    val partnerReady = input.readBoolean()
+
+                    val alive = AtomicBoolean(true)
+                    val writer = Thread({
+                        try {
+                            while (alive.get()) {
+                                val candidate = outgoing.poll(100, TimeUnit.MILLISECONDS)
+                                    ?: continue
+                                synchronized(output) {
+                                    output.writeByte(1)
+                                    output.writeUTF(candidate.sdpMid ?: "")
+                                    output.writeInt(candidate.sdpMLineIndex)
+                                    output.writeUTF(candidate.sdp)
+                                    output.flush()
+                                }
+                            }
+                        } catch (_: Exception) { alive.set(false) }
+                    }, "Maizo-RTC-ICE-Sender").apply { isDaemon = true; start() }
+
+                    val reader = Thread({
+                        try {
+                            while (alive.get()) {
+                                when (input.readUnsignedByte()) {
+                                    1 -> {
+                                        val mid = input.readUTF()
+                                        val index = input.readInt()
+                                        val sdp = input.readUTF()
+                                        require(mid.length < 100 && index in 0..16 &&
+                                            sdp.length < 4096) { "ICE candidate inválido" }
+                                        peer.addIceCandidate(IceCandidate(mid, index, sdp))
+                                    }
+                                    3 -> {
+                                        partnerAccepted.set(input.readBoolean())
+                                        partnerComplete.countDown()
+                                        break
+                                    }
+                                    else -> error("ICE message desconhecida")
+                                }
+                            }
+                        } catch (_: Exception) {
+                            partnerComplete.countDown()
+                        }
+                    }, "Maizo-RTC-ICE-Receiver").apply { isDaemon = true; start() }
+
+                    val ready = open.await(if (relayOnly) 14 else 17, TimeUnit.SECONDS) &&
+                        connection.channel?.state() == DataChannel.State.OPEN
+                    synchronized(output) {
+                        output.writeByte(3)
+                        output.writeBoolean(ready)
+                        output.flush()
+                    }
+                    val partnerReady = partnerComplete.await(7, TimeUnit.SECONDS) &&
+                        partnerAccepted.get()
+                    alive.set(false)
                     if (!ready || !partnerReady) {
-                        onState("ICE não conectou: usando Lockstep TCP.")
-                        return null
+                        onState(if (relayOnly)
+                            "ICE relay TURN falhou; retornando Lockstep TCP."
+                            else "ICE P2P não completou; avaliando TURN.")
+                        return AttemptResult(canRetryRelay = canRetryRelay)
                     }
-                    onState("ICE connected • WebRTC DataChannel não ordenado ativo")
-                    return transport
+                    success = true
+                    onState("ICE connected: WebRTC DataChannel estabelecido" +
+                        if (relayOnly) " pelo TURN" else " (par ICE selecionado)")
+                    return AttemptResult(transport, canRetryRelay)
                 }
-            } catch (e: Exception) {
-                onState("WebRTC indisponível: " + (e.message ?: "ICE/SDP"))
-                transport?.close()
-                return null
+            } catch (err: Exception) {
+                onState("ICE falhou: " + (err.message ?: err.javaClass.simpleName))
+                return AttemptResult(canRetryRelay = canRetryRelay)
             } finally {
-                // The data channel owns native state; the process keeps the
-                // factory as a singleton until a future session.
-                // Do not dispose the peer factory while an active peer exists.
+                if (!success) transport?.close()
             }
         }
     }
