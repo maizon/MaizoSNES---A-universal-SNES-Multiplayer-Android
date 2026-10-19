@@ -339,7 +339,7 @@ internal fun MaizoEmulatorApp(
                 onRemoveRom, onApplyPatchToRom,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
                 onScanRomFolder, onApplyRomPatch, onScanAllDevice,
-                onOpenRom, onContinueGame, onRenameRom
+                onOpenRom, onContinueGame, onRenameRom, onSetScreen
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize().padding(padding), currentRomName, localRomHashPrefix, multiplayerReady,
@@ -431,7 +431,8 @@ private fun LibraryScreen(
     onScanAllDevice: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
-    onRenameRom: (String, String) -> Unit
+    onRenameRom: (String, String) -> Unit,
+    onSetScreen: (AppScreen) -> Unit
 ) {
     var selectedRom by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<String?>(null) }
@@ -442,7 +443,7 @@ private fun LibraryScreen(
     var collectionMode by remember { mutableStateOf("Todos") }
     val homeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { homeFocus.requestFocus() }
-    val visibleRoms = remember(romNames, libraryQuery, collectionMode, favoriteRoms, recentRoms) {
+    val visibleRoms = remember(romNames, romHeaders, libraryQuery, collectionMode, favoriteRoms, recentRoms) {
         val filtered = romNames.filter { name ->
             val gameTitle = romHeaders[name]?.title ?: name
             (name.contains(libraryQuery.trim(), ignoreCase = true) ||
@@ -526,7 +527,8 @@ private fun LibraryScreen(
             LazyColumn(Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(visibleRoms, key = { it }) { name ->
-                    RomCard(name, currentRomName == name, coverBitmaps[name],
+                    RomCard(name, romHeaders[name]?.title ?: File(name).nameWithoutExtension,
+                        currentRomName == name, coverBitmaps[name],
                         { selectedRom = name }, { renameTarget = name }, compact = true)
                 }
             }
@@ -536,7 +538,8 @@ private fun LibraryScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 gridItems(visibleRoms, key = { it }) { name ->
-                    RomCard(name, currentRomName == name, coverBitmaps[name],
+                    RomCard(name, romHeaders[name]?.title ?: File(name).nameWithoutExtension,
+                        currentRomName == name, coverBitmaps[name],
                         { selectedRom = name }, { renameTarget = name }, compact = columns >= 3)
                 }
             }
@@ -550,8 +553,8 @@ private fun LibraryScreen(
         LaunchedEffect(name) { detailFocus.requestFocus() }
         Dialog(onDismissRequest = { selectedRom = null }) {
             Surface(shape = RoundedCornerShape(24.dp), color = Panel,
-                modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 670.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
@@ -568,6 +571,17 @@ private fun LibraryScreen(
                         modifier = Modifier.fillMaxWidth().focusRequester(detailFocus)) { Text("▶ JOGAR") }
                     OutlinedButton(onClick = { selectedRom = null; onApplyPatchToRom(name) },
                         modifier = Modifier.fillMaxWidth()) { Text("APLICAR PATCH IPS / BPS") }
+                    if (currentRomName == name && hasLoadedRom) {
+                        OutlinedButton(onClick = {
+                            selectedRom = null
+                            onSetScreen(AppScreen.SETTINGS)
+                        }, modifier = Modifier.fillMaxWidth()) { Text("SAVE STATES E AJUSTES") }
+                        OutlinedButton(onClick = {
+                            selectedRom = null
+                            onSetScreen(AppScreen.MULTIPLAYER)
+                        }, modifier = Modifier.fillMaxWidth()) { Text("MULTIPLAYER LAN / ONLINE") }
+                    } else Text("Para saves e multiplayer, abra o jogo primeiro.",
+                        color = Muted, fontSize = 11.sp)
                     OutlinedButton(onClick = { onToggleFavorite(name) },
                         modifier = Modifier.fillMaxWidth()) {
                         Text(if (name in favoriteRoms) "★ REMOVER FAVORITO" else "☆ FAVORITAR")
@@ -606,6 +620,7 @@ private fun LibraryScreen(
 @Composable
 private fun RomCard(
     fileName: String,
+    displayTitle: String,
     current: Boolean,
     cover: Bitmap?,
     onOpen: () -> Unit,
@@ -628,7 +643,7 @@ private fun RomCard(
                 if (cover != null) {
                     Image(
                         bitmap = cover.asImageBitmap(),
-                        contentDescription = "Capa de " + File(fileName).nameWithoutExtension,
+                        contentDescription = "Capa de " + displayTitle,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit
                     )
@@ -647,7 +662,7 @@ private fun RomCard(
                         fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Text(File(fileName).nameWithoutExtension,
+            Text(displayTitle,
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp),
                 fontSize = if (compact) 11.sp else 13.sp, fontWeight = FontWeight.Bold,
                 maxLines = 2, lineHeight = 16.sp)
