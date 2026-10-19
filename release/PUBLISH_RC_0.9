@@ -1,0 +1,12 @@
+# MaizoSNES v0.9.0 RC1 publication request
+# The publish-0.9-rc.yml workflow builds from this commit, executes
+# node relay tests + JVM Android tests (including 200ms RTT simulation),
+# verifies the arm64 library and APK debug certificate, then publishes
+# only if tests and assembleDebug succeed.
+#
+# IMPORTANT: This is a prerelease with ephemeral development certificate.
+# A production signature requires the owner's private MAIZO_KEYSTORE secrets.
+# No commercial ROMs and no GPL VirtualGamePad-Mobile code/assets are included.
+MZNP_V5_INPUT_PIPELINE=1
+VIRTUAL_GAMEPAD_SNES_OVERLAY=1
+PUBLIC_RELEASE_KIND=EXPERIMENTAL_RC_DEBUG_SIGNED

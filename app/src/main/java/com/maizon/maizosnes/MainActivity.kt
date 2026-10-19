@@ -1291,14 +1291,15 @@ class MainActivity : ComponentActivity() {
             ?: TouchPreset.VIRTUAL_GAMEPAD.name
         val preset = runCatching { TouchPreset.valueOf(selectedName) }
             .getOrDefault(TouchPreset.VIRTUAL_GAMEPAD)
+        val presetDefaults = preset.defaultLayout()
         val legacy = TouchLayout(
-            enabled = prefs.getBoolean(key("touch_enabled"), true),
-            dpadX = prefs.getFloat(key("dpad_x"), 0.02f),
-            dpadY = prefs.getFloat(key("dpad_y"), 0.025f),
-            buttonsX = prefs.getFloat(key("buttons_x"), 0.02f),
-            buttonsY = prefs.getFloat(key("buttons_y"), 0.025f),
-            scale = prefs.getFloat(key("touch_scale"), 1f),
-            opacity = prefs.getFloat(key("touch_opacity"), 0.62f),
+            enabled = prefs.getBoolean(key("touch_enabled"), presetDefaults.enabled),
+            dpadX = prefs.getFloat(key("dpad_x"), presetDefaults.dpadX),
+            dpadY = prefs.getFloat(key("dpad_y"), presetDefaults.dpadY),
+            buttonsX = prefs.getFloat(key("buttons_x"), presetDefaults.buttonsX),
+            buttonsY = prefs.getFloat(key("buttons_y"), presetDefaults.buttonsY),
+            scale = prefs.getFloat(key("touch_scale"), presetDefaults.scale),
+            opacity = prefs.getFloat(key("touch_opacity"), presetDefaults.opacity),
             preset = preset
         )
         val touch = TouchLayoutCodec.decode(
