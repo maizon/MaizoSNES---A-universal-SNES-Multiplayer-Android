@@ -408,5 +408,63 @@ internal class WebRtcRollbackTransport private constructor(
                 if (!success) transport?.close()
             }
         }
+
+        /**
+         * Local diagnostic only: collecting candidates does NOT establish a
+         * session with a remote peer. Reports srflx and relay candidates without
+         * claiming ICE connected; a two-phone test verifies connectivity.
+         */
+        fun probeIce(context: Context, endpoint: String, overrides: String = ""): String {
+            val servers = IceServerConfig.load(endpoint, overrides)
+            val candidates = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+            val gathered = CountDownLatch(1)
+            var peer: PeerConnection? = null
+            try {
+                val factory = buildFactory(context)
+                val config = PeerConnection.RTCConfiguration(servers)
+                peer = factory.createPeerConnection(config,
+                    object : PeerConnection.Observer {
+                        override fun onSignalingChange(s: PeerConnection.SignalingState) {}
+                        override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {}
+                        override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                        override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {
+                            if (s == PeerConnection.IceGatheringState.COMPLETE)
+                                gathered.countDown()
+                        }
+                        override fun onIceCandidate(candidate: IceCandidate) {
+                            val type = when {
+                                candidate.sdp.contains(" typ relay ") -> "relay/TURN"
+                                candidate.sdp.contains(" typ srflx ") -> "srflx/STUN"
+                                candidate.sdp.contains(" typ host ") -> "host/LAN"
+                                else -> "outro"
+                            }
+                            candidates.add(type)
+                        }
+                        override fun onIceCandidatesRemoved(candidates: Array<IceCandidate>) {}
+                        override fun onAddStream(stream: MediaStream) {}
+                        override fun onRemoveStream(stream: MediaStream) {}
+                        override fun onDataChannel(dc: DataChannel) {}
+                        override fun onRenegotiationNeeded() {}
+                    }) ?: error("RTC indisponível")
+                peer.createDataChannel("connect-test", DataChannel.Init())
+                val offer = awaitSdpCreate(peer, true)
+                setSdp(peer, offer, true)
+                val complete = gathered.await(14, TimeUnit.SECONDS)
+                return "Teste ICE local: " + if (!complete) {
+                    "gathering excedeu 14 segundos. Candidatos: " +
+                        candidates.joinToString().ifBlank { "nenhum" }
+                } else {
+                    "candidatos " + candidates.joinToString().ifBlank { "nenhum" } +
+                        ". TURN " + if ("relay/TURN" in candidates) "autenticado"
+                            else "não confirmado" +
+                        ". Isso NÃO confirma conexão entre celulares."
+                }
+            } catch (e: Exception) {
+                return "Teste ICE falhou: " + (e.message ?: e.javaClass.simpleName)
+            } finally {
+                runCatching { peer?.close() }
+                runCatching { peer?.dispose() }
+            }
+        }
     }
 }
