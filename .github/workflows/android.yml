@@ -1,17 +1,17 @@
-name: Android CI
+name: Android ARMv7 CI
 
 concurrency:
   # A push and its matching pull-request event share the head branch name.
-  group: android-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: android-armv7-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 on:
   push:
-    branches: [main, work/android-foundation]
+    branches: [feature/armv7-32bit]
     paths-ignore:
       - docs/CI_PERFORMANCE.md
   pull_request:
-    branches: [main, work/android-foundation]
+    branches: [main, feature/armv7-32bit]
     paths-ignore:
       - docs/CI_PERFORMANCE.md
 
@@ -72,10 +72,17 @@ jobs:
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           unzip -l "$APK" | tee /tmp/apk-contents.txt
-          grep -Eq 'lib/arm64-v8a/libnative-lib\.so$' /tmp/apk-contents.txt
+          grep -Eq 'lib/armeabi-v7a/libnative-lib\.so$' /tmp/apk-contents.txt
+          if grep -Eq 'lib/(arm64-v8a|x86|x86_64)/' /tmp/apk-contents.txt; then
+            echo "Unexpected non-ARMv7 native library in 32-bit package" >&2; exit 1
+          fi
+          unzip -p "$APK" lib/armeabi-v7a/libnative-lib.so > /tmp/native-armv7.so
+          "$ANDROID_HOME/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h /tmp/native-armv7.so | tee /tmp/elf32.txt
+          grep -Eq 'Class:[[:space:]]*ELF32' /tmp/elf32.txt
+          grep -Eq 'Machine:[[:space:]]*ARM' /tmp/elf32.txt
           grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
+          if grep -Eq 'lib/armeabi-v7a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
             exit 1
           fi
@@ -84,6 +91,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: MaizoSNES-ARMv7-32bit-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
