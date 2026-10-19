@@ -155,6 +155,7 @@ class NetplaySessionTest {
             onStatus = { if (it.startsWith("Conectado")) connected.countDown() },
             onFinish = { stopped.countDown() },
             receiveAllowedByClient = true,
+            onReceiveRomOffer = { _, _, _ -> true },
             onReceiveRom = { name, bytes ->
                 receivedName = name
                 receivedBytes = bytes

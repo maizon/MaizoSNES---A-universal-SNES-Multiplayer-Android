@@ -85,7 +85,14 @@ class MainActivity : ComponentActivity() {
     private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val shareConsentVisible = androidx.compose.runtime.mutableStateOf(false)
-    private var pendingHostPort: Int? = null
+    private data class PendingHost(val port: Int, val roomId: String?, val relayHost: String?)
+    private var pendingHost: PendingHost? = null
+    private var hostApproved = false
+    private var hostAnswered = false
+    private data class RomOffer(val filename: String, val digest: String, val bytes: Int)
+    private val incomingRomOffer = androidx.compose.runtime.mutableStateOf<RomOffer?>(null)
+    private val pendingRomApproval =
+        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.CompletableFuture<Boolean>?>(null)
     private val cheatEntries = androidx.compose.runtime.mutableStateOf<List<CheatEntry>>(emptyList())
     private val activeCheatIds = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
     private val cheatStatus = androidx.compose.runtime.mutableStateOf("Abra uma ROM para consultar cheats.")
@@ -242,6 +249,10 @@ class MainActivity : ComponentActivity() {
                     shareRomAllowed = shareRomAllowed.value,
                     shareConsentVisible = shareConsentVisible.value,
                     onShareConsent = ::resolveShareConsent,
+                    incomingRomName = incomingRomOffer.value?.filename,
+                    incomingRomHash = incomingRomOffer.value?.digest ?: "",
+                    incomingRomBytes = incomingRomOffer.value?.bytes ?: 0,
+                    onIncomingRomDecision = ::resolveIncomingRomOffer,
                     receiveRomAllowed = receiveRomAllowed.value,
                     onShareRomAllowedChanged = {
                         shareRomAllowed.value = it
@@ -1853,29 +1864,49 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun resolveShareConsent(authorized: Boolean) {
-        val port = pendingHostPort
-        pendingHostPort = null
-        shareConsentVisible.value = false
-        if (!authorized) {
-            shareRomAllowed.value = false
-            prefs.edit().putBoolean("share_rom_enabled", false).apply()
-        } else {
-            prefs.edit().putBoolean("share_rom_rights_confirmed", true).apply()
+    private fun resolveIncomingRomOffer(approved: Boolean) {
+        incomingRomOffer.value = null
+        pendingRomApproval.getAndSet(null)?.complete(approved)
+    }
+
+    /** Called only on the network worker; UI thread is free to show the dialog. */
+    private fun askIncomingRomApproval(name: String, hash: String, bytes: Int): Boolean {
+        val response = java.util.concurrent.CompletableFuture<Boolean>()
+        if (!pendingRomApproval.compareAndSet(null, response)) return false
+        runOnUiThread { incomingRomOffer.value = RomOffer(name, hash, bytes) }
+        return try { response.get(75, java.util.concurrent.TimeUnit.SECONDS) }
+        catch (_: Exception) { false }
+        finally {
+            pendingRomApproval.compareAndSet(response, null)
+            runOnUiThread {
+                if (incomingRomOffer.value?.digest == hash) incomingRomOffer.value = null
+            }
         }
-        if (port != null) startNetplay(null, port)
+    }
+
+    private fun resolveShareConsent(authorized: Boolean) {
+        val request = pendingHost
+        pendingHost = null
+        shareConsentVisible.value = false
+        hostAnswered = true
+        hostApproved = authorized
+        // Declining sharing still starts the multiplayer room without ROM transfer.
+        if (request != null) startNetplay(null, request.port, request.roomId, request.relayHost)
     }
 
     private fun startNetplay(host: String?, port: Int,
         relayRoomId: String? = null, relayServerHost: String? = null) {
         if (netplaySession != null) return
-        // Host consent is needed before any automatic private-network transfer.
-        if (host == null && relayRoomId == null && shareRomAllowed.value &&
-            !prefs.getBoolean("share_rom_rights_confirmed", false)) {
-            pendingHostPort = port
+        // Per-session rights check; includes public-relay rooms, not only LAN.
+        if (host == null && shareRomAllowed.value && !hostAnswered) {
+            pendingHost = PendingHost(port, relayRoomId, relayServerHost)
             shareConsentVisible.value = true
             return
         }
+        val hostShareThisSession = host == null && shareRomAllowed.value &&
+            hostAnswered && hostApproved
+        hostApproved = false
+        hostAnswered = false
         if (host == null && (!hasLoadedRom || currentRomFile.value == null)) {
             lanStatus.value = "Como host, abra uma ROM antes de criar a sala."
             return
@@ -1944,9 +1975,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             },
-            shareAllowedByHost = shareRomAllowed.value && host == null,
+            shareAllowedByHost = hostShareThisSession,
             receiveAllowedByClient = receiveRomAllowed.value && host != null,
             onReceiveRom = ::installReceivedRom,
+            onReceiveRomOffer = ::askIncomingRomApproval,
             onStatus = { message ->
                 runOnUiThread {
                     if (netplaySession === session) {
@@ -2010,6 +2042,7 @@ class MainActivity : ComponentActivity() {
         if (netplaySession == null) return
         lanStatus.value = "Cancelando sessão e liberando sala…"
         autoNetworkStatus.value = lanStatus.value
+        pendingRomApproval.getAndSet(null)?.complete(false)
         netplaySession?.stop()
     }
 

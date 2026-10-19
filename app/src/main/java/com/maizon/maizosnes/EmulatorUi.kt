@@ -264,6 +264,10 @@ internal fun MaizoEmulatorApp(
     shareRomAllowed: Boolean,
     shareConsentVisible: Boolean,
     onShareConsent: (Boolean) -> Unit,
+    incomingRomName: String?,
+    incomingRomHash: String,
+    incomingRomBytes: Int,
+    onIncomingRomDecision: (Boolean) -> Unit,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
     onReceiveRomAllowedChanged: (Boolean) -> Unit,
@@ -299,11 +303,27 @@ internal fun MaizoEmulatorApp(
     onGpuReady: (Boolean) -> Unit
 ) {
     var editingControls by remember { mutableStateOf(false) }
+    incomingRomName?.let { name ->
+        AlertDialog(
+            onDismissRequest = { onIncomingRomDecision(false) },
+            modifier = Modifier.dialogGamepadKeys { onIncomingRomDecision(false) },
+            title = { Text("Receber ROM do anfitrião?") },
+            text = { Text("Arquivo: " + name +
+                "\nTamanho: " + (incomingRomBytes / 1024) + " KiB" +
+                "\nSHA-256: " + incomingRomHash.take(20) + "…" +
+                "\nAceite apenas arquivos autorizados. Os bytes serão verificados antes do uso.") },
+            confirmButton = { TextButton(onClick = { onIncomingRomDecision(true) }) {
+                Text("ACEITAR")
+            } },
+            dismissButton = { TextButton(onClick = { onIncomingRomDecision(false) }) {
+                Text("REJEITAR")
+            } })
+    }
     if (shareConsentVisible) {
         AlertDialog(onDismissRequest = { onShareConsent(false) },
             modifier = Modifier.dialogGamepadKeys { onShareConsent(false) },
             title = { Text("Permissão de compartilhar ROM") },
-            text = { Text("Confirme somente se a ROM é homebrew, domínio público ou você tem autorização de redistribuição. O compartilhamento é restrito à LAN privada.") },
+            text = { Text("Compartilhar esta ROM nesta sessão? Confirme apenas se for homebrew, domínio público ou houver autorização de redistribuição. Transferências remotas só devem usar conexões protegidas.") },
             confirmButton = { TextButton(onClick = { onShareConsent(true) }) { Text("TENHO PERMISSÃO") } },
             dismissButton = { TextButton(onClick = { onShareConsent(false) }) { Text("NÃO COMPARTILHAR") } })
     }

@@ -45,6 +45,7 @@ internal class NetplaySession(
     private val shareAllowedByHost: Boolean = false,
     private val receiveAllowedByClient: Boolean = false,
     private val onReceiveRom: (String, ByteArray) -> Boolean = { _, _ -> false },
+    private val onReceiveRomOffer: (String, String, Int) -> Boolean = { _, _, _ -> false },
     /** Host-selected cheat codes, never changed while a session is running. */
     private val hostCheatCodes: List<String> = emptyList(),
     /** Both players explicitly opt-in before entering a cheated match. */
@@ -58,7 +59,7 @@ internal class NetplaySession(
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
-        private const val VERSION = 5
+        private const val VERSION = 6
         private const val MAX_ROM = 64 * 1024 * 1024
         private const val MAX_STATE = 64 * 1024 * 1024 + 28
         // Avoid heavy full-state snapshots every 2 seconds on slow ARM SoCs.
@@ -227,7 +228,7 @@ internal class NetplaySession(
         // Core source is pinned by scripts/fetch_snes9x.sh. No binary identity
         // guarantee across APKs; tested compatibility is still required.
         val manifest = buildString {
-            append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp5\n")
+            append("MaizoSNES-Snes9x-921f9f7b83660eb44ad263022a57a4a029057c37-mznp6\n")
             options.toSortedMap().forEach { (key, value) ->
                 append(key).append('=').append(value).append('\n')
             }
@@ -357,6 +358,9 @@ internal class NetplaySession(
                 }
                 connection.soTimeout = 90000
                 output.writeInt(bytes.size)
+                output.flush()
+                // Do not transmit one ROM byte until the client has approved the offer.
+                require(input.readBoolean()) { "O cliente rejeitou a ROM." }
                 output.write(bytes)
                 output.flush()
                 require(input.readUnsignedByte() == 1) {
@@ -420,6 +424,12 @@ internal class NetplaySession(
                     connection.soTimeout = 90000
                     val size = input.readInt()
                     require(size in 1..MAX_ROM) { "Tamanho de ROM inválido: $size." }
+                    val fingerprint = hostRom.joinToString("") { "%02x".format(it) }
+                    val agreed = runCatching { onReceiveRomOffer(hostName, fingerprint, size) }
+                        .getOrDefault(false)
+                    output.writeBoolean(agreed)
+                    output.flush()
+                    require(agreed) { "Transferência da ROM recusada pelo cliente." }
                     val bytes = ByteArray(size)
                     input.readFully(bytes)
                     require(MessageDigest.isEqual(digest(bytes), hostRom)) {
