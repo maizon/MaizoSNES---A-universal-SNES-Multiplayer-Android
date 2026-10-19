@@ -2,6 +2,11 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const net = require("node:net");
+const tls = require("node:tls");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { createRelayServer } = require("./relay");
 async function connect(port) {
   return new Promise((resolve, reject) => {
@@ -72,4 +77,52 @@ test("directory advertises external TCP proxy separately from its HTTP hostname"
 test("reject invalid advertised TCP destinations", () => {
   assert.throws(() => createRelayServer({ publicTcpHost: "http://not-allowed", publicTcpPort: 8788 }));
   assert.throws(() => createRelayServer({ publicTcpHost: "proxy.example.net", publicTcpPort: 65536 }));
+});
+
+// Self-signed certificate exists only during this test; app NEVER disables trust.
+test("TLS relay advertises encryption and forwards both directions", async () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "maizo-tls-"));
+  const key = path.join(folder, "key.pem");
+  const cert = path.join(folder, "cert.pem");
+  let relay, host, guest;
+  try {
+    execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes",
+      "-days", "1", "-subj", "/CN=localhost",
+      "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
+      "-keyout", key, "-out", cert], { stdio: "ignore" });
+    relay = createRelayServer({ httpPort: 0, relayPort: 0, bind: "127.0.0.1",
+      tlsKey: fs.readFileSync(key), tlsCert: fs.readFileSync(cert) });
+    const ports = await relay.start();
+    const listing = await (await fetch("http://127.0.0.1:" +
+      ports.httpPort + "/api/rooms")).json();
+    assert.equal(listing.relayTls, true);
+    const dial = () => new Promise((resolve, reject) => {
+      const socket = tls.connect({ host: "127.0.0.1", port: ports.relayPort,
+        servername: "localhost", ca: fs.readFileSync(cert) },
+        () => resolve(socket));
+      socket.once("error", reject);
+    });
+    host = await dial();
+    host.write("HOST aabbccddeeff " + Buffer.from("Freeware").toString("base64url") +
+      " 0123456789abcdef 0\n");
+    await new Promise(resolve => setTimeout(resolve, 40));
+    guest = await dial();
+    const hostReady = readUntil(host, "READY\n");
+    const guestReady = readUntil(guest, "READY\n");
+    guest.write("JOIN aabbccddeeff\n");
+    assert.match(await hostReady, /READY/);
+    assert.match(await guestReady, /READY/);
+    const message = readUntil(guest, "protected");
+    host.write("protected");
+    assert.match(await message, /protected/);
+  } finally {
+    host?.destroy(); guest?.destroy();
+    if (relay) await relay.close();
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("TLS key and certificate are required together", () => {
+  assert.throws(() => createRelayServer({ tlsKey: "key-only" }), /together/);
+  assert.throws(() => createRelayServer({ tlsCert: "cert-only" }), /together/);
 });

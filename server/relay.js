@@ -3,18 +3,25 @@
  * MaizoSNES experimental public-directory TCP relay.
  * Hosts and clients both make OUTBOUND TCP connections, so carrier-grade NAT
  * does not require port forwarding. This is a relay, not direct WebRTC P2P.
- * No ROM content is retained by this server. Traffic is NOT encrypted.
- * Production deployments must use firewall/rate limiting and a trusted VPN
- * or encrypted TCP transport. HTTP directory should sit behind HTTPS.
+ * No ROM content is retained by this server. TLS is optional and terminates
+ * at the relay: the server operator can inspect plaintext (not end-to-end).
+ * Production deployments need HTTPS directory and firewall/rate limiting.
  */
 const http = require("node:http");
 const net = require("node:net");
+const tls = require("node:tls");
+const fs = require("node:fs");
 const crypto = require("node:crypto");
 
 function createRelayServer({
   httpPort = 8787, relayPort = 8788, bind = "0.0.0.0",
   publicTcpHost = "", publicTcpPort = null,
+  tlsKey = null, tlsCert = null,
 } = {}) {
+  if (Boolean(tlsKey) !== Boolean(tlsCert)) {
+    throw new Error("MAIZO_TLS_KEY_PATH and MAIZO_TLS_CERT_PATH must be set together");
+  }
+  const encrypted = Boolean(tlsKey && tlsCert);
   // Hosted TCP proxy ports can differ from the relay's internal listening port.
   // Advertise only values explicitly configured by the operator.
   const advertisedHost = String(publicTcpHost).trim();
@@ -42,6 +49,7 @@ function createRelayServer({
     res.end(JSON.stringify({
       protocol: "maizo-relay-v1",
       relayPort: advertisedPort || tcp.address()?.port || relayPort,
+      relayTls: encrypted,
       ...(advertisedHost ? { relayHost: advertisedHost } : {}),
       rooms: [...rooms.values()].filter(r => !r.host.destroyed).map(r => ({
         id: r.id, game: r.game, createdAt: r.createdAt,
@@ -50,7 +58,7 @@ function createRelayServer({
     }));
   });
 
-  const tcp = net.createServer((socket) => {
+  const handlePeer = (socket) => {
     socket.setNoDelay(true);
     socket.setTimeout(roomLifetimeMs, () => socket.destroy());
     let incoming = Buffer.alloc(0);
@@ -115,7 +123,10 @@ function createRelayServer({
       socket.end("ERR BAD_ROLE\n");
     }
     socket.on("data", handshake);
-  });
+  };
+  const tcp = encrypted
+    ? tls.createServer({ key: tlsKey, cert: tlsCert, minVersion: "TLSv1.2" }, handlePeer)
+    : net.createServer(handlePeer);
 
   return {
     directory, tcp,
@@ -143,6 +154,10 @@ if (require.main === module) {
     bind: process.env.MAIZO_BIND || "0.0.0.0",
     publicTcpHost: process.env.MAIZO_PUBLIC_TCP_HOST || "",
     publicTcpPort: process.env.MAIZO_PUBLIC_TCP_PORT || null,
+    tlsKey: process.env.MAIZO_TLS_KEY_PATH
+      ? fs.readFileSync(process.env.MAIZO_TLS_KEY_PATH) : null,
+    tlsCert: process.env.MAIZO_TLS_CERT_PATH
+      ? fs.readFileSync(process.env.MAIZO_TLS_CERT_PATH) : null,
   });
   instance.start().then(ports => console.log("MaizoSNES relay ready", ports))
     .catch(error => { console.error(error); process.exitCode = 1; });
