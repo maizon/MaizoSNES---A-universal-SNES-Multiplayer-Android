@@ -29,7 +29,8 @@ internal class GekkoRollbackSession(
     private val onStatus: (String) -> Unit,
     private val onMetrics: (NetworkMetrics) -> Unit,
     private val onFinish: (String) -> Unit,
-    private val onFallback: (String) -> Unit
+    private val onFallback: (String) -> Unit,
+    private val localDelay: Int = 1
 ) {
     private val stopped = AtomicBoolean(false)
     @Volatile private var thread: Thread? = null
@@ -146,7 +147,7 @@ internal class GekkoRollbackSession(
                     require(input.readBoolean()) { "Peer recusou iniciar rollback" }
                     require(GekkoNative.nativeStart(localPort, address.hostAddress,
                         peerUdpPort, if (host == null) 0 else 1,
-                        snapshot.size, 6, 1)) { "Falha ao abrir socket UDP nativo" }
+                        snapshot.size, 6, localDelay)) { "Falha ao abrir socket UDP nativo" }
                     val callbacks = object : RollbackCallbacks {
                         override fun save(): ByteArray = saveState() ?: error("Save state falhou")
                         override fun load(bytes: ByteArray): Boolean {
@@ -197,7 +198,7 @@ internal class GekkoRollbackSession(
                 socket = null
                 listener = null
                 if (!stopped.get() && fallback != null && !started) {
-                    if (host != null) runCatching { Thread.sleep(450) }
+                    if (host != null) runCatching { Thread.sleep(8500) }
                     onFallback(fallback!!)
                 } else {
                     prepare(false)

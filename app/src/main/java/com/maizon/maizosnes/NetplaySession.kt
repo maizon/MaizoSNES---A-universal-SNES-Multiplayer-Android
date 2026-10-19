@@ -95,6 +95,11 @@ internal class NetplaySession(
             prepare = prepare, saveState = saveState, loadState = loadState,
             step = step, framePeriodNs = framePeriodNs, onStatus = onStatus,
             onMetrics = onMetrics, onFinish = onFinish,
+            localDelay = when (latencyMode) {
+                NetplayLatencyMode.RESPONSIVE -> 0
+                NetplayLatencyMode.BALANCED -> 1
+                NetplayLatencyMode.STABLE -> 3
+            },
             onFallback = { reason ->
                 if (!closed.get()) {
                     rollback = null

@@ -10,6 +10,7 @@
 // Stable Snes9x and TCP implementations live in other compilation units.
 namespace {
 std::mutex sessionLock;
+std::string persistentRemoteEndpoint;
 GekkoSession* session = nullptr;
 int localHandle = -1, remoteHandle = -1;
 unsigned int stateCapacity = 0;
@@ -32,6 +33,7 @@ void stopUnsafe() {
         session = nullptr;
     }
     gekko_default_adapter_destroy();
+    persistentRemoteEndpoint.clear();
     localHandle = remoteHandle = -1;
     connected = false;
     stateCapacity = 0;
@@ -83,8 +85,9 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStart(
         return JNI_FALSE;
     }
     gekko_net_adapter_set(session, adapter);
-    GekkoNetAddress remoteAddress{const_cast<char*>(remote.c_str()),
-                                  static_cast<unsigned int>(remote.size())};
+    persistentRemoteEndpoint = remote;
+    GekkoNetAddress remoteAddress{const_cast<char*>(persistentRemoteEndpoint.c_str()),
+                                  static_cast<unsigned int>(persistentRemoteEndpoint.size())};
     // Actor handles occupy the same index as the SNES player (P1/P2).
     for (int actor = 0; actor < 2; ++actor) {
         const int handle = gekko_add_actor(session,
