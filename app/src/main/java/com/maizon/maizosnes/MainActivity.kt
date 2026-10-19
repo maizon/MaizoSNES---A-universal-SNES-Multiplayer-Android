@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity() {
     private val devUnlocked = androidx.compose.runtime.mutableStateOf(false)
     private val devShareEnabled = androidx.compose.runtime.mutableStateOf(false)
     private val lastNetworkMetrics = androidx.compose.runtime.mutableStateOf<NetworkMetrics?>(null)
+    private val networkDebug = androidx.compose.runtime.mutableStateOf(NetworkDebugState())
+    private var lastRollbackCounter = 0L
     private val lanStatus = androidx.compose.runtime.mutableStateOf("Sem sessão ativa.")
     private val availableLanRooms = androidx.compose.runtime.mutableStateOf<List<LanRoom>>(emptyList())
     private val scanningLan = androidx.compose.runtime.mutableStateOf(false)
@@ -218,6 +220,7 @@ class MainActivity : ComponentActivity() {
                     settings = appSettings.value,
                     coreOptions = coreSettings.toMap(),
                     performanceText = performanceText.value,
+                    networkDebug = networkDebug.value,
                     onSelectTouchPreset = ::selectTouchPreset,
                     connectionMode = connectionMode.value,
                     onConnectionModeChanged = ::changeConnectionMode,
@@ -1956,6 +1959,18 @@ class MainActivity : ComponentActivity() {
         syncPlaybackState()
         createMultiplayerBackup("before")
         lastNetworkMetrics.value = null
+        lastRollbackCounter = 0L
+        networkDebug.value = NetworkDebugState(
+            active = true,
+            mode = "Negociando " + netcodeMode.value.label,
+            transport = when {
+                wssEndpoint != null -> "TCP via Railway (WSS)"
+                relayRoomId != null -> if (relayTls) "TCP TLS relay" else "TCP relay"
+                else -> "UDP direto (tentativa) / TCP fallback"
+            },
+            peer = if (host == null) "P1: porta " + port else
+                relayRoomId ?: host + ":" + port,
+            state = "Verificação de ROM e transporte")
         val current = currentRomFile.value
         lateinit var session: NetplaySession
         val originalCoreOptions = coreSettings.toMap()
@@ -2000,6 +2015,29 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (netplaySession === session) {
                         lastNetworkMetrics.value = metrics
+                        val old = networkDebug.value
+                        val rtt = metrics.sampledRttMs.takeIf { it.isFinite() && it > 0.0 }
+                        val total = if (metrics.rollback) metrics.rollbackCount else 0L
+                        networkDebug.value = old.copy(
+                            active = true,
+                            mode = if (metrics.rollback) "Rollback (GekkoNet)"
+                                else "Lockstep (MZNP TCP)",
+                            transport = if (metrics.rollback) "UDP direto"
+                                else if (wssEndpoint != null) "TCP via Railway (WSS)"
+                                else if (relayRoomId != null) "TCP relay" else "TCP direto",
+                            rttMin = if (rtt == null) old.rttMin
+                                else minOf(old.rttMin ?: rtt, rtt),
+                            rttMax = if (rtt == null) old.rttMax
+                                else maxOf(old.rttMax ?: rtt, rtt),
+                            rttAvg = if (rtt == null) old.rttAvg
+                                else if (old.rttAvg == null) rtt
+                                else old.rttAvg!! * 0.85 + rtt * 0.15,
+                            jitterMs = metrics.jitterMs.takeIf { metrics.rollback },
+                            rollbacksPerSec = if (metrics.rollback)
+                                (total - lastRollbackCounter).coerceAtLeast(0) else 0L,
+                            totalRollbacks = total, delay = metrics.inputDelayFrames,
+                            frame = metrics.frame, state = "Partida em andamento")
+                        lastRollbackCounter = total
                         lanStatus.value = if (metrics.rollback)
                             String.format(java.util.Locale.US,
                                 "GekkoNet • quadro %d • RTT %.0f ms • jitter %.1f ms • " +
@@ -2025,6 +2063,21 @@ class MainActivity : ComponentActivity() {
                     if (netplaySession === session) {
                         lanStatus.value = message
                         autoNetworkStatus.value = message
+                        val rollbackStarted = message.contains("Rollback UDP")
+                        val tcpStarted = message.startsWith("Conectado como") && !rollbackStarted
+                        networkDebug.value = networkDebug.value.copy(
+                            mode = if (rollbackStarted) "Rollback (GekkoNet)"
+                                else if (tcpStarted) "Lockstep (MZNP TCP)"
+                                else networkDebug.value.mode,
+                            transport = if (rollbackStarted) "UDP direto"
+                                else if (tcpStarted && wssEndpoint != null) "TCP via Railway (WSS)"
+                                else if (tcpStarted && relayRoomId != null) "TCP relay"
+                                else if (tcpStarted) "TCP direto"
+                                else networkDebug.value.transport,
+                            desyncs = networkDebug.value.desyncs +
+                                if (message.contains("dessíncronia", ignoreCase = true) ||
+                                    message.contains("desync", ignoreCase = true)) 1 else 0,
+                            state = message)
                         if (message.startsWith("Conectado como")) {
                             userPaused = false
                             localPlayer2Enabled.value = false
@@ -2042,6 +2095,8 @@ class MainActivity : ComponentActivity() {
                         runCatching { NativeBridge.nativeSetPaused(true) }
                         createMultiplayerBackup("after")
                         lastNetworkMetrics.value = null
+                        networkDebug.value = networkDebug.value.copy(
+                            active = false, state = message)
                         runCatching { hostWifiLock?.release() }
                         hostWifiLock = null
                         if (sessionCoreOptionsWereChanged) {

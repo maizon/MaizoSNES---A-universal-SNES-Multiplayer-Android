@@ -223,6 +223,7 @@ internal fun MaizoEmulatorApp(
     settings: AppSettings,
     coreOptions: Map<String, String>,
     performanceText: String,
+    networkDebug: NetworkDebugState,
     onSelectTouchPreset: (TouchPreset) -> Unit,
     connectionMode: NetworkMode,
     onConnectionModeChanged: (NetworkMode) -> Unit,
@@ -305,6 +306,7 @@ internal fun MaizoEmulatorApp(
     onGpuReady: (Boolean) -> Unit
 ) {
     var editingControls by remember { mutableStateOf(false) }
+    var connectionOverlay by remember { mutableStateOf(false) }
     incomingRomName?.let { name ->
         AlertDialog(
             onDismissRequest = { onIncomingRomDecision(false) },
@@ -370,6 +372,10 @@ internal fun MaizoEmulatorApp(
                             TextButton(onClick = { onGameMenuChanged(false) },
                                 modifier = Modifier.focusRequester(menuFocus)) { Text("FECHAR") }
                         }
+                        OutlinedButton(onClick = { connectionOverlay = true },
+                            modifier = Modifier.fillMaxWidth().padFocusRing()) {
+                            Text("STATUS DE CONEXÃO / DEBUG")
+                        }
                         TextButton(onClick = {
                             editingControls = !editingControls
                             onGameMenuChanged(false)
@@ -381,7 +387,14 @@ internal fun MaizoEmulatorApp(
                 }
             }
         }
+        if (connectionOverlay) NetplayDebugDialog(networkDebug) {
+            connectionOverlay = false
+        }
         return
+    }
+
+    if (connectionOverlay) NetplayDebugDialog(networkDebug) {
+        connectionOverlay = false
     }
 
     Scaffold(
@@ -422,11 +435,17 @@ internal fun MaizoEmulatorApp(
                 shareRomAllowed, receiveRomAllowed,
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
                 onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
-                onLocalMultiplayerChanged
+                onLocalMultiplayerChanged,
+                onDebug = { connectionOverlay = true }
             )
             AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("AJUSTES", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                Text("Configure o emulador", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 14.dp))
+                Text("Configure o emulador", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.padding(bottom = 8.dp))
+                OutlinedButton(onClick = { connectionOverlay = true },
+                    modifier = Modifier.fillMaxWidth().padFocusRing()) {
+                    Text("STATUS DE CONEXÃO / DEBUG")
+                }
                 EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
                     onSelectTouchPreset, connectionMode, onConnectionModeChanged,
                     devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)
@@ -803,7 +822,8 @@ private fun MultiplayerScreen(
     onHost: (Int) -> Unit,
     onJoin: (String, Int) -> Unit,
     onStop: () -> Unit,
-    onLocalMode: (Boolean) -> Unit
+    onLocalMode: (Boolean) -> Unit,
+    onDebug: () -> Unit
 ) {
     var advancedNetwork by remember { mutableStateOf(false) }
     var remoteHost by remember(connectionMode) { mutableStateOf(savedConnectionHost) }
@@ -819,6 +839,10 @@ private fun MultiplayerScreen(
     }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedButton(onClick = onDebug,
+            modifier = Modifier.fillMaxWidth().padFocusRing()) {
+            Text("STATUS DE CONEXÃO / DEBUG")
+        }
         Text("MULTIPLAYER • MAIZOSNES", color = Mint, fontSize = 11.sp,
             fontWeight = FontWeight.Bold, letterSpacing = 1.7.sp)
         Text("Jogue junto, de qualquer lugar.", fontSize = 24.sp,
@@ -2559,4 +2583,42 @@ private fun SettingSectionTitle(title: String, subtitle: String) {
         Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text(subtitle, color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
     }
+}
+
+@Composable
+private fun NetplayDebugDialog(debug: NetworkDebugState, dismiss: () -> Unit) {
+    fun number(v: Double?): String = if (v == null) "N/D" else
+        String.format(java.util.Locale.US, "%.1f", v)
+    AlertDialog(
+        onDismissRequest = dismiss,
+        modifier = Modifier.dialogGamepadKeys(dismiss),
+        title = { Text("STATUS DE CONEXÃO • DEBUG", color = Mint) },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("Sessão: " + if (debug.active) "ATIVA" else "INATIVA")
+                Text("Motor: " + debug.mode)
+                Text("Transporte: " + debug.transport)
+                Text("Peer: " + debug.peer)
+                Text("RTT (mín/média/máx): " +
+                    number(debug.rttMin) + " / " + number(debug.rttAvg) +
+                    " / " + number(debug.rttMax) + " ms")
+                Text("Jitter: " + number(debug.jitterMs) + " ms")
+                Text("Perda de pacotes: " + debug.packetLoss)
+                Text("Rollbacks/s: " + debug.rollbacksPerSec)
+                Text("Correções totais: " + debug.totalRollbacks)
+                Text("Input delay: " + (debug.delay?.toString() ?: "N/D") + " quadros")
+                Text("Desyncs detectados: " + debug.desyncs)
+                Text("Quadros executados: " + debug.frame)
+                Text(debug.state, color = Mint, fontSize = 11.sp)
+                Text("WSS não é WebRTC/UDP. Não há perda percentual na API " +
+                    "GekkoNet; nunca estimar sem medição.", color = Muted, fontSize = 10.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = dismiss, modifier = Modifier.padFocusRing()) {
+                Text("FECHAR")
+            }
+        }
+    )
 }
