@@ -36,12 +36,14 @@ internal class GekkoRollbackSession(
     @Volatile private var thread: Thread? = null
     @Volatile private var socket: Socket? = null
     @Volatile private var listener: ServerSocket? = null
+    @Volatile private var announcement: LanDiscovery.Announcement? = null
     fun host(port: Int) = launch(null, port)
     fun join(host: String, port: Int) = launch(host, port)
     fun stop() {
         stopped.set(true)
         runCatching { socket?.close() }
         runCatching { listener?.close() }
+        runCatching { announcement?.close() }
         thread?.interrupt()
     }
     private fun hash(): ByteArray {
@@ -85,8 +87,18 @@ internal class GekkoRollbackSession(
                     ServerSocket(port).use { server ->
                         listener = server
                         server.soTimeout = 20000
-                        onStatus("Aguardando P2 em TCP " + port + " para negociar rollback")
-                        server.accept()
+                        // Keep existing LAN discovery working when Rollback is
+                        // the default (AUTO/LAN_AUTO both discover this room).
+                        val fp = hash().take(8).joinToString("") { "%02x".format(it) }
+                        announcement = LanDiscovery.announce(
+                            port, rom.nameWithoutExtension, fp, false)
+                        try {
+                            onStatus("Sala LAN disponível: Gekko UDP negociado na porta " + port)
+                            server.accept()
+                        } finally {
+                            announcement?.close()
+                            announcement = null
+                        }
                     }
                 } else Socket().also { it.connect(InetSocketAddress(host, port), 20000) }
                 socket = control
@@ -197,6 +209,8 @@ internal class GekkoRollbackSession(
                 runCatching { GekkoNative.nativeStop() }
                 socket = null
                 listener = null
+                runCatching { announcement?.close() }
+                announcement = null
                 if (!stopped.get() && fallback != null && !started) {
                     if (host != null) runCatching { Thread.sleep(8500) }
                     onFallback(fallback!!)
