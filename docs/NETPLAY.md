@@ -123,3 +123,35 @@ servidor deve usar HTTPS. Relay sem TLS permite jogar com ROM igual, sem
 transferência. O operador TLS pode ler os dados (não é E2E).
 
 Este código não instala automaticamente serviço TLS nem certificados válidos.
+
+
+## GekkoNet rollback mode (direct IPv4 UDP; experimental)
+
+The frontend defaults to **Rollback (Recomendado)**; **Lockstep
+(Compatibilidade)** is selectable at any time before session start. For
+manual IP and direct LAN sessions the peers negotiate over the existing TCP
+port, compare full ROM SHA-256 and exact core options, synchronize the host's
+initial save state, exchange IPv4 UDP ports, and initialize the pinned
+GekkoNet C++20 engine. Snes9x save/load/advance events drive the engine on
+a single emulation/network thread; speculative video/audio are suppressed.
+
+**Viability gate:** snapshot <=16 MiB; measured save+load <=10 ms; UDP socket
+bind succeeds, and peer UDP connects in the initial synchronization window.
+If not, attempt the existing MZNP TCP Lockstep automatically before the first
+game frame and display the reason. For NAT/CGNAT online rooms over HTTPS/WSS,
+Gekko UDP cannot traverse the existing WSS relay and **Lockstep remains in
+use**. The manual IP:port route is preserved without changing its MZNP
+wire format.
+
+GekkoNet public stats report ping (RTT) and jitter; the UI reports a count
+of state-load rollback corrections. The public API does not provide packet
+loss percent, so it must display "N/D" instead of inventing data. Input delay
+by latency profile: responsive=0, balanced=1, stable=3 frames. Gekko source is
+pinned at 0d491a4524e10173fc5d2aae22d042d3ae9f2d44 and is included in
+both ARMv7 and ARM64 native builds, with the BSD, Boost and MIT license texts.
+
+**Limits pending device validation:** IPv6, direct UDP under carrier NAT,
+host/client mismatch when different builds are installed, cross-ABI snapshots,
+competitive frame pacing, rollback audio smoothness, and multi-minute
+determinism. This transport is not authenticated/encrypted and should be used
+on trusted LAN/VPN only; web-based room sharing remains encrypted HTTPS/WSS.

@@ -60,3 +60,9 @@ No ROMs or copyrighted game assets are bundled.
 - BSD-2-Clause; copyright (c) 2024–2026 Jamie Meyer, full unmodified text in `LICENSES/gekkonet-bsd-2.txt`, also packaged in the APK.
 - Source downloaded by scripts/fetch_gekkonet.sh during the build. No bsnes code copied; HeatXD/bsnes-netplay is used solely as an architectural guide.
 - The upstream bundled standalone ASIO implementation has additional notices: preserve its Boost Software License (BSL-1.0) when redistributing binaries.
+
+## GekkoNet bundled dependencies
+
+- Standalone ASIO: copyright 2003–2026 Christopher M. Kohlhoff; Boost Software License v1.0, full notice in LICENSES/asio-boost-1.0.txt and inside APK.
+- zpp library: copyright (c) 2021 Eyal Z; MIT, full notice in LICENSES/zpp-mit.txt and inside APK.
+- No bsnes-netplay sources or assets were copied.

@@ -56,3 +56,14 @@ Um teste de integração usa uma sala efêmera e bytes sintéticos, verificando
 executa também um smoke externo no Railway, com resultado separado do build
 Android para que indisponibilidade externa não invalide o APK. **Não há teste
 físico de dois Androids nem prova de transferência real de ROM nesta etapa.**
+
+
+## 2026-10-19 — experimental GekkoNet rollback
+
+Pinned BSD-licensed upstream C++20 SDK (with Asio Boost/zpp MIT notices), JNI
+integration, game event save/load/advance, UDP handshake and Gekko stats added.
+UI defaults Rollback with explicit Lockstep fallback. Save/load measurement
+and UDP binding are viability gates. Manual TCP is preserved; WSS relay
+continues to use Lockstep (not falsely labeled UDP rollback). CI validation
+and real device test of two simultaneous players are required before any
+production readiness claim.
