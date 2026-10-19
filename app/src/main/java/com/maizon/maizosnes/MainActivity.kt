@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
     private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val shareConsentVisible = androidx.compose.runtime.mutableStateOf(false)
-    private data class PendingHost(val port: Int, val roomId: String?, val relayHost: String?)
+    private data class PendingHost(val port: Int, val roomId: String?, val relayHost: String?, val relayTls: Boolean)
     private var pendingHost: PendingHost? = null
     private var hostApproved = false
     private var hostAnswered = false
@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
-        devShareEnabled.value = prefs.getBoolean("dev_share_advanced", false) && devUnlocked.value
+        devShareEnabled.value = prefs.getBoolean("dev_share_advanced", true) && devUnlocked.value
         shareRomAllowed.value = prefs.getBoolean("share_rom_enabled", true)
         receiveRomAllowed.value = prefs.getBoolean("receive_rom_enabled", true)
         runCatching {
@@ -421,14 +421,15 @@ class MainActivity : ComponentActivity() {
     private fun unlockDev(code: String): Boolean {
         if (code != "9090") return false
         devUnlocked.value = true
-        prefs.edit().putBoolean("dev_unlocked", true).apply()
+        devShareEnabled.value = prefs.getBoolean("dev_share_advanced", true)
+        prefs.edit().putBoolean("dev_unlocked", true)
+            .putBoolean("dev_share_advanced", devShareEnabled.value).apply()
         return true
     }
 
     private fun setAdvancedSharing(enabled: Boolean) {
         if (!devUnlocked.value || netplaySession != null) return
         devShareEnabled.value = enabled
-        shareRomAllowed.value = enabled
         prefs.edit().putBoolean("dev_share_advanced", enabled).apply()
     }
 
@@ -1066,7 +1067,12 @@ class MainActivity : ComponentActivity() {
         if (netplaySession != null) return
         val rom = currentRomFile.value
         if (!hasLoadedRom || rom == null) {
-            autoNetworkStatus.value = "Abra primeiro o jogo para buscar adversários."
+            val room = autoRooms.value.firstOrNull {
+                it.tls && receiveRomAllowed.value && (!it.cheats || onlineCheatsOptIn.value)
+            }
+            if (room != null) joinAutomatic(room)
+            else autoNetworkStatus.value = "Sem ROM: selecione sala TLS " +
+                "e aceite a oferta de ROM autorizada, ou abra um jogo."
             return
         }
         val currentTitle = rom.nameWithoutExtension
@@ -1087,6 +1093,9 @@ class MainActivity : ComponentActivity() {
         }
         val compatibleRoom = autoRooms.value.firstOrNull { room ->
             (room.romHash.isBlank() || room.romHash == currentRomHashPrefix.value) &&
+                (!room.cheats || onlineCheatsOptIn.value)
+        } ?: autoRooms.value.firstOrNull { room ->
+            room.tls && receiveRomAllowed.value &&
                 (!room.cheats || onlineCheatsOptIn.value)
         }
         if (compatibleRoom != null) {
@@ -1122,27 +1131,23 @@ class MainActivity : ComponentActivity() {
 
     private fun joinAutomatic(room: AutoRoom) {
         if (netplaySession != null) return
-        if (!canJoinOnlineRoom(room.romHash, room.cheats)) return
+        if (!canJoinOnlineRoom(room.romHash, room.cheats, room.tls)) return
         autoNetworkStatus.value = "Entrando na sala ${room.id}…"
         startRelayRoom(room.id, room.endpoint)
     }
 
-    private fun canJoinOnlineRoom(hash: String, cheats: Boolean): Boolean {
-        if (!hasLoadedRom) {
-            lanStatus.value = "Abra a ROM desejada antes de entrar no jogo."
-            autoNetworkStatus.value = lanStatus.value
-            return false
-        }
-        if (hash.isNotEmpty() && currentRomHashPrefix.value.isNotEmpty() &&
-            hash != currentRomHashPrefix.value) {
-            lanStatus.value = "ROM ou mod diferente: abra a mesma versão da ROM " +
-                "do anfitrião. Os dois aparelhos precisam do mesmo SHA-256."
-            autoNetworkStatus.value = lanStatus.value
-            return false
-        }
+    private fun canJoinOnlineRoom(hash: String, cheats: Boolean, tls: Boolean): Boolean {
         if (cheats && !onlineCheatsOptIn.value) {
             lanStatus.value = "Essa sala utiliza cheats. Ative primeiro " +
                 "'Autorizar cheats sincronizados' nas opções Multiplayer."
+            autoNetworkStatus.value = lanStatus.value
+            return false
+        }
+        val matches = hash.isBlank() || hash == currentRomHashPrefix.value
+        if (!OnlineRomJoinPolicy.canJoin(hasLoadedRom, matches,
+                receiveRomAllowed.value, tls)) {
+            lanStatus.value = "ROM ausente/diferente. Para receber, ative " +
+                "'Aceitar ROM' e escolha uma sala com relay TLS confiável."
             autoNetworkStatus.value = lanStatus.value
             return false
         }
@@ -1196,9 +1201,9 @@ class MainActivity : ComponentActivity() {
     private fun joinRelay(roomId: String) {
         if (netplaySession != null) return
         val room = relayRooms.value.firstOrNull { it.id == roomId }
-        if (room != null && !canJoinOnlineRoom(room.romHash, room.cheats)) return
-        if (!hasLoadedRom) {
-            lanStatus.value = "Abra a mesma ROM para entrar na sala."
+        if (room != null && !canJoinOnlineRoom(room.romHash, room.cheats, room.tls)) return
+        if (!hasLoadedRom && room == null) {
+            lanStatus.value = "Atualize a lista de salas antes de entrar sem ROM."
             return
         }
         startRelayRoom(roomId)
@@ -1229,7 +1234,8 @@ class MainActivity : ComponentActivity() {
                     host = if (joinRoomId == null) null else listing.serverHost,
                     port = listing.relayPort,
                     relayRoomId = roomId,
-                    relayServerHost = listing.serverHost
+                    relayServerHost = listing.serverHost,
+                    relayTls = listing.tls
                 )
             } catch (error: Exception) {
                 lanStatus.value = "Falha ao conectar servidor: " +
@@ -1891,15 +1897,16 @@ class MainActivity : ComponentActivity() {
         hostAnswered = true
         hostApproved = authorized
         // Declining sharing still starts the multiplayer room without ROM transfer.
-        if (request != null) startNetplay(null, request.port, request.roomId, request.relayHost)
+        if (request != null) startNetplay(null, request.port, request.roomId, request.relayHost, request.relayTls)
     }
 
     private fun startNetplay(host: String?, port: Int,
-        relayRoomId: String? = null, relayServerHost: String? = null) {
+        relayRoomId: String? = null, relayServerHost: String? = null,
+        relayTls: Boolean = false) {
         if (netplaySession != null) return
         // Per-session rights check; includes public-relay rooms, not only LAN.
         if (host == null && shareRomAllowed.value && !hostAnswered) {
-            pendingHost = PendingHost(port, relayRoomId, relayServerHost)
+            pendingHost = PendingHost(port, relayRoomId, relayServerHost, relayTls)
             shareConsentVisible.value = true
             return
         }
@@ -1975,7 +1982,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             },
-            shareAllowedByHost = hostShareThisSession,
+            shareAllowedByHost = hostShareThisSession &&
+                (relayRoomId == null || (relayTls && devShareEnabled.value)),
             receiveAllowedByClient = receiveRomAllowed.value && host != null,
             onReceiveRom = ::installReceivedRom,
             onReceiveRomOffer = ::askIncomingRomApproval,
@@ -2033,8 +2041,8 @@ class MainActivity : ComponentActivity() {
         autoNetworkStatus.value = lanStatus.value
         if (relayRoomId != null && relayServerHost != null) {
             if (host == null) session.hostViaRelay(relayServerHost, port, relayRoomId,
-                current?.nameWithoutExtension ?: "SNES")
-            else session.joinViaRelay(relayServerHost, port, relayRoomId)
+                current?.nameWithoutExtension ?: "SNES", relayTls = relayTls)
+            else session.joinViaRelay(relayServerHost, port, relayRoomId, relayTls = relayTls)
         } else if (host == null) session.host(port) else session.join(host, port)
     }
 
