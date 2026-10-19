@@ -19,3 +19,7 @@ cp "$DEST/LICENSE" "$ROOT/app/src/main/assets/licenses/gekkonet-bsd-2.txt"
 cmp -s "$DEST/GekkoLib/thirdparty/zpp/LICENSE" "$ROOT/LICENSES/zpp-mit.txt"
 cp "$ROOT/LICENSES/asio-boost-1.0.txt" "$ROOT/app/src/main/assets/licenses/asio-boost-1.0.txt"
 cp "$ROOT/LICENSES/zpp-mit.txt" "$ROOT/app/src/main/assets/licenses/zpp-mit.txt"
+
+# Prebuilt WebRTC Android artifact's redistributable copyright notices.
+cp "$ROOT/LICENSES/webrtc-bsd-3.txt" "$ROOT/app/src/main/assets/licenses/webrtc-bsd-3.txt"
+cp "$ROOT/LICENSES/webrtc-sdk-mit.txt" "$ROOT/app/src/main/assets/licenses/webrtc-sdk-mit.txt"

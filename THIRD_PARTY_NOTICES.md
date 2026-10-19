@@ -66,3 +66,12 @@ No ROMs or copyrighted game assets are bundled.
 - Standalone ASIO: copyright 2003–2026 Christopher M. Kohlhoff; Boost Software License v1.0, full notice in LICENSES/asio-boost-1.0.txt and inside APK.
 - zpp library: copyright (c) 2021 Eyal Z; MIT, full notice in LICENSES/zpp-mit.txt and inside APK.
 - No bsnes-netplay sources or assets were copied.
+
+
+## WebRTC DataChannel Android SDK (P2P ICE/STUN/DTLS)
+
+- AAR artifact: `io.github.webrtc-sdk:android-prefixed-stripped:150.7871.01` from Maven Central; package namespace `livekit.org.webrtc`.
+- WebRTC native library copyright the WebRTC project authors; **BSD-3-Clause** (full unmodified text: `LICENSES/webrtc-bsd-3.txt`, also bundled in APK).
+- Android SDK packaging copyright 2023 WebRTC SDKs; **MIT** (full text `LICENSES/webrtc-sdk-mit.txt`, also bundled in APK).
+- Upstream source: https://webrtc.googlesource.com/src and https://github.com/webrtc-sdk/android ; binaries use the SDK's official redistributable pre-built AAR.
+- TURN is not shipped; STUN uses public servers. No Google proprietary games or BIOS are bundled. Third-party notices and patents of underlying WebRTC releases remain subject to upstream distribution review before signed release.
