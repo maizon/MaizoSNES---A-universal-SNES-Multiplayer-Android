@@ -5,6 +5,8 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <cstdlib>
+#include <vector>
 
 // One active local emulation engine; all entrypoints run on the rollback worker.
 // Stable Snes9x and TCP implementations live in other compilation units.
@@ -17,6 +19,80 @@ unsigned int stateCapacity = 0;
 int64_t rollbackCount = 0, advances = 0;
 bool connected = false;
 bool aborted = false;
+JavaVM* rtcVm = nullptr;
+jobject rtcPort = nullptr; // global ref, only while active
+std::vector<GekkoNetResult*> rtcResults;
+
+static JNIEnv* rtcEnv() {
+    JNIEnv* env = nullptr;
+    return rtcVm && rtcVm->GetEnv(reinterpret_cast<void**>(&env),
+                                  JNI_VERSION_1_6) == JNI_OK ? env : nullptr;
+}
+static void rtcSend(GekkoNetAddress*, const char* bytes, int length) {
+    auto* env = rtcEnv();
+    if (!env || !rtcPort || !bytes || length <= 0 || length > 16384) return;
+    jclass cls = env->GetObjectClass(rtcPort);
+    jmethodID method = env->GetMethodID(cls, "send", "([B)Z");
+    if (!method || env->ExceptionCheck()) {
+        env->ExceptionClear(); env->DeleteLocalRef(cls); return;
+    }
+    jbyteArray payload = env->NewByteArray(length);
+    if (payload) {
+        env->SetByteArrayRegion(payload, 0, length,
+                                reinterpret_cast<const jbyte*>(bytes));
+        env->CallBooleanMethod(rtcPort, method, payload);
+        env->DeleteLocalRef(payload);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(cls);
+}
+static GekkoNetResult** rtcReceive(int* total) {
+    *total = 0;
+    auto* env = rtcEnv();
+    if (!env || !rtcPort) return nullptr;
+    rtcResults.clear(); // only previous POINTER ARRAY, packet structs were freed
+    jclass cls = env->GetObjectClass(rtcPort);
+    jmethodID method = env->GetMethodID(cls, "takePacket", "()[B");
+    if (!method || env->ExceptionCheck()) {
+        env->ExceptionClear(); env->DeleteLocalRef(cls); return nullptr;
+    }
+    for (int i = 0; i < 64; ++i) {
+        auto payload = static_cast<jbyteArray>(env->CallObjectMethod(
+            rtcPort, method));
+        if (env->ExceptionCheck()) { env->ExceptionClear(); break; }
+        if (!payload) break;
+        const auto len = env->GetArrayLength(payload);
+        if (len > 0 && len <= 16384) {
+            auto* packet = static_cast<GekkoNetResult*>(
+                std::calloc(1, sizeof(GekkoNetResult)));
+            if (packet) {
+                packet->addr.size = static_cast<unsigned int>(
+                    persistentRemoteEndpoint.size());
+                packet->addr.data = std::malloc(packet->addr.size);
+                packet->data_len = static_cast<unsigned int>(len);
+                packet->data = std::malloc(len);
+                if (packet->addr.data && packet->data) {
+                    std::memcpy(packet->addr.data,
+                                persistentRemoteEndpoint.data(), packet->addr.size);
+                    env->GetByteArrayRegion(payload, 0, len,
+                                            static_cast<jbyte*>(packet->data));
+                    rtcResults.push_back(packet);
+                } else {
+                    std::free(packet->addr.data);
+                    std::free(packet->data);
+                    std::free(packet);
+                }
+            }
+        }
+        env->DeleteLocalRef(payload);
+    }
+    env->DeleteLocalRef(cls);
+    *total = static_cast<int>(rtcResults.size());
+    return rtcResults.data();
+}
+static void rtcFree(void* p) { std::free(p); }
+GekkoNetAdapter rtcAdapter{rtcSend, rtcReceive, rtcFree};
+
 constexpr unsigned int kMaxBytes = 16u * 1024u * 1024u;
 
 uint32_t fnv1a(const unsigned char* data, unsigned int size) {
@@ -33,6 +109,11 @@ void stopUnsafe() {
         session = nullptr;
     }
     gekko_default_adapter_destroy();
+    if (rtcPort) {
+        if (JNIEnv* env = rtcEnv()) env->DeleteGlobalRef(rtcPort);
+        rtcPort = nullptr;
+    }
+    rtcResults.clear();
     persistentRemoteEndpoint.clear();
     localHandle = remoteHandle = -1;
     connected = false;
@@ -79,7 +160,8 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStart(
     config.desync_detection = true;
     config.limited_saving = false;
     gekko_start(session, &config);
-    GekkoNetAdapter* adapter = gekko_default_adapter(static_cast<unsigned short>(localPort));
+    GekkoNetAdapter* adapter = rtcPort ? &rtcAdapter :
+        gekko_default_adapter(static_cast<unsigned short>(localPort));
     if (!adapter) {
         stopUnsafe();
         return JNI_FALSE;
@@ -109,6 +191,26 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStart(
     connected = false;
     aborted = false;
     return JNI_TRUE;
+}
+
+// Attach DataChannel packet callbacks to GekkoNet's official custom adapter.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_maizon_maizosnes_GekkoNative_nativeStartRtc(
+    JNIEnv* env, jobject instance, jint player, jint stateSize,
+    jint prediction, jint delay, jobject port) {
+    if (!port || rtcPort || session) return JNI_FALSE;
+    env->GetJavaVM(&rtcVm);
+    rtcPort = env->NewGlobalRef(port);
+    if (!rtcPort) return JNI_FALSE;
+    jstring peer = env->NewStringUTF("rtc");
+    jboolean ok = Java_com_maizon_maizosnes_GekkoNative_nativeStart(
+        env, instance, 16384, peer, 16385, player, stateSize, prediction, delay);
+    env->DeleteLocalRef(peer);
+    if (!ok) {
+        if (rtcPort) env->DeleteGlobalRef(rtcPort);
+        rtcPort = nullptr;
+    }
+    return ok;
 }
 
 // Java callback interface: save():ByteArray, load(ByteArray):Boolean,
