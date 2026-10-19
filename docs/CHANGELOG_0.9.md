@@ -15,6 +15,7 @@ enviava input de um quadro e aguardava input remoto **a cada quadro**.
   O host comunica delay ao cliente para o jogo continuar determinístico.
 - LAN direta continua preferida quando alcançável (menos RTT);
   relay TCP permanece opção para redes com NAT/CGNAT.
+- Checksum de estado piggybackado nos pacotes antecipados a cada 300 quadros; não intercala bytes soltos no fluxo TCP. Isso evita corromper os pacotes já enfileirados e mantém a verificação determinística.
 - Métricas de quadros/s, espera remota, frames atrasados e **buffer em frames**
   incluídas no status multiplayer/HUD.
 - Preservados: Snes9x 1.63, ROM SHA-256, cheat consent/sync,

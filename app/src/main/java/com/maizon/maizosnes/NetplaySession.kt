@@ -512,6 +512,8 @@ internal class NetplaySession(
         for (initialFrame in 0 until delay) {
             output.writeInt(initialFrame)
             output.writeInt(localInputs[initialFrame])
+            output.writeInt(-1) // No state checkpoint yet.
+            output.writeLong(0L)
         }
         output.flush()
         var nextFrameAt = System.nanoTime()
@@ -521,6 +523,12 @@ internal class NetplaySession(
         var measureWaitNs = 0L
         var measureMaxWaitNs = 0L
         var measureStart = System.nanoTime()
+        // Checkpoint for the *finished* emulation frame. Written alongside
+        // a future INPUT packet, not as a separate in-band message that would
+        // corrupt the already queued future frame packets.
+        val localCheckpoints = HashMap<Int, Long>(3)
+        var lastCheckpointFrame = -1
+        var lastCheckpointHash = 0L
         while (!closed.get()) {
             val ringSlot = frame % delay
             val localMask = localInputs[ringSlot]
@@ -530,10 +538,26 @@ internal class NetplaySession(
             // Publish future inputs early; not one request/response per frame.
             output.writeInt(frame + delay)
             output.writeInt(futureMask)
+            output.writeInt(lastCheckpointFrame)
+            output.writeLong(lastCheckpointHash)
             output.flush()
             val peerFrame = input.readInt()
             require(peerFrame == frame) { "Frame inválido: esperado $frame, veio $peerFrame." }
             val peerMask = input.readInt() and 0xffff
+            val remoteCheckpointFrame = input.readInt()
+            val remoteCheckpointHash = input.readLong()
+            require(remoteCheckpointFrame == -1 ||
+                (remoteCheckpointFrame >= 0 &&
+                    remoteCheckpointFrame % HASH_INTERVAL == 0 &&
+                    remoteCheckpointFrame < frame)) {
+                "Checkpoint remoto fora de ordem."
+            }
+            if (remoteCheckpointFrame >= 0) {
+                val local = localCheckpoints[remoteCheckpointFrame]
+                if (local != null) require(local == remoteCheckpointHash) {
+                    "Dessíncronia no quadro $remoteCheckpointFrame."
+                }
+            }
             val waitNs = (System.nanoTime() - waitStart).coerceAtLeast(0L)
             measureFrames++
             measureWaitNs += waitNs
@@ -543,12 +567,12 @@ internal class NetplaySession(
             val p2 = if (host) peerMask else localMask
             check(step(p1, p2) == 0) { "Erro ao processar quadro $frame." }
             if (frame % HASH_INTERVAL == 0) {
-                val localHash = stateHash()
-                output.writeLong(localHash)
-                output.flush()
-                check(localHash == input.readLong()) {
-                    "Dessíncronia detectada no quadro $frame; partida interrompida."
-                }
+                lastCheckpointHash = stateHash()
+                lastCheckpointFrame = frame
+                localCheckpoints[frame] = lastCheckpointHash
+                // Keep a short 2-checkpoint ring; remote input lead <= 48.
+                if (localCheckpoints.size > 2)
+                    localCheckpoints.remove(frame - 2 * HASH_INTERVAL)
             }
             frame++
             nextFrameAt += period
