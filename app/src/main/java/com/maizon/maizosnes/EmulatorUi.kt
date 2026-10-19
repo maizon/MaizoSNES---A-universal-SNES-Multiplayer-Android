@@ -83,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -165,6 +166,12 @@ internal fun MaizoTheme(content: @Composable () -> Unit) {
 internal fun MaizoEmulatorApp(
     romNames: List<String>,
     coverBitmaps: Map<String, Bitmap>,
+    romHeaders: Map<String, SnesRomHeader.Details>,
+    favoriteRoms: Set<String>,
+    recentRoms: List<String>,
+    onToggleFavorite: (String) -> Unit,
+    onRemoveRom: (String) -> Unit,
+    onApplyPatchToRom: (String) -> Unit,
     screen: AppScreen,
     statusMessage: String,
     currentRomName: String?,
@@ -313,6 +320,8 @@ internal fun MaizoEmulatorApp(
         when (screen) {
             AppScreen.LIBRARY -> LibraryScreen(
                 Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
+                romHeaders, favoriteRoms, recentRoms, onToggleFavorite,
+                onRemoveRom, onApplyPatchToRom,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
                 onScanRomFolder, onApplyRomPatch, onScanAllDevice,
                 onOpenRom, onContinueGame, onRenameRom
@@ -392,6 +401,12 @@ private fun LibraryScreen(
     modifier: Modifier,
     romNames: List<String>,
     coverBitmaps: Map<String, Bitmap>,
+    romHeaders: Map<String, SnesRomHeader.Details>,
+    favoriteRoms: Set<String>,
+    recentRoms: List<String>,
+    onToggleFavorite: (String) -> Unit,
+    onRemoveRom: (String) -> Unit,
+    onApplyPatchToRom: (String) -> Unit,
     statusMessage: String,
     currentRomName: String?,
     hasLoadedRom: Boolean,
@@ -403,112 +418,173 @@ private fun LibraryScreen(
     onContinueGame: () -> Unit,
     onRenameRom: (String, String) -> Unit
 ) {
+    var selectedRom by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<String?>(null) }
+    var confirmRemove by remember { mutableStateOf<String?>(null) }
     var libraryQuery by remember { mutableStateOf("") }
-    val visibleRoms = remember(romNames, libraryQuery) {
-        romNames.filter { it.contains(libraryQuery.trim(), ignoreCase = true) }
+    var columns by remember { mutableStateOf(2) }
+    var listMode by remember { mutableStateOf(false) }
+    var collectionMode by remember { mutableStateOf("Todos") }
+    val homeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { homeFocus.requestFocus() }
+    val visibleRoms = remember(romNames, libraryQuery, collectionMode, favoriteRoms, recentRoms) {
+        val filtered = romNames.filter { name ->
+            val gameTitle = romHeaders[name]?.title ?: name
+            (name.contains(libraryQuery.trim(), ignoreCase = true) ||
+                gameTitle.contains(libraryQuery.trim(), ignoreCase = true)) &&
+                (collectionMode != "Favoritos" || name in favoriteRoms) &&
+                (collectionMode != "Recentes" || name in recentRoms)
+        }
+        if (collectionMode == "Recentes") filtered.sortedBy { recentRoms.indexOf(it) }
+        else filtered.sortedBy { (romHeaders[it]?.title ?: it).lowercase() }
+    }
+    BackHandler(enabled = selectedRom != null || renameTarget != null) {
+        selectedRom = null
+        renameTarget = null
     }
     Column(modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-            Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Brush.linearGradient(listOf(Accent, Color(0xFF4540A1)))), contentAlignment = Alignment.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp))
+                .background(Brush.linearGradient(listOf(Accent, Color(0xFF4540A1)))),
+                contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Gamepad, null, modifier = Modifier.size(28.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("MAIZO", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+                Text("MAIZO", color = Mint, fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                 Text("SNES", fontSize = 24.sp, fontWeight = FontWeight.Black)
             }
-            Surface(color = Color(0xFF1A2C2A), shape = CircleShape) {
-                Text("Snes9x 1.63", color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
-            }
+            Text("Snes9x 1.63", color = Mint, fontSize = 10.sp)
         }
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
-            Column(Modifier.background(Brush.linearGradient(listOf(Color(0xFF29264E), Panel, Color(0xFF102B31)))).padding(20.dp)) {
-                Text("SUA COLEÇÃO", color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
-                Spacer(Modifier.height(8.dp))
-                Text("Seu próximo jogo começa aqui.", fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold)
-                Spacer(Modifier.height(7.dp))
-                Text("Adicione suas ROMs uma vez. Depois, abra qualquer jogo direto desta biblioteca.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
-                Spacer(Modifier.height(15.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = onChooseAddRom, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
-                        Text("+ ADICIONAR ROM", fontWeight = FontWeight.Bold)
-                    }
-                    if (hasLoadedRom) OutlinedButton(onClick = onContinueGame) { Text("CONTINUAR") }
-                }
-                OutlinedButton(onClick = onScanRomFolder, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Text("PROCURAR ROMS EM PASTA DO APARELHO")
-                }
-                OutlinedButton(onClick = onScanAllDevice,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    Text("PROCURAR EM TODO O APARELHO", fontSize = 12.sp)
-                }
-                Text("Busca completa requer autorização especial do Android e só " +
-                    "acessa armazenamento compartilhado, não dados privados de outros apps.",
-                    fontSize = 10.sp, color = Muted, lineHeight = 14.sp)
-                if (hasLoadedRom) OutlinedButton(onClick = onApplyRomPatch,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    Text("APLICAR MOD .IPS / .BPS À ROM ATUAL", fontSize = 11.sp)
-                }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            Button(onClick = onChooseAddRom,
+                modifier = Modifier.weight(1f).focusRequester(homeFocus),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                Text("+ IMPORTAR ROM / ZIP", fontSize = 11.sp)
             }
+            OutlinedButton(onClick = onScanRomFolder,
+                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("PASTA", fontSize = 11.sp) }
+            OutlinedButton(onClick = onScanAllDevice,
+                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("BUSCAR", fontSize = 11.sp) }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("Biblioteca", fontWeight = FontWeight.Bold, fontSize = 21.sp)
-                Text(romNames.size.toString() + " jogo(s) importado(s)", color = Muted, fontSize = 12.sp)
+        if (hasLoadedRom) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = onContinueGame) { Text("▶ CONTINUAR") }
+                OutlinedButton(onClick = onApplyRomPatch) { Text("PATCH ROM ATUAL") }
             }
-            if (currentRomName != null) Text("Em memória: " + File(currentRomName).nameWithoutExtension, color = Mint, fontSize = 10.sp)
         }
         if (romNames.isNotEmpty()) {
-            TextField(
-                value = libraryQuery,
-                onValueChange = { libraryQuery = it.take(80) },
-                label = { Text("Pesquisar na biblioteca") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
-            )
+            TextField(value = libraryQuery, onValueChange = { libraryQuery = it.take(80) },
+                singleLine = true, label = { Text("Buscar nome ou título SNES") },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
         }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .padding(vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("Todos", "Favoritos", "Recentes").forEach { mode ->
+                OutlinedButton(onClick = { collectionMode = mode },
+                    contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(if (mode == collectionMode) "● $mode" else mode, fontSize = 11.sp)
+                }
+            }
+            listOf(2, 3, 4).forEach { count ->
+                OutlinedButton(onClick = { columns = count; listMode = false },
+                    contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text(if (!listMode && columns == count) "● $count" else "$count", fontSize = 11.sp)
+                }
+            }
+            OutlinedButton(onClick = { listMode = true },
+                contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text(if (listMode) "● Lista" else "Lista", fontSize = 11.sp)
+            }
+        }
+        Text(visibleRoms.size.toString() + " jogo(s) • A: detalhes • B: voltar",
+            color = Muted, fontSize = 11.sp)
         if (visibleRoms.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Gamepad, null, tint = Accent, modifier = Modifier.size(50.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text(if (romNames.isEmpty()) "Sua biblioteca está vazia"
-                        else "Nenhum jogo corresponde à pesquisa",
-                        fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    Text("Adicione .sfc, .smc ou ZIP com sua ROM.",
-                        color = Muted, fontSize = 12.sp)
+                Text(if (romNames.isEmpty()) "Importe seus jogos .sfc, .smc ou .zip"
+                    else "Nenhum jogo encontrado.", color = Muted)
+            }
+        } else if (listMode) {
+            LazyColumn(Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(visibleRoms, key = { it }) { name ->
+                    RomCard(name, currentRomName == name, coverBitmaps[name],
+                        { selectedRom = name }, { renameTarget = name }, compact = true)
                 }
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 165.dp),
+            LazyVerticalGrid(columns = GridCells.Fixed(columns),
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 gridItems(visibleRoms, key = { it }) { name ->
                     RomCard(name, currentRomName == name, coverBitmaps[name],
-                        { onOpenRom(name) }, { renameTarget = name })
+                        { selectedRom = name }, { renameTarget = name }, compact = columns >= 3)
                 }
             }
         }
-        Text(statusMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 8.dp, bottom = 3.dp))
+        Text(statusMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(top = 8.dp, bottom = 3.dp))
     }
-    renameTarget?.let { target ->
-        var editedName by remember(target) { mutableStateOf(File(target).nameWithoutExtension) }
-        AlertDialog(
-            onDismissRequest = { renameTarget = null },
-            title = { Text("Renomear ROM") },
-            text = {
-                Column {
-                    Text("A extensão ." + File(target).extension + " será mantida automaticamente.", color = Muted, fontSize = 12.sp)
-                    TextField(value = editedName, onValueChange = { editedName = it }, singleLine = true, label = { Text("Nome do jogo") })
+    selectedRom?.let { name ->
+        val info = romHeaders[name]
+        val detailFocus = remember(name) { androidx.compose.ui.focus.FocusRequester() }
+        LaunchedEffect(name) { detailFocus.requestFocus() }
+        Dialog(onDismissRequest = { selectedRom = null }) {
+            Surface(shape = RoundedCornerShape(24.dp), color = Panel,
+                modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
+                        val cover = coverBitmaps[name]
+                        if (cover != null) Image(cover.asImageBitmap(), "Capa",
+                            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                        else Icon(Icons.Default.Gamepad, "Sem capa", modifier = Modifier.size(74.dp))
+                    }
+                    Text(info?.title ?: File(name).nameWithoutExtension,
+                        fontWeight = FontWeight.Bold, fontSize = 21.sp)
+                    Text("Região: " + (info?.region ?: "desconhecida"), color = Muted)
+                    info?.warning?.let { Text(it, color = Color(0xFFFFBD85), fontSize = 12.sp) }
+                    Button(onClick = { selectedRom = null; onOpenRom(name) },
+                        modifier = Modifier.fillMaxWidth().focusRequester(detailFocus)) { Text("▶ JOGAR") }
+                    OutlinedButton(onClick = { selectedRom = null; onApplyPatchToRom(name) },
+                        modifier = Modifier.fillMaxWidth()) { Text("APLICAR PATCH IPS / BPS") }
+                    OutlinedButton(onClick = { onToggleFavorite(name) },
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text(if (name in favoriteRoms) "★ REMOVER FAVORITO" else "☆ FAVORITAR")
+                    }
+                    OutlinedButton(onClick = { selectedRom = null; renameTarget = name },
+                        modifier = Modifier.fillMaxWidth()) { Text("RENOMEAR") }
+                    TextButton(onClick = { confirmRemove = name; selectedRom = null }) {
+                        Text("REMOVER DA BIBLIOTECA", color = Color(0xFFFFBD85))
+                    }
+                    TextButton(onClick = { selectedRom = null }) { Text("VOLTAR") }
                 }
-            },
-            confirmButton = { TextButton(onClick = { onRenameRom(target, editedName); renameTarget = null }) { Text("SALVAR") } },
-            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("CANCELAR") } }
-        )
+            }
+        }
+    }
+    confirmRemove?.let { name ->
+        AlertDialog(onDismissRequest = { confirmRemove = null },
+            title = { Text("Remover ROM?") },
+            text = { Text("O arquivo será apagado da biblioteca local.") },
+            confirmButton = { TextButton(onClick = {
+                onRemoveRom(name); confirmRemove = null
+            }) { Text("REMOVER") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("CANCELAR") } })
+    }
+    renameTarget?.let { name ->
+        var editedName by remember(name) { mutableStateOf(File(name).nameWithoutExtension) }
+        AlertDialog(onDismissRequest = { renameTarget = null },
+            title = { Text("Renomear ROM") },
+            text = { TextField(editedName, { editedName = it }, label = { Text("Nome") }) },
+            confirmButton = { TextButton(onClick = {
+                onRenameRom(name, editedName); renameTarget = null
+            }) { Text("SALVAR") } },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("CANCELAR") } })
     }
 }
 
@@ -518,16 +594,17 @@ private fun RomCard(
     current: Boolean,
     cover: Bitmap?,
     onOpen: () -> Unit,
-    onRename: () -> Unit
+    onRename: () -> Unit,
+    compact: Boolean = false
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Panel)
     ) {
         Column {
             Box(
-                Modifier.fillMaxWidth().height(150.dp)
+                Modifier.fillMaxWidth().height(if (compact) 102.dp else 150.dp)
                     .background(Brush.linearGradient(
                         listOf(Color(0xFF35305F), Color(0xFF141C30), Color(0xFF0A2D36))
                     )),
@@ -556,19 +633,19 @@ private fun RomCard(
                 }
             }
             Text(File(fileName).nameWithoutExtension,
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp),
-                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp),
+                fontSize = if (compact) 11.sp else 13.sp, fontWeight = FontWeight.Bold,
                 maxLines = 2, lineHeight = 16.sp)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onRename, contentPadding = PaddingValues(4.dp),
+                if (!compact) TextButton(onClick = onRename, contentPadding = PaddingValues(4.dp),
                     modifier = Modifier.weight(1f)) { Text("EDITAR", fontSize = 10.sp) }
                 Button(onClick = onOpen,
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
                     contentPadding = PaddingValues(horizontal = 13.dp, vertical = 5.dp)) {
-                    Text("JOGAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("ABRIR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

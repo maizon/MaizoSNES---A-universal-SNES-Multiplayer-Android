@@ -46,6 +46,10 @@ class MainActivity : ComponentActivity() {
 
     private val statusMessage = androidx.compose.runtime.mutableStateOf("Preparando Snes9x 1.63…")
     private val romFiles = androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
+    private val romHeaders = androidx.compose.runtime.mutableStateMapOf<String, SnesRomHeader.Details>()
+    private val favoriteRoms = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
+    private val recentRoms = androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
+    private var patchTarget: File? = null
     private val activeScreen = androidx.compose.runtime.mutableStateOf(AppScreen.LIBRARY)
     private val currentRomFile = androidx.compose.runtime.mutableStateOf<File?>(null)
     private val currentRomName = androidx.compose.runtime.mutableStateOf<String?>(null)
@@ -130,6 +134,11 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.rgb(9, 13, 24)
         romDirectory.mkdirs()
         stateDirectory.mkdirs()
+        favoriteRoms.value = prefs.getStringSet("library_favorites", emptySet())?.toSet() ?: emptySet()
+        recentRoms.value = runCatching {
+            val arr = org.json.JSONArray(prefs.getString("library_recent", "[]"))
+            (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }
+        }.getOrDefault(emptyList())
         refreshLibrary()
 
         val initResult = runCatching { NativeBridge.nativeInit(filesDir.absolutePath) }.getOrElse {
@@ -175,6 +184,12 @@ class MainActivity : ComponentActivity() {
                 MaizoEmulatorApp(
                     romNames = romFiles.value,
                     coverBitmaps = coverBitmaps.toMap(),
+                    romHeaders = romHeaders.toMap(),
+                    favoriteRoms = favoriteRoms.value,
+                    recentRoms = recentRoms.value,
+                    onToggleFavorite = ::toggleFavorite,
+                    onRemoveRom = ::removeRom,
+                    onApplyPatchToRom = ::choosePatchForRom,
                     screen = activeScreen.value,
                     statusMessage = statusMessage.value,
                     currentRomName = currentRomName.value,
@@ -719,7 +734,8 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Encerre a sessão multiplayer antes de aplicar um patch."
             return
         }
-        val original = currentRomFile.value
+        val original = patchTarget ?: currentRomFile.value
+        patchTarget = null
         if (original == null || !original.isFile) {
             statusMessage.value = "Abra primeiro a ROM que receberá o patch."
             return
@@ -756,12 +772,49 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun choosePatchForRom(name: String) {
+        val file = File(romDirectory, name)
+        if (!file.isFile || file.parentFile != romDirectory) {
+            statusMessage.value = "ROM não encontrada na biblioteca."
+            return
+        }
+        patchTarget = file
+        patchRomLauncher.launch(arrayOf("*/*"))
+    }
+
+    private fun toggleFavorite(name: String) {
+        val updated = favoriteRoms.value.toMutableSet()
+        if (!updated.add(name)) updated.remove(name)
+        favoriteRoms.value = updated
+        prefs.edit().putStringSet("library_favorites", updated).apply()
+    }
+
+    private fun removeRom(name: String) {
+        val file = File(romDirectory, name)
+        if (!file.isFile || file.parentFile != romDirectory) return
+        if (currentRomFile.value?.absolutePath == file.absolutePath) {
+            statusMessage.value = "Saia do jogo e carregue outra ROM antes de removê-la."
+            return
+        }
+        if (file.delete()) {
+            favoriteRoms.value = favoriteRoms.value - name
+            recentRoms.value = recentRoms.value.filterNot { it == name }
+            prefs.edit().putStringSet("library_favorites", favoriteRoms.value)
+                .putString("library_recent", org.json.JSONArray(recentRoms.value).toString()).apply()
+            refreshLibrary()
+        }
+    }
+
     private fun refreshLibrary() {
         romFiles.value = romDirectory.listFiles()
             ?.filter { it.isFile && it.extension.lowercase() in setOf("sfc", "smc") }
             ?.sortedBy { it.name.lowercase() }
             ?.map { it.name }
             ?: emptyList()
+        romHeaders.clear()
+        romFiles.value.forEach { name ->
+            romHeaders[name] = SnesRomHeader.inspect(File(romDirectory, name))
+        }
         refreshCovers()
     }
 
@@ -866,6 +919,8 @@ class MainActivity : ComponentActivity() {
                 cheatRomKey = null
                 currentRomFile.value = file
                 currentRomName.value = file.name
+                recentRoms.value = (listOf(file.name) + recentRoms.value.filterNot { it == file.name }).take(40)
+                prefs.edit().putString("library_recent", org.json.JSONArray(recentRoms.value).toString()).apply()
                 currentRomHashPrefix.value = romPrefix
                 userPaused = false
                 paused.value = false
