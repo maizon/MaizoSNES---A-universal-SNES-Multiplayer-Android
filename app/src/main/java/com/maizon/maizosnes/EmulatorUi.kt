@@ -367,10 +367,10 @@ internal fun MaizoEmulatorApp(
         contentWindowInsets = WindowInsets(0),
         bottomBar = {
             NavigationBar(containerColor = Color(0xFF101624), modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
-                NavigationBarItem(screen == AppScreen.LIBRARY, { onSetScreen(AppScreen.LIBRARY) }, icon = { Icon(Icons.Default.Gamepad, null) }, label = { Text("Biblioteca") })
-                NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("Online") })
-                NavigationBarItem(screen == AppScreen.SETTINGS, { onSetScreen(AppScreen.SETTINGS) }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Ajustes") })
-                NavigationBarItem(screen == AppScreen.CREDITS, { onSetScreen(AppScreen.CREDITS) }, icon = { Icon(Icons.Default.Info, null) }, label = { Text("Créditos") })
+                NavigationBarItem(screen == AppScreen.LIBRARY, { onSetScreen(AppScreen.LIBRARY) }, icon = { Icon(Icons.Default.Gamepad, null) }, label = { Text("Biblioteca") }, modifier = Modifier.padFocusRing())
+                NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("Online") }, modifier = Modifier.padFocusRing())
+                NavigationBarItem(screen == AppScreen.SETTINGS, { onSetScreen(AppScreen.SETTINGS) }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Ajustes") }, modifier = Modifier.padFocusRing())
+                NavigationBarItem(screen == AppScreen.CREDITS, { onSetScreen(AppScreen.CREDITS) }, icon = { Icon(Icons.Default.Info, null) }, label = { Text("Créditos") }, modifier = Modifier.padFocusRing())
             }
         }
     ) { padding ->
@@ -967,7 +967,7 @@ private fun MultiplayerScreen(
                             localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
                         val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                         Card(
-                            modifier = Modifier.fillMaxWidth().clickable(
+                            modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
                                 enabled = !active && ready && hashCompatible && cheatsAllowed
                             ) {
                                 onJoinAutomatic(room)
@@ -1057,7 +1057,7 @@ private fun MultiplayerScreen(
                     Card(
                         colors = CardDefaults.cardColors(containerColor = PanelRaised),
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().clickable(
+                        modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
                             enabled = !active && (ready || receiveRomAllowed) &&
                                 hashCompatible && cheatsAllowed
                         ) {
@@ -2049,8 +2049,8 @@ private fun EmulatorSettings(
                 androidx.compose.material3.FilterChip(
                     selected = item == category,
                     onClick = { category = item },
-                    modifier = if (index == 0) Modifier.focusRequester(firstCategoryFocus)
-                        else Modifier,
+                    modifier = (if (index == 0) Modifier.focusRequester(firstCategoryFocus)
+                        else Modifier).padFocusRing(),
                     label = { Text(item, fontSize = 12.sp) }
                 )
             }
