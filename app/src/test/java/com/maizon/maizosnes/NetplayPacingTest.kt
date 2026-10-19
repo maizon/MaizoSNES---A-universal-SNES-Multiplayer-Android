@@ -21,6 +21,19 @@ class NetplayPacingTest {
         assertTrue("Must cover one-way latency and jitter", lead in 8..12)
     }
 
+
+    @Test fun latencyPreferenceAlwaysTradesDelayForResilience() {
+        val samples = longArrayOf(250_000_000L, 260_000_000L, 280_000_000L)
+        val fastest = NetplayPacing.suggestFrameBuffer(samples, ntsc,
+            NetworkMode.RELAY, NetplayLatencyMode.RESPONSIVE)
+        val balanced = NetplayPacing.suggestFrameBuffer(samples, ntsc,
+            NetworkMode.RELAY, NetplayLatencyMode.BALANCED)
+        val stable = NetplayPacing.suggestFrameBuffer(samples, ntsc,
+            NetworkMode.RELAY, NetplayLatencyMode.STABLE)
+        assertTrue(fastest <= balanced)
+        assertTrue(balanced < stable)
+    }
+
     @Test fun slowInternetBufferIsBoundedAndCorrectAcrossPeers() {
         assertEquals(48, NetplayPacing.suggestFrameBuffer(
             longArrayOf(1_600_000_000L), ntsc, NetworkMode.RELAY))

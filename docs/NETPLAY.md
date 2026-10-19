@@ -1,5 +1,29 @@
 # Multiplayer (código experimental)
 
+## Atualização v0.9 — MZNP v5
+
+Relato do desenvolvedor em teste Android + VM: conexão pela Internet funcionando,
+mas jogo reduz a ~2 FPS. O código antigo tinha dependência de um RTT completo
+por quadro (`enviar input -> bloquear aguardando input remoto -> emular`).
+Em redes com RTT~500ms isso explica ~2 FPS.
+
+**Solução testada em CI:** novo protocolo v5 envia comandos de
+`frame + atraso` antecipadamente, de 2 a 48 quadros, e só aguarda a entrada
+correspondente ao quadro atual. O RTT é medido três vezes no handshake,
+e o host negocia o buffer. Há três perfis selecionáveis:
+Resposta rápida, Equilibrado e Conexão instável. Após receber as entradas,
+o Snes9x roda as duas portas em lockstep determinístico. Checkpoints de
+estado seguem anexados aos pacotes de entrada, sem bloquear em troca
+serial de checksums. Teste de integração simula 200ms RTT em TCP e valida
+vazão muito superior ao limite antigo de 5 FPS.
+
+**Limitações:** input delay pelo menos metade RTT + jitter; o buffer não
+corrige perda de pacotes/resincronização automaticamente. Ainda não há
+predição/rollback; o relay TCP não é P2P direto e não adiciona criptografia.
+Instale a mesma versão (MZNP v5) nos dois aparelhos. Não alegar 60 FPS real
+sem teste físico em Android + VM/Android + Android.
+
+
 ## Atualização de protocolo (0.7)
 
 **Esta versão usa MZNP v3** e rejeita clientes 0.6/v2 incompatíveis. Durante a negociação, após conferir ROM e opções, o host envia até 64 cheats sanitizados; o segundo jogador precisa ter ativado consentimento prévio. Ambos aplicam os mesmos códigos enquanto o jogo está parado. Qualquer rejeição impede o primeiro quadro. Sem autorização, o host deve desativar cheats antes de criar a sala. Trocas de cheats durante frames permanecem bloqueadas. O fingerprint de estado a cada 120 quadros continua sendo usado.

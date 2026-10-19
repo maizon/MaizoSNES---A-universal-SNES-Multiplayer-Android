@@ -12,13 +12,18 @@ internal object NetplayPacing {
     fun suggestFrameBuffer(
         rttSamplesNs: LongArray,
         periodNs: Long,
-        mode: NetworkMode
+        mode: NetworkMode,
+        latencyMode: NetplayLatencyMode = NetplayLatencyMode.BALANCED
     ): Int {
         require(periodNs > 0L)
         val sample = rttSamplesNs.filter { it > 0L }.maxOrNull() ?: 0L
         // 0.6 RTT > expected 0.5 RTT one-way, 30ms jitter reserve.
         // Small LAN latency gets a smaller delay; Internet/relay gets a floor.
-        val targetNs = sample.toDouble() * 0.6 + 30_000_000.0
+        val targetNs = when (latencyMode) {
+            NetplayLatencyMode.RESPONSIVE -> sample.toDouble() * 0.52 + 10_000_000.0
+            NetplayLatencyMode.BALANCED -> sample.toDouble() * 0.60 + 30_000_000.0
+            NetplayLatencyMode.STABLE -> sample.toDouble() * 0.73 + 80_000_000.0
+        }
         val recommended = ceil(targetNs / periodNs.toDouble()).toInt() + 1
         val minimum = when (mode) {
             NetworkMode.LOCAL -> 2

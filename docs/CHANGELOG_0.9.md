@@ -16,6 +16,11 @@ enviava input de um quadro e aguardava input remoto **a cada quadro**.
 - LAN direta continua preferida quando alcançável (menos RTT);
   relay TCP permanece opção para redes com NAT/CGNAT.
 - Checksum de estado piggybackado nos pacotes antecipados a cada 300 quadros; não intercala bytes soltos no fluxo TCP. Isso evita corromper os pacotes já enfileirados e mantém a verificação determinística.
+- Três perfis visíveis: **Resposta rápida** (menos input delay),
+  **Equilibrado** (padrão) e **Conexão instável** (maior tolerância a jitter).
+  O anfitrião decide o buffer; o convidado recebe a mesma configuração.
+- HUD de FPS e status detalhado, incluindo **buffer em quadros** e
+  métricas de espera remota.
 - Métricas de quadros/s, espera remota, frames atrasados e **buffer em frames**
   incluídas no status multiplayer/HUD.
 - Preservados: Snes9x 1.63, ROM SHA-256, cheat consent/sync,

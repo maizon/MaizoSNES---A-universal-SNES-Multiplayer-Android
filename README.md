@@ -77,7 +77,7 @@ entradas para quadros futuros com *input delay* limitado de **2 a 48 quadros**.
 Assim os dois aparelhos podem continuar em ~60 quadros/s se a rede entregar
 as entradas dentro do buffer negociado e se ambos os núcleos forem rápidos.
 Existe uma troca: conexões distantes exigem mais atraso no controle.
-O cliente recebe o delay selecionado pelo host. Hash periódico mantém detecção
+O cliente recebe o delay selecionado pelo host. O menu Multiplayer permite escolher entre Resposta rápida, Equilibrado e Conexão instável, com tradeoff explícito de latência e jitter. Hash periódico mantém detecção
 de dessincronização; não foi implementado rollback/predição de entrada. O
 transporte direto LAN continua suportado; o modo Internet/CGNAT continua
 através de relay público, sem prometer perfuração de NAT para conexão direta.

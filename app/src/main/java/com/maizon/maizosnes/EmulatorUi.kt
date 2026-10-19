@@ -177,6 +177,8 @@ internal fun MaizoEmulatorApp(
     onSelectTouchPreset: (TouchPreset) -> Unit,
     connectionMode: NetworkMode,
     onConnectionModeChanged: (NetworkMode) -> Unit,
+    netplayLatencyMode: NetplayLatencyMode,
+    onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     savedConnectionHost: String,
     savedConnectionPort: Int,
     onSaveConnectionTarget: (String, Int) -> Unit,
@@ -312,6 +314,7 @@ internal fun MaizoEmulatorApp(
                 Modifier.fillMaxSize().padding(padding), currentRomName, localRomHashPrefix, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
                 connectionMode, onConnectionModeChanged,
+                netplayLatencyMode, onNetplayLatencyModeChanged,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
                 lanRooms, scanningLan, onScanLan,
                 relayAddress, relayRooms, scanningRelay,
@@ -366,6 +369,7 @@ private fun CreditsScreen(modifier: Modifier, onOpenInstagram: () -> Unit) {
             "Libretro — interfaces, cheats, identificação e thumbnails.\n" +
             "PPSSPP (hrydgard) — referência de ergonomia dos controles.\n" +
             "CTR Native Android (igawa6) — referência de controles.\n" +
+            "VirtualGamePad-Mobile (kitswas) — referência de proporção e disposição; arte original.\n" +
             "ARMSX1 (ARMSX2) — referência de interface.\n" +
             "Daijishou (TapiocaFox) — referência de navegação da biblioteca.\n" +
             "Android Open Source Project e Jetpack Compose — plataforma e interface.",
@@ -576,6 +580,8 @@ private fun MultiplayerScreen(
     localMultiplayer: Boolean,
     connectionMode: NetworkMode,
     onConnectionModeChanged: (NetworkMode) -> Unit,
+    netplayLatencyMode: NetplayLatencyMode,
+    onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     savedConnectionHost: String,
     savedConnectionPort: Int,
     onSaveConnectionTarget: (String, Int) -> Unit,
@@ -673,6 +679,29 @@ private fun MultiplayerScreen(
                 }
             }
         }
+        if (connectionMode != NetworkMode.LOCAL) Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("PERFIL DE LATÊNCIA • MZNP v5",
+                    color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Envia comandos para quadros futuros, evitando um RTT " +
+                    "a cada frame. Buffer menor reage mais rápido, " +
+                    "mas pode engasgar; o host aplica o mesmo buffer aos dois.",
+                    color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+                NetplayLatencyMode.values().forEach { choice ->
+                    ChoiceRow(choice.label, choice.hint,
+                        netplayLatencyMode == choice) {
+                        if (!active) onNetplayLatencyModeChanged(choice)
+                    }
+                }
+                if (active) Text("O buffer não pode ser alterado no meio da sessão.",
+                    color = Color(0xFFFFBD85), fontSize = 10.sp)
+            }
+        }
+
         if (connectionMode == NetworkMode.AUTO) Card(
             colors = CardDefaults.cardColors(containerColor = Panel),
             shape = RoundedCornerShape(18.dp)
@@ -1035,7 +1064,7 @@ private fun MultiplayerScreen(
                 }
             }
         }
-        Text("LAN funciona sem internet, mas pode haver isolamento Wi-Fi. Compartilhamento de ROM depende de permissão legal e consentimento mútuo, não envia jogos comerciais por padrão. TCP lockstep tem atraso de rede, sem rollback nem criptografia; para acesso remoto prefira VPN privada confiável.",
+        Text("LAN funciona sem internet, mas pode haver isolamento Wi-Fi. Compartilhamento de ROM depende de permissão legal e consentimento mútuo, não envia jogos comerciais por padrão. MZNP v5 usa buffer negociado (sem rollback): RTT/jitter alto ainda aumenta atraso dos botões. Relay TCP não criptografado; para acesso remoto prefira VPN privada confiável.",
             color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
     }
 }
@@ -1066,8 +1095,12 @@ private fun GameScreen(
         )
         if (!toolbarExpanded && !editingControls) {
             Box(
-                modifier = Modifier.align(Alignment.TopEnd)
-                    .padding(top = 9.dp, end = 12.dp)
+                modifier = (if (settings.touch.enabled &&
+                        settings.touch.preset == TouchPreset.VIRTUAL_GAMEPAD)
+                        Modifier.align(Alignment.TopStart)
+                            .padding(top = 9.dp, start = 12.dp)
+                    else Modifier.align(Alignment.TopEnd)
+                            .padding(top = 9.dp, end = 12.dp))
                     .size(44.dp)
                     .clip(CircleShape)
                     .background(Color(0x503B4563))
@@ -2078,7 +2111,7 @@ private fun EmulatorSettings(
                 "Rede" -> {
                     SettingSectionTitle("Perfil de conexão",
                         "Alternar modos não apaga ROMs, save states nem preferências; " +
-                            "as salas usam MZNP v4 e sincronização temporária das opções do host.")
+                            "as salas usam MZNP v5 (entradas antecipadas) e opções temporárias do host.")
                     NetworkMode.values().forEach { mode ->
                         ChoiceRow(mode.label, mode.hint, connectionMode == mode) {
                             if (!cheatsLocked) onConnectionModeChanged(mode)
@@ -2087,7 +2120,7 @@ private fun EmulatorSettings(
                     if (cheatsLocked) Text("Para trocar modo, encerre a sessão ativa.",
                         color = Color(0xFFFFC47E), fontSize = 11.sp)
                     Text("LAN usa descoberta automática ou IP manual. Internet " +
-                        "continua em lockstep para manter os jogos sincronizados. " +
+                        "usa fila de inputs antecipados em vez de um RTT por quadro. " +
                         "O convidado copia temporariamente as opções compatíveis do host; " +
                         "ao sair, os ajustes pessoais são restaurados.",
                         color = Muted, fontSize = 11.sp, lineHeight = 16.sp)

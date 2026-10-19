@@ -13,6 +13,16 @@ internal enum class NetworkMode(val label: String, val hint: String) {
     RELAY("Servidor de salas (NAT / CGNAT)", "Digite apenas o IP ou URL do servidor; descubra e entre em salas online")
 }
 
+/**
+ * Trade controller reaction time against jitter resilience. The host chooses
+ * the common buffer; the client never uses an independent frame lead.
+ */
+internal enum class NetplayLatencyMode(val label: String, val hint: String) {
+    RESPONSIVE("Resposta rápida", "Menor atraso nos botões; exige rede estável, pode engasgar"),
+    BALANCED("Equilibrado (recomendado)", "RTT detectado automaticamente com folga leve para jitter"),
+    STABLE("Conexão instável", "Mais frames de buffer contra jitter, com maior atraso nos botões")
+}
+
 internal data class NetworkMetrics(
     val frame: Long,
     val peerWaitMs: Double,

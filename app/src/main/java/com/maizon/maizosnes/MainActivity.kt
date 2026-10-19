@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
     private var perfJob: Job? = null
     private val performanceText = androidx.compose.runtime.mutableStateOf("Aguardando métricas…")
     private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.AUTO)
+    private val netplayLatencyMode = androidx.compose.runtime.mutableStateOf(NetplayLatencyMode.BALANCED)
     private val savedHost = androidx.compose.runtime.mutableStateOf("")
     private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
     private val relayAddress = androidx.compose.runtime.mutableStateOf("")
@@ -149,6 +150,10 @@ class MainActivity : ComponentActivity() {
             NetworkMode.valueOf(restoredMode ?: NetworkMode.AUTO.name)
         }.getOrDefault(NetworkMode.AUTO)
         loadConnectionTarget()
+        netplayLatencyMode.value = runCatching {
+            NetplayLatencyMode.valueOf(prefs.getString("netplay_latency_mode",
+                NetplayLatencyMode.BALANCED.name) ?: NetplayLatencyMode.BALANCED.name)
+        }.getOrDefault(NetplayLatencyMode.BALANCED)
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
@@ -180,6 +185,8 @@ class MainActivity : ComponentActivity() {
                     onSelectTouchPreset = ::selectTouchPreset,
                     connectionMode = connectionMode.value,
                     onConnectionModeChanged = ::changeConnectionMode,
+                    netplayLatencyMode = netplayLatencyMode.value,
+                    onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
                     savedConnectionHost = savedHost.value,
                     savedConnectionPort = savedPort.value,
                     onSaveConnectionTarget = ::saveConnectionTarget,
@@ -328,6 +335,17 @@ class MainActivity : ComponentActivity() {
         val prefix = "network_" + connectionMode.value.name + "_"
         savedHost.value = prefs.getString(prefix + "host", "") ?: ""
         savedPort.value = prefs.getInt(prefix + "port", 55435).coerceIn(1024, 65535)
+    }
+
+    private fun changeNetplayLatencyMode(next: NetplayLatencyMode) {
+        if (netplaySession != null) {
+            lanStatus.value = "Encerre a sessão antes de trocar o buffer de rede."
+            return
+        }
+        netplayLatencyMode.value = next
+        prefs.edit().putString("netplay_latency_mode", next.name).apply()
+        lanStatus.value = "Perfil de latência: " + next.label +
+            ". O host sincroniza automaticamente o buffer com o convidado."
     }
 
     private fun changeConnectionMode(next: NetworkMode) {
@@ -1736,6 +1754,7 @@ class MainActivity : ComponentActivity() {
                 }
             },
             mode = connectionMode.value,
+            latencyMode = netplayLatencyMode.value,
             onMetrics = { metrics ->
                 runOnUiThread {
                     if (netplaySession === session) {

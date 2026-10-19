@@ -40,6 +40,7 @@ internal class NetplaySession(
     private val onStatus: (String) -> Unit,
     private val onFinish: (String) -> Unit,
     private val mode: NetworkMode = NetworkMode.LAN_AUTO,
+    private val latencyMode: NetplayLatencyMode = NetplayLatencyMode.BALANCED,
     private val onMetrics: (NetworkMetrics) -> Unit = { },
     private val shareAllowedByHost: Boolean = false,
     private val receiveAllowedByClient: Boolean = false,
@@ -479,7 +480,7 @@ internal class NetplaySession(
                 rttSamples[index] = (System.nanoTime() - sent).coerceAtLeast(0L)
             }
             delay = NetplayPacing.suggestFrameBuffer(
-                rttSamples, period, mode)
+                rttSamples, period, mode, latencyMode)
             output.writeInt(BUFFER_MAGIC)
             output.writeInt(delay)
             output.flush()
