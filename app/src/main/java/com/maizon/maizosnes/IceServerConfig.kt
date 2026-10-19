@@ -91,6 +91,18 @@ internal object IceServerConfig {
             } finally { conn.disconnect() }
         }.getOrDefault(emptyList())
         servers.addAll(remote)
+        // Open Relay has historically published shared demonstration TURN
+        // credentials. They are BEST EFFORT ONLY and can be revoked or quota-
+        // limited at any time. Prefer authenticated Metered /api/ice.
+        if (remote.none { it.urls.any { url -> url.startsWith("turn") } } &&
+            servers.none { it.urls.any { url -> url.startsWith("turn") } }) {
+            servers.add(PeerConnection.IceServer.builder(listOf(
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp"
+            )).setUsername("openrelayproject")
+              .setPassword("openrelayproject").createIceServer())
+        }
         return servers.take(24)
     }
 
