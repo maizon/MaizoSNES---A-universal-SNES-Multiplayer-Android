@@ -3,7 +3,7 @@ project(maizosnes LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -96,6 +96,19 @@ target_compile_options(snes9x_core PRIVATE -O2 -Wno-unused-parameter)
 set_source_files_properties(${SNES9X_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-fno-exceptions;-fno-rtti"
 )
+
+set(GEKKO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/gekkonet")
+if(NOT EXISTS "${GEKKO_DIR}/GekkoLib/include/gekkonet.h")
+    message(FATAL_ERROR "GekkoNet missing: bash scripts/fetch_gekkonet.sh")
+endif()
+set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(NO_ASIO_BUILD OFF CACHE BOOL "" FORCE)
+add_subdirectory("${GEKKO_DIR}/GekkoLib" "${CMAKE_BINARY_DIR}/gekkonet")
+add_library(gekko_bridge SHARED gekko_bridge.cpp)
+target_link_libraries(gekko_bridge PRIVATE GekkoNet log)
+target_compile_options(gekko_bridge PRIVATE -O2)
+set_target_properties(gekko_bridge PROPERTIES CXX_STANDARD 20)
 
 add_library(native-lib SHARED native-lib.cpp)
 target_compile_options(native-lib PRIVATE -O2)

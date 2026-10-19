@@ -57,6 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/fetch_snes9x.sh
+          bash scripts/fetch_gekkonet.sh
           node --test server/relay.test.js
           ./gradlew --no-daemon testDebugUnitTest
       - name: Build signed universal APK
