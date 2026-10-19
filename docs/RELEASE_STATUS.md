@@ -101,3 +101,13 @@ Credenciais compartilhadas demonstrativas do Open Relay são tentadas sem
 SLA. Documentação docs/TURN_SETUP.md e testes do servidor foram incluídos.
 Hardware P2P em duas operadoras e ARMv7 real NÃO foi validado; não publicar
 como funcional em todos os NATs até confirmação física.
+
+## 2026-10-19 — WebSocket RFC 6455 frame boundary
+
+Fixed relay framing for the 65,536-byte boundary: outgoing frames now use
+the 64-bit extended-length header, and masked incoming frames parse that
+header with an explicit 64 KiB cap. A 65,537-byte client frame is rejected.
+Added real loopback WebSocket integration coverage at 126, 65,535 and 65,536
+bytes in both directions. The normal 32 KiB ROM chunks are unchanged.
+This is a protocol regression test, **not** evidence of two-device NAT/ICE
+connectivity or permissioned ROM transfer on hardware.

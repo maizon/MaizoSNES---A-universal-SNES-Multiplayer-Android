@@ -15,8 +15,15 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
   const maxBuffered = 2 * 1024 * 1024;
   const frame = (opcode, payload) => {
     const n = payload.length;
+    // RFC 6455: 16-bit lengths stop at 65535; 65536 needs a 64-bit header.
     const hdr = n < 126 ? Buffer.from([0x80 | opcode, n]) :
-      Buffer.from([0x80 | opcode, 126, n >>> 8, n & 255]);
+      n <= 65535 ? Buffer.from([0x80 | opcode, 126, n >>> 8, n & 255]) :
+      Buffer.alloc(10);
+    if (n > 65535) {
+      hdr[0] = 0x80 | opcode;
+      hdr[1] = 127;
+      hdr.writeBigUInt64BE(BigInt(n), 2);
+    }
     return Buffer.concat([hdr, payload]);
   };
   function reject(socket, code) {
@@ -128,8 +135,15 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
           socket.destroy(); return;
         }
         let offset = 2, n = two & 127;
-        if (n === 127) { socket.destroy(); return; }
-        if (n === 126) {
+        if (n === 127) {
+          if (peer.pending.length < 10) return;
+          // Never convert attacker-controlled 64-bit lengths to imprecise Number.
+          if (peer.pending.readUInt32BE(2) !== 0 ||
+              peer.pending.readUInt32BE(6) > maxFrame) {
+            socket.destroy(); return;
+          }
+          n = peer.pending.readUInt32BE(6); offset = 10;
+        } else if (n === 126) {
           if (peer.pending.length < 4) return;
           n = peer.pending.readUInt16BE(2); offset = 4;
         }
