@@ -82,8 +82,10 @@ class MainActivity : ComponentActivity() {
     private val lanStatus = androidx.compose.runtime.mutableStateOf("Sem sessão ativa.")
     private val availableLanRooms = androidx.compose.runtime.mutableStateOf<List<LanRoom>>(emptyList())
     private val scanningLan = androidx.compose.runtime.mutableStateOf(false)
-    private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(false)
-    private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(false)
+    private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(true)
+    private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(true)
+    private val shareConsentVisible = androidx.compose.runtime.mutableStateOf(false)
+    private var pendingHostPort: Int? = null
     private val cheatEntries = androidx.compose.runtime.mutableStateOf<List<CheatEntry>>(emptyList())
     private val activeCheatIds = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
     private val cheatStatus = androidx.compose.runtime.mutableStateOf("Abra uma ROM para consultar cheats.")
@@ -169,7 +171,8 @@ class MainActivity : ComponentActivity() {
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
         devShareEnabled.value = prefs.getBoolean("dev_share_advanced", false) && devUnlocked.value
-        if (devShareEnabled.value) shareRomAllowed.value = true
+        shareRomAllowed.value = prefs.getBoolean("share_rom_enabled", true)
+        receiveRomAllowed.value = prefs.getBoolean("receive_rom_enabled", true)
         runCatching {
             NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
             NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
@@ -235,9 +238,17 @@ class MainActivity : ComponentActivity() {
                     onlineCheatsOptIn = onlineCheatsOptIn.value,
                     onOnlineCheatsChanged = ::setOnlineCheatsOptIn,
                     shareRomAllowed = shareRomAllowed.value,
+                    shareConsentVisible = shareConsentVisible.value,
+                    onShareConsent = ::resolveShareConsent,
                     receiveRomAllowed = receiveRomAllowed.value,
-                    onShareRomAllowedChanged = { shareRomAllowed.value = it },
-                    onReceiveRomAllowedChanged = { receiveRomAllowed.value = it },
+                    onShareRomAllowedChanged = {
+                        shareRomAllowed.value = it
+                        prefs.edit().putBoolean("share_rom_enabled", it).apply()
+                    },
+                    onReceiveRomAllowedChanged = {
+                        receiveRomAllowed.value = it
+                        prefs.edit().putBoolean("receive_rom_enabled", it).apply()
+                    },
                     cheats = cheatEntries.value,
                     enabledCheatIds = activeCheatIds.value,
                     cheatStatus = cheatStatus.value,
@@ -1799,9 +1810,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun resolveShareConsent(authorized: Boolean) {
+        val port = pendingHostPort
+        pendingHostPort = null
+        shareConsentVisible.value = false
+        if (!authorized) {
+            shareRomAllowed.value = false
+            prefs.edit().putBoolean("share_rom_enabled", false).apply()
+        } else {
+            prefs.edit().putBoolean("share_rom_rights_confirmed", true).apply()
+        }
+        if (port != null) startNetplay(null, port)
+    }
+
     private fun startNetplay(host: String?, port: Int,
         relayRoomId: String? = null, relayServerHost: String? = null) {
         if (netplaySession != null) return
+        // Host consent is needed before any automatic private-network transfer.
+        if (host == null && relayRoomId == null && shareRomAllowed.value &&
+            !prefs.getBoolean("share_rom_rights_confirmed", false)) {
+            pendingHostPort = port
+            shareConsentVisible.value = true
+            return
+        }
         if (host == null && (!hasLoadedRom || currentRomFile.value == null)) {
             lanStatus.value = "Como host, abra uma ROM antes de criar a sala."
             return

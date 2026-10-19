@@ -222,6 +222,8 @@ internal fun MaizoEmulatorApp(
     onlineCheatsOptIn: Boolean,
     onOnlineCheatsChanged: (Boolean) -> Unit,
     shareRomAllowed: Boolean,
+    shareConsentVisible: Boolean,
+    onShareConsent: (Boolean) -> Unit,
     receiveRomAllowed: Boolean,
     onShareRomAllowedChanged: (Boolean) -> Unit,
     onReceiveRomAllowedChanged: (Boolean) -> Unit,
@@ -257,6 +259,16 @@ internal fun MaizoEmulatorApp(
     onGpuReady: (Boolean) -> Unit
 ) {
     var editingControls by remember { mutableStateOf(false) }
+    if (shareConsentVisible) {
+        AlertDialog(onDismissRequest = { onShareConsent(false) },
+            title = { Text("Permissão de compartilhar ROM") },
+            text = { Text("Confirme somente se a ROM é homebrew, domínio público ou você tem autorização de redistribuição. O compartilhamento é restrito à LAN privada.") },
+            confirmButton = { TextButton(onClick = { onShareConsent(true) }) { Text("TENHO PERMISSÃO") } },
+            dismissButton = { TextButton(onClick = { onShareConsent(false) }) { Text("NÃO COMPARTILHAR") } })
+    }
+    BackHandler(enabled = screen != AppScreen.GAME && screen != AppScreen.LIBRARY) {
+        onSetScreen(AppScreen.LIBRARY)
+    }
     BackHandler(enabled = screen == AppScreen.GAME) {
         if (gameMenuOpen) onGameMenuChanged(false) else onExitGame()
     }
@@ -278,6 +290,8 @@ internal fun MaizoEmulatorApp(
             onInputChanged = onInputChanged
         )
         if (gameMenuOpen) {
+            val menuFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(gameMenuOpen) { menuFocus.requestFocus() }
             Dialog(onDismissRequest = { onGameMenuChanged(false) }) {
                 Surface(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp),
@@ -289,7 +303,8 @@ internal fun MaizoEmulatorApp(
                                 Text("MENU DO EMULADOR", color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                                 Text(currentRomName ?: "Jogo", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             }
-                            TextButton(onClick = { onGameMenuChanged(false) }) { Text("FECHAR") }
+                            TextButton(onClick = { onGameMenuChanged(false) },
+                                modifier = Modifier.focusRequester(menuFocus)) { Text("FECHAR") }
                         }
                         TextButton(onClick = {
                             editingControls = !editingControls
@@ -1118,13 +1133,13 @@ private fun MultiplayerScreen(
                     singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !active)
                 ToggleSettingRow(
                     "Compartilhar minha ROM autorizada",
-                    "Host: confirme apenas para homebrew, domínio público ou ROM com permissão de redistribuição. Desligado por padrão.",
+                    "ON por padrão. Na primeira sala LAN, confirme os direitos de redistribuição; restrito à rede privada.",
                     shareRomAllowed,
                     { if (!active) onShareRomAllowedChanged(it) }
                 )
                 ToggleSettingRow(
                     "Aceitar ROM autorizada do host",
-                    "Cliente: permite salvar automaticamente a ROM na biblioteca interna, somente em rede privada. Desligado por padrão.",
+                    "ON por padrão; SHA-256 validado; somente LAN privada. Desative em redes desconhecidas.",
                     receiveRomAllowed,
                     { if (!active) onReceiveRomAllowedChanged(it) }
                 )

@@ -33,10 +33,14 @@ android {
     }
 
     signingConfigs {
-        val ksPath = System.getenv("MAIZO_KEYSTORE_PATH")
-        val storePass = System.getenv("MAIZO_STORE_PASSWORD")
-        val keyAliasEnv = System.getenv("MAIZO_KEY_ALIAS")
-        val keyPass = System.getenv("MAIZO_KEY_PASSWORD")
+        // Stable signing key comes only from environment variables or CI Secrets.
+        fun secret(primary: String, legacy: String): String? =
+            System.getenv(primary)?.takeIf(String::isNotBlank)
+                ?: System.getenv(legacy)?.takeIf(String::isNotBlank)
+        val ksPath = secret("KEYSTORE_PATH", "MAIZO_KEYSTORE_PATH")
+        val storePass = secret("KEYSTORE_PASSWORD", "MAIZO_STORE_PASSWORD")
+        val keyAliasEnv = secret("KEY_ALIAS", "MAIZO_KEY_ALIAS")
+        val keyPass = secret("KEY_PASSWORD", "MAIZO_KEY_PASSWORD")
         if (!ksPath.isNullOrBlank() && !storePass.isNullOrBlank() &&
             !keyAliasEnv.isNullOrBlank() && !keyPass.isNullOrBlank() &&
             file(ksPath).exists()) {
