@@ -8,7 +8,7 @@ import java.net.Socket
 import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
+import android.util.Base64
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -152,7 +152,7 @@ internal class WssRelaySocket private constructor(
                 }
                 underlying.startHandshake()
                 val randomBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
-                val key = Base64.getEncoder().encodeToString(randomBytes)
+                val key = Base64.encodeToString(randomBytes, Base64.NO_WRAP)
                 val request = "GET /ws HTTP/1.1\r\n" +
                     "Host: $host" + (if (port == 443) "" else ":$port") + "\r\n" +
                     "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
@@ -185,10 +185,10 @@ internal class WssRelaySocket private constructor(
                     if (sep < 1) null else line.substring(0, sep).lowercase() to
                         line.substring(sep + 1).trim()
                 }.toMap()
-                val expected = Base64.getEncoder().encodeToString(
+                val expected = Base64.encodeToString(
                     MessageDigest.getInstance("SHA-1").digest(
                         (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
-                            .toByteArray(Charsets.US_ASCII)))
+                            .toByteArray(Charsets.US_ASCII)), Base64.NO_WRAP)
                 require(headers["sec-websocket-accept"] == expected &&
                     headers["upgrade"]?.equals("websocket", true) == true) {
                     "Servidor WebSocket não autenticou a atualização."
