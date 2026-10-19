@@ -65,7 +65,10 @@ jobs:
         with:
           node-version: "22"
       - name: Test TCP, TLS, WSS and local public-smoke protocol
-        run: node --test server/*.test.js
+        run: |
+          node --test server/*.test.js
+          grep -q 'server/ice-directory.js' Dockerfile
+          grep -q 'ice-directory.js' server/Dockerfile
       - name: Prepare pinned Snes9x source and license assets
         run: bash scripts/fetch_snes9x.sh
       - name: Fetch pinned GekkoNet SDK and keep license
