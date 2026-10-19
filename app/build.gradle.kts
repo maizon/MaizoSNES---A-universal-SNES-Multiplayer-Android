@@ -13,10 +13,12 @@ android {
         applicationId = "com.maizon.maizosnes"
         minSdk = 23
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.8.0-rc1"
+        versionCode = 9
+        versionName = "0.8.1-armv7-preview"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters += listOf("arm64-v8a") }
+        // Independent Android 32-bit package: NDK builds ARMv7, not ARM64.
+        // Do not force NEON; some ARMv7 devices lack those extensions.
+        ndk { abiFilters += listOf("armeabi-v7a") }
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17", "-O2")
@@ -50,7 +52,8 @@ android {
     }
 
     buildTypes {
-        debug { applicationIdSuffix = ".debug" }
+        // Side-by-side install with ARM64 preview; no forced uninstall/saves loss.
+        debug { applicationIdSuffix = ".debug.armv7" }
         release {
             signingConfigs.findByName("publish")?.let { signingConfig = it }
             isMinifyEnabled = false
