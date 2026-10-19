@@ -80,84 +80,9 @@ jobs:
           unzip -l "$APK" | tee /tmp/apk-contents.txt
           grep -Eq 'lib/arm64-v8a/libnative-lib\.so$' /tmp/apk-contents.txt
           grep -Eq 'lib/armeabi-v7a/libnative-lib\.so$' /tmp/apk-contents.txt
-          grep -Eq 'lib/arm64-v8a/libgekko_bridge[.]so
-          grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
-          grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
-            echo "Unexpected shared C++ runtime; expected c++_static." >&2
-            exit 1
-          fi
-          stat -c 'APK_SIZE_BYTES=%s' "$APK"
-          sha256sum "$APK" | awk '{ print "APK_SHA256=" $1 }'
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-      - name: Probe live Railway HTTPS API and WSS (external, non-blocking)
-        id: railway_smoke
-        continue-on-error: true
-        timeout-minutes: 2
-        run: node scripts/verify_public_wss.js
-      - name: Record live relay verification separately from APK result
-        if: always()
-        run: |
-          echo "Railway public WSS smoke outcome: ${{ steps.railway_smoke.outcome }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "External uptime is not an APK build gate; see smoke step logs." >> "$GITHUB_STEP_SUMMARY"
- /tmp/apk-contents.txt
-          grep -Eq 'lib/armeabi-v7a/libgekko_bridge[.]so
-          grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
-          grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
-            echo "Unexpected shared C++ runtime; expected c++_static." >&2
-            exit 1
-          fi
-          stat -c 'APK_SIZE_BYTES=%s' "$APK"
-          sha256sum "$APK" | awk '{ print "APK_SHA256=" $1 }'
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-      - name: Probe live Railway HTTPS API and WSS (external, non-blocking)
-        id: railway_smoke
-        continue-on-error: true
-        timeout-minutes: 2
-        run: node scripts/verify_public_wss.js
-      - name: Record live relay verification separately from APK result
-        if: always()
-        run: |
-          echo "Railway public WSS smoke outcome: ${{ steps.railway_smoke.outcome }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "External uptime is not an APK build gate; see smoke step logs." >> "$GITHUB_STEP_SUMMARY"
- /tmp/apk-contents.txt
-          grep -Eq 'assets/licenses/gekkonet-bsd-2[.]txt
-          grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
-          grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
-          if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
-            echo "Unexpected shared C++ runtime; expected c++_static." >&2
-            exit 1
-          fi
-          stat -c 'APK_SIZE_BYTES=%s' "$APK"
-          sha256sum "$APK" | awk '{ print "APK_SHA256=" $1 }'
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-      - name: Probe live Railway HTTPS API and WSS (external, non-blocking)
-        id: railway_smoke
-        continue-on-error: true
-        timeout-minutes: 2
-        run: node scripts/verify_public_wss.js
-      - name: Record live relay verification separately from APK result
-        if: always()
-        run: |
-          echo "Railway public WSS smoke outcome: ${{ steps.railway_smoke.outcome }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "External uptime is not an APK build gate; see smoke step logs." >> "$GITHUB_STEP_SUMMARY"
- /tmp/apk-contents.txt
+          grep -Eq 'lib/arm64-v8a/libgekko_bridge[.]so$' /tmp/apk-contents.txt
+          grep -Eq 'lib/armeabi-v7a/libgekko_bridge[.]so$' /tmp/apk-contents.txt
+          grep -Eq 'assets/licenses/gekkonet-bsd-2[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
           if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
