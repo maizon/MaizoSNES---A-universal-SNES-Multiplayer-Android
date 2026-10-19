@@ -983,13 +983,13 @@ private fun MultiplayerScreen(
                         color = Muted, fontSize = 12.sp)
                 } else {
                     autoRooms.forEach { room ->
-                        val hashCompatible = room.romHash.isBlank() ||
-                            localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
+                        val hashCompatible = ready && (room.romHash.isBlank() ||
+                            room.romHash == localRomHashPrefix)
                         val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                         Card(
                             modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
                                 enabled = !active && cheatsAllowed &&
-                                    ((ready && hashCompatible) || (receiveRomAllowed && room.tls))
+                                    ((ready && hashCompatible) || (receiveRomAllowed && (room.tls || room.wss)))
                             ) {
                                 onJoinAutomatic(room)
                             },
@@ -1007,14 +1007,14 @@ private fun MultiplayerScreen(
                                     Text(
                                         when {
                                             !cheatsAllowed -> "CHEATS — autorize nas configurações"
-                                            !hashCompatible && room.tls && receiveRomAllowed ->
+                                            !hashCompatible && (room.tls || room.wss) && receiveRomAllowed ->
                                                 "ROM DIFERENTE — host pode oferecer via TLS"
                                             !hashCompatible -> "ROM/MOD DIFERENTE — mesma versão necessária"
                                             room.cheats -> "CHEATS SINCRONIZADOS • ROM compatível"
                                             room.romHash.isNotBlank() -> "ROM compatível por SHA-256"
                                             else -> "Versão da ROM será validada ao conectar"
                                         }, color = if (cheatsAllowed &&
-                                            (hashCompatible || (room.tls && receiveRomAllowed))) Mint
+                                            (hashCompatible || ((room.tls || room.wss) && receiveRomAllowed))) Mint
                                             else Color(0xFFFFBD85), fontSize = 10.sp
                                     )
                                 }
@@ -1075,8 +1075,8 @@ private fun MultiplayerScreen(
                     Text("A busca começa automaticamente. Se o Wi-Fi bloquear descoberta, use IP/porta abaixo.",
                         color = Muted, fontSize = 11.sp)
                 } else lanRooms.forEach { room ->
-                    val hashCompatible = room.romHash.isBlank() ||
-                        localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
+                    val hashCompatible = ready && (room.romHash.isBlank() ||
+                        room.romHash == localRomHashPrefix)
                     val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                     Card(
                         colors = CardDefaults.cardColors(containerColor = PanelRaised),
@@ -1156,7 +1156,7 @@ private fun MultiplayerScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
                             enabled = !active && cheatsAllowed &&
-                                ((ready && hashCompatible) || (receiveRomAllowed && room.tls))
+                                ((ready && hashCompatible) || (receiveRomAllowed && (room.tls || room.wss)))
                         ) {
                             onJoinRelay(room.id)
                         },
@@ -1171,13 +1171,13 @@ private fun MultiplayerScreen(
                                 Text(
                                     when {
                                         !cheatsAllowed -> "CHEATS — autorize"
-                                        !hashCompatible && room.tls && receiveRomAllowed ->
+                                        !hashCompatible && (room.tls || room.wss) && receiveRomAllowed ->
                                             "ROM DIFERENTE — oferta autorizada via TLS"
                                         !hashCompatible -> "ROM/MOD DIFERENTE"
                                         room.cheats -> "CHEATS SINCRONIZADOS"
                                         else -> "ROM verificada ao entrar"
                                     }, color = if (cheatsAllowed &&
-                                        (hashCompatible || (room.tls && receiveRomAllowed))) Mint
+                                        (hashCompatible || ((room.tls || room.wss) && receiveRomAllowed))) Mint
                                         else Color(0xFFFFBD85), fontSize = 10.sp
                                 )
                             }
