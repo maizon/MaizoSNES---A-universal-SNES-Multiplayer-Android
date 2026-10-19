@@ -69,3 +69,13 @@ Registre modelo, Android, versão do APK, hash SHA-256 do APK, resultado e trech
 - [ ] ROM com CRC32+SHA1 No-Intro conhecida aparece como identificada por checksum; ROM modificada volta para correspondência heurística.
 - [ ] Habilitar/desabilitar download de capas; imagens aparecem na grade sem sobrecarregar rede/dados móveis, cache offline é reutilizado.
 - [ ] Configurações → DEV: PIN incorreto não desbloqueia; `9090` habilita menu. Compartilhamento permanece somente entre IPs privados com autorização de ambos e direitos de redistribuição.
+
+## Gamepad UI and native START regression tests
+
+- [ ] PS4/PS5/Xbox: physical START starts game / opens in-game game menu, never opens emulator settings.
+- [ ] Central PS/Xbox GUIDE opens/closes app settings when Android exposes the key; record firmware behavior when Android consumes Home.
+- [ ] D-pad and analog stick move focus across all ROM covers, favorite/recent chips, settings groups, multiplayer cards and Credits.
+- [ ] Gamepad A activates all focused buttons/switches/dialog actions; gamepad B closes dialogs and returns from sub-pages.
+- [ ] L1/R1 cycles app tabs without triggering in-game inputs.
+- [ ] One and two controllers preserve SNES Start and Select independently; touch gameplay remains unaltered.
+- [ ] Online gameplay opens the overlay without pausing only one peer; avoids netplay state divergence.

@@ -3,7 +3,7 @@
 Implemented: dual ABI configuration and CI checks; offline SNES title/region
 reader and tests; launcher 2/3/4 columns and list, favorites and recents,
 ROM details with patch and delete; gamepad A/B/D-pad routing outside game;
-Start/Mode pause/menu input routing; private-LAN opt-in ownership prompt for
+GUIDE/MODE pause/menu input routing; START reserved for the actual SNES game input; private-LAN opt-in ownership prompt for
 default-enabled ROM transfer; secure signed-release workflow definition.
 
 Existing preserved: Snes9x, native audio/video, SAF/ZIP, manual LAN, TCP
@@ -13,7 +13,11 @@ safety. The source updates themselves are not proof of on-device success.
 
 Pending: xdelta/VCDIFF, TheGamesDB authorized API, exact supplied icon,
 per-control independent sizing/opacity and full-screen drag constraints,
-full gamepad focus across all Settings, 30-second clip capture, per-slot
+hardware gamepad focus validation across all Settings, 30-second clip capture, per-slot
 thumbnail/resume, fast-forward/rewind, haptics, final Material 3 Expressive
 UI, verified real WebRTC NAT traversal, production key secrets, signed
 artifact and GitHub official stable release. See release workflow for gate.
+
+## October 19 gamepad remediation
+
+Activity now routes the physical START key to SNES bit 3 and reserves GUIDE/MODE for the overlay. Compose outside gameplay uses A/Enter and B/Back, with L1/R1 for app tabs and D-pad/analog stick for focus movement. FocusRequester is attached to initial targets in multiplayer, settings and credits. Modal dialogs directly handle gamepad A/B. Focus indicators are applied to game cards and selected option cards. Build verification and physical controller regression tests are required before declaring support complete.
