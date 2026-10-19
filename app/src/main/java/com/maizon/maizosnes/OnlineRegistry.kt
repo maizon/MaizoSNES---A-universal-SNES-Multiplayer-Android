@@ -28,7 +28,8 @@ internal data class AutoRoom(
     val latencyMs: Long,
     val romHash: String = "",
     val cheats: Boolean = false,
-    val tls: Boolean = false
+    val tls: Boolean = false,
+    val wss: Boolean = false
 )
 internal data class AutoServerStatus(
     val relay: PublicRelay,
@@ -178,7 +179,7 @@ internal object OnlineRegistry {
                         .coerceIn(1L, 120000L)
                     val rooms = listing.rooms.map { room ->
                         AutoRoom(room.id, room.game, server.name, server.region,
-                            server.endpoint, elapsed, room.romHash, room.cheats, room.tls)
+                            server.endpoint, elapsed, room.romHash, room.cheats, room.tls, room.wss)
                     }
                     AutoServerStatus(server, elapsed, rooms.size) to rooms
                 }.getOrNull()

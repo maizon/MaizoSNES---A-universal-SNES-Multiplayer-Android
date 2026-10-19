@@ -14,11 +14,13 @@ internal data class InternetRoom(
     val createdAt: Long,
     val romHash: String = "",
     val cheats: Boolean = false,
-    val tls: Boolean = false
+    val tls: Boolean = false,
+    val wss: Boolean = false
 )
 internal data class RelayListing(
     val serverHost: String, val relayPort: Int,
-    val rooms: List<InternetRoom>, val tls: Boolean = false
+    val rooms: List<InternetRoom>, val tls: Boolean = false,
+    val wss: Boolean = false
 )
 
 internal object RelayDirectory {
@@ -94,6 +96,8 @@ internal object RelayDirectory {
         val port = json.optInt("relayPort", -1)
         require(port in 1..65535) { "Porta TCP de relay inválida." }
         val relayTls = json.optBoolean("relayTls", false)
+        val wss = json.optBoolean("websocketRelay", false) &&
+            url.protocol.equals("https", true)
         require(!relayTls || url.protocol.equals("https", true)) {
             "Relay TLS requer diretório HTTPS para proteger endereço e porta."
         }
@@ -107,9 +111,10 @@ internal object RelayDirectory {
             rooms.add(InternetRoom(id, item.optString("game").take(75),
                 item.optLong("createdAt"),
                 romHash.takeIf { it.matches(Regex("[a-f0-9]{16}")) } ?: "",
-                item.optBoolean("cheats", false), relayTls))
+                item.optBoolean("cheats", false), relayTls,
+                wss && item.optBoolean("websocketRelay", false)))
         }
         val relayHost = validateRelayHost(parsed.host, json.optString("relayHost", ""))
-        return RelayListing(relayHost, port, rooms, relayTls)
+        return RelayListing(relayHost, port, rooms, relayTls, wss)
     }
 }

@@ -150,6 +150,50 @@ internal class NetplaySession(
         relayConnect(serverHost, relayPort, "JOIN $roomId", false, roomId, relayTls)
     }
 
+    fun hostViaWebSocket(endpoint: String, roomId: String, title: String) = launch {
+        require(rom?.isFile == true) { "Host precisa de ROM." }
+        val titleCode = android.util.Base64.encodeToString(
+            title.take(75).toByteArray(Charsets.UTF_8),
+            android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE or
+                android.util.Base64.NO_PADDING)
+        val fp = romDigest(rom).take(8).joinToString("") { "%02x".format(it) }
+        val cheats = if (allowOnlineCheats && hostCheatCodes.isNotEmpty()) "1" else "0"
+        webSocketConnect(endpoint, roomId, "HOST $roomId $titleCode $fp $cheats", true)
+    }
+
+    fun joinViaWebSocket(endpoint: String, roomId: String) = launch {
+        require(rom?.isFile == true || receiveAllowedByClient) {
+            "Abra uma ROM ou autorize receber ROM oferecida pelo host."
+        }
+        webSocketConnect(endpoint, roomId, "JOIN $roomId", false)
+    }
+
+    private fun webSocketConnect(endpoint: String, roomId: String,
+                                 hello: String, hosting: Boolean) {
+        require(roomId.matches(Regex("[a-f0-9]{12,24}"))) { "Código de sala inválido." }
+        prepare(true)
+        WssRelaySocket.connect(endpoint).use { connection ->
+            socket = connection
+            connection.tcpNoDelay = true
+            connection.soTimeout = if (hosting) 310000 else 20000
+            onStatus(if (hosting) "Sala $roomId pronta por HTTPS/WSS. Aguardando cliente…"
+                else "Entrando na sala $roomId por HTTPS/WSS…")
+            connection.getOutputStream().write((hello + "\n").toByteArray(Charsets.UTF_8))
+            connection.getOutputStream().flush()
+            val line = StringBuilder()
+            while (line.length < 80) {
+                val byte = connection.getInputStream().read()
+                require(byte >= 0) { "Relay WSS desconectou." }
+                if (byte == 10) break
+                line.append(byte.toChar())
+            }
+            require(line.toString() == "READY") { "Sala WSS não disponível: $line" }
+            connection.soTimeout = 20000
+            onStatus("Pares conectados por HTTPS/WSS. Verificando ROM…")
+            runSession(connection, host = hosting, protectedTransport = true)
+        }
+    }
+
     private fun relayConnect(
         serverHost: String, relayPort: Int, hello: String,
         hosting: Boolean, roomId: String, relayTls: Boolean
