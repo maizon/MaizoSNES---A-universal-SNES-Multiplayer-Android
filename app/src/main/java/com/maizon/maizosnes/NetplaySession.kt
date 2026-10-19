@@ -43,6 +43,7 @@ internal class NetplaySession(
     private val onFinish: (String) -> Unit,
     private val mode: NetworkMode = NetworkMode.LAN_AUTO,
     private val netcodeMode: NetcodeMode = NetcodeMode.LOCKSTEP,
+    private val webrtcContext: android.content.Context? = null,
     private val latencyMode: NetplayLatencyMode = NetplayLatencyMode.BALANCED,
     private val onMetrics: (NetworkMetrics) -> Unit = { },
     private val shareAllowedByHost: Boolean = false,
@@ -232,7 +233,8 @@ internal class NetplaySession(
             require(line.toString() == "READY") { "Sala WSS não disponível: $line" }
             connection.soTimeout = 20000
             onStatus("Pares conectados por HTTPS/WSS. Verificando ROM…")
-            runSession(connection, host = hosting, protectedTransport = true)
+            runSession(connection, host = hosting, protectedTransport = true,
+                rtcEndpoint = endpoint, rtcRoomId = roomId)
         }
     }
 
@@ -408,8 +410,104 @@ internal class NetplaySession(
                     char in 'A'..'F' || char in "-:+,.; "
             }
 
+    /** Optional online P2P rollback. Returning false leaves the untouched
+     *  MZNP buffered input/output stream at the first LOCKSTEP PING.
+     *  Railway WSS only signals WebRTC SDP, never transports Gekko packets.
+     */
+    private fun tryWebRtcRollback(context: android.content.Context, endpoint: String,
+                                  roomId: String, host: Boolean): Boolean {
+        val snapshot = saveState() ?: return false
+        if (snapshot.size !in 32..RollbackFeasibility.MAX_STATE_BYTES) return false
+        val start = System.nanoTime()
+        val saved = saveState() ?: return false
+        val savedAt = System.nanoTime()
+        val restored = loadState(saved) == 0
+        val elapsedMs = (System.nanoTime() - start) / 1e6
+        if (!restored || saved.size != snapshot.size || elapsedMs > 10.0) {
+            onStatus("Rollback remoto inviável (save/load " +
+                String.format(java.util.Locale.US, "%.1f", elapsedMs) +
+                " ms). Usando Lockstep via Railway.")
+            return false
+        }
+        onStatus("Verificação da ROM concluída. Procurando P2P WebRTC/ICE…")
+        val rtc = WebRtcRollbackTransport.attempt(
+            context, endpoint, roomId, host, onStatus) ?: return false
+        rtc.use { port ->
+            val delayFrames = when (latencyMode) {
+                NetplayLatencyMode.RESPONSIVE -> 0
+                NetplayLatencyMode.BALANCED -> 1
+                NetplayLatencyMode.STABLE -> 3
+            }
+            val active = GekkoNative.nativeStartRtc(
+                if (host) 0 else 1, snapshot.size, 6, delayFrames, port)
+            if (!active) {
+                onStatus("Inicialização Gekko RTC indisponível; TCP preservado.")
+                return false
+            }
+            try {
+                val callbacks = object : RollbackCallbacks {
+                    override fun save(): ByteArray =
+                        saveState() ?: error("Snes9x serialize falhou")
+                    override fun load(bytes: ByteArray): Boolean {
+                        NativeBridge.nativeSetRollbackReplaying(true)
+                        return loadState(bytes) == 0
+                    }
+                    override fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean {
+                        NativeBridge.nativeSetRollbackReplaying(resimulation)
+                        return step(p1, p2) == 0
+                    }
+                }
+                val beginning = System.nanoTime()
+                val period = framePeriodNs().coerceIn(10000000L, 50000000L)
+                var connected = false
+                var metricsAt = 0L
+                while (!closed.get()) {
+                    val tickStart = System.nanoTime()
+                    val executed = GekkoNative.nativeTick(localInput(), callbacks)
+                    if (executed < 0) {
+                        if (!connected) {
+                            onStatus("WebRTC handshake Gekko falhou antes de jogar; Lockstep.")
+                            return false
+                        }
+                        error("Gekko RTC perdeu sincronização ($executed)")
+                    }
+                    val stats = GekkoNative.nativeStats()
+                    if (stats.size >= 6 && stats[4] == 1 && !connected) {
+                        connected = true
+                        onStatus(if (host)
+                            "Conectado como jogador 1 (Rollback WebRTC DataChannel)."
+                            else "Conectado como jogador 2 (Rollback WebRTC DataChannel).")
+                    }
+                    if (!connected && System.nanoTime() - beginning > 8_000_000_000L) {
+                        onStatus("ICE/Gekko P2P não conectou em 8s; usando Lockstep TCP.")
+                        return false
+                    }
+                    if (connected && System.nanoTime() - metricsAt > 1_000_000_000L) {
+                        metricsAt = System.nanoTime()
+                        onMetrics(NetworkMetrics(
+                            frame = stats[3].toLong(), peerWaitMs = 0.0,
+                            maxPeerWaitMs = 0.0, effectiveFps = 0.0,
+                            stalledFrames = 0, inputDelayFrames = delayFrames,
+                            sampledRttMs = stats[0].toDouble(),
+                            jitterMs = stats[1] / 10.0,
+                            rollbackCount = stats[2].toLong(),
+                            rollback = true, webRtc = true, iceState = port.iceState,
+                            turnUsed = port.turnUsed))
+                    }
+                    val sleep = period - (System.nanoTime() - tickStart)
+                    if (sleep > 0L) java.util.concurrent.locks.LockSupport.parkNanos(sleep)
+                }
+                return true
+            } finally {
+                NativeBridge.nativeSetRollbackReplaying(false)
+                GekkoNative.nativeStop()
+            }
+        }
+    }
+
     private fun runSession(
-        connection: Socket, host: Boolean, protectedTransport: Boolean = false
+        connection: Socket, host: Boolean, protectedTransport: Boolean = false,
+        rtcEndpoint: String? = null, rtcRoomId: String? = null
     ) {
         connection.tcpNoDelay = true
         connection.keepAlive = true
@@ -609,6 +707,11 @@ internal class NetplaySession(
             output.flush()
         }
 
+        if (rtcEndpoint != null && rtcRoomId != null &&
+            netcodeMode == NetcodeMode.ROLLBACK && webrtcContext != null &&
+            tryWebRtcRollback(webrtcContext, rtcEndpoint, rtcRoomId, host)) {
+            return
+        }
         connection.soTimeout = if (mode == NetworkMode.INTERNET ||
             mode == NetworkMode.RELAY || mode == NetworkMode.AUTO) 12000 else 5000
         val period = framePeriodNs().coerceIn(10000000L, 50000000L)

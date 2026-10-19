@@ -74,7 +74,7 @@ internal class WebRtcRollbackTransport private constructor(
         private val initLock = Any()
         @Volatile private var initialized = false
 
-        private fun factory(context: Context): PeerConnectionFactory {
+        private fun buildFactory(context: Context): PeerConnectionFactory {
             synchronized(initLock) {
                 if (!initialized) {
                     PeerConnectionFactory.initialize(
@@ -200,7 +200,7 @@ internal class WebRtcRollbackTransport private constructor(
             var transport: WebRtcRollbackTransport? = null
             try {
                 signal.use { ws ->
-                    factory = factory(context)
+                    factory = buildFactory(context)
                     val gather = CountDownLatch(1)
                     val open = CountDownLatch(1)
                     val packets = ArrayBlockingQueue<ByteArray>(384)

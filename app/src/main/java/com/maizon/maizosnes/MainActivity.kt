@@ -227,6 +227,7 @@ class MainActivity : ComponentActivity() {
                     netplayLatencyMode = netplayLatencyMode.value,
                     onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
                     netcodeMode = netcodeMode.value,
+            webrtcContext = applicationContext,
                     onNetcodeModeChanged = ::changeNetcodeMode,
                     savedConnectionHost = savedHost.value,
                     savedConnectionPort = savedPort.value,
@@ -2022,7 +2023,8 @@ class MainActivity : ComponentActivity() {
                             active = true,
                             mode = if (metrics.rollback) "Rollback (GekkoNet)"
                                 else "Lockstep (MZNP TCP)",
-                            transport = if (metrics.rollback) "UDP direto"
+                            transport = if (metrics.webRtc) "WebRTC DataChannel"
+                                else if (metrics.rollback) "UDP direto"
                                 else if (wssEndpoint != null) "TCP via Railway (WSS)"
                                 else if (relayRoomId != null) "TCP relay" else "TCP direto",
                             rttMin = if (rtt == null) old.rttMin
@@ -2036,6 +2038,7 @@ class MainActivity : ComponentActivity() {
                             rollbacksPerSec = if (metrics.rollback)
                                 (total - lastRollbackCounter).coerceAtLeast(0) else 0L,
                             totalRollbacks = total, delay = metrics.inputDelayFrames,
+                            iceState = metrics.iceState, turnUsed = metrics.turnUsed,
                             frame = metrics.frame, state = "Partida em andamento")
                         lastRollbackCounter = total
                         lanStatus.value = if (metrics.rollback)
@@ -2063,13 +2066,16 @@ class MainActivity : ComponentActivity() {
                     if (netplaySession === session) {
                         lanStatus.value = message
                         autoNetworkStatus.value = message
-                        val rollbackStarted = message.contains("Rollback UDP")
+                        val rollbackStarted = message.contains("Rollback UDP") ||
+                            message.contains("Rollback WebRTC DataChannel")
                         val tcpStarted = message.startsWith("Conectado como") && !rollbackStarted
                         networkDebug.value = networkDebug.value.copy(
                             mode = if (rollbackStarted) "Rollback (GekkoNet)"
                                 else if (tcpStarted) "Lockstep (MZNP TCP)"
                                 else networkDebug.value.mode,
-                            transport = if (rollbackStarted) "UDP direto"
+                            transport = if (message.contains("WebRTC DataChannel"))
+                                "WebRTC DataChannel"
+                                else if (rollbackStarted) "UDP direto"
                                 else if (tcpStarted && wssEndpoint != null) "TCP via Railway (WSS)"
                                 else if (tcpStarted && relayRoomId != null) "TCP relay"
                                 else if (tcpStarted) "TCP direto"

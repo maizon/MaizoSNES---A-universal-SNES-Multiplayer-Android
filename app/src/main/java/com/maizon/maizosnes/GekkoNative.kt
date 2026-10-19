@@ -7,6 +7,8 @@ internal object GekkoNative {
     external fun nativeStart(localPort: Int, address: String, remotePort: Int,
         localPlayer: Int, stateBytes: Int, prediction: Int, delay: Int): Boolean
     external fun nativeTick(input: Int, callbacks: RollbackCallbacks): Int
+    external fun nativeStartRtc(player: Int, stateBytes: Int,
+        prediction: Int, delay: Int, port: WebRtcRollbackTransport): Boolean
     /** RTT ms, jitter 0.1ms, cumulative loads/rollbacks, advanced frames, connected, aborted. */
     external fun nativeStats(): IntArray
     external fun nativeStop()

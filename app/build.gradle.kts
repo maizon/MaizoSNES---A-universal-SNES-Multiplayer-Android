@@ -74,6 +74,9 @@ android {
 }
 
 dependencies {
+    // BSD-3-Clause WebRTC SDK, native Android ARMv7+ARM64 binary.
+    // Packages relocated to livekit.org.webrtc to avoid symbol collisions.
+    implementation("io.github.webrtc-sdk:android-prefixed-stripped:150.7871.01")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.activity:activity-compose:1.9.3")

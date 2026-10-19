@@ -33,7 +33,10 @@ internal data class NetworkMetrics(
     val sampledRttMs: Double = 0.0,
     val jitterMs: Double = 0.0,
     val rollbackCount: Long = 0,
-    val rollback: Boolean = false
+    val rollback: Boolean = false,
+    val webRtc: Boolean = false,
+    val iceState: String = "N/D",
+    val turnUsed: String = "N/D"
 )
 
 /** Runtime truth for the settings/in-game connection diagnostics. */
