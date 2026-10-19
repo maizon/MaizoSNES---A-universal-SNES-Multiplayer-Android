@@ -77,3 +77,15 @@ Transferência reporta progresso em chunks, com timeout longo próprio e hash.
 Novo debug dialog disponível em Multiplayer, Ajustes e menu no jogo; exibe
 motor REAL, transporte REAL, RTT min/média/máx, jitter, correções/s, delay,
 perda N/D e desyncs. Sem WebRTC inexistente/servidor Fly.io fictício.
+
+
+## 2026-10-19 — hash da ROM recebida (regressão)
+
+Corrigido o estado `currentRomHashPrefix` ao instalar uma ROM autorizada
+recebida pela rede: antes o núcleo carregava a ROM, mas a tela Multiplayer
+podia continuar exibindo o hash da ROM anterior ou um hash vazio, impedindo
+a descoberta/entrada posterior em salas compatíveis. Agora carregamento local
+e importação remota usam a mesma função de SHA-256 (prefixo de 8 bytes).
+Testes JVM cobrem vetor SHA-256 conhecido e igualdade com arquivo local.
+A validação da sincronização de UI e do multiplayer em dois aparelhos físicos
+permanece pendente; este patch não equivale a prova de hardware.

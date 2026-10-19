@@ -948,9 +948,7 @@ class MainActivity : ComponentActivity() {
                 require(bytes.isNotEmpty()) { "O arquivo está vazio." }
                 val (result, romPrefix) = withContext(Dispatchers.Default) {
                     val result = NativeBridge.nativeLoadRom(bytes, file.name)
-                    val prefix = if (result == 0) MessageDigest.getInstance("SHA-256")
-                        .digest(bytes).take(8)
-                        .joinToString("") { "%02x".format(it) } else ""
+                    val prefix = if (result == 0) RomFingerprint.prefix(bytes) else ""
                     result to prefix
                 }
                 if (result != 0) {
@@ -1316,6 +1314,7 @@ class MainActivity : ComponentActivity() {
                 return@runCatching false
             }
             val installed = destination
+            val receivedRomPrefix = RomFingerprint.prefix(bytes)
             runOnUiThread {
                 audioOutput?.stop()
                 audioOutput = AudioOutput(NativeBridge.nativeGetAudioSampleRate()).also {
@@ -1325,6 +1324,7 @@ class MainActivity : ComponentActivity() {
                 hasLoadedRom = true
                 currentRomFile.value = installed
                 currentRomName.value = installed.name
+                currentRomHashPrefix.value = receivedRomPrefix
                 appSettings.value = readSettings(profilePrefix(installed))
                 runCatching {
             NativeBridge.nativeSetVideoFilter(appSettings.value.filter.nativeId)
