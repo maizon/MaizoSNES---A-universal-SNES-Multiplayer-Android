@@ -172,6 +172,7 @@ private fun Modifier.dialogGamepadKeys(onBack: () -> Unit): Modifier = composed 
     this.onPreviewKeyEvent { key ->
         val raw = key.nativeKeyEvent
         when (raw.keyCode) {
+            android.view.KeyEvent.KEYCODE_BUTTON_MODE, GamepadKeyRouting.OPTIONAL_GUIDE_BUTTON,
             android.view.KeyEvent.KEYCODE_BUTTON_B -> {
                 if (raw.action == android.view.KeyEvent.ACTION_DOWN && raw.repeatCount == 0)
                     onBack()
