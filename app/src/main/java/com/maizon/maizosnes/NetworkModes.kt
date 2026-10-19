@@ -36,7 +36,8 @@ internal data class NetworkMetrics(
     val rollback: Boolean = false,
     val webRtc: Boolean = false,
     val iceState: String = "N/D",
-    val turnUsed: String = "N/D"
+    val turnUsed: String = "N/D",
+    val natType: String = "N/D"
 )
 
 /** Runtime truth for the settings/in-game connection diagnostics. */
@@ -50,7 +51,9 @@ internal data class NetworkDebugState(
     val packetLoss: String = "N/D (não medido)",
     val rollbacksPerSec: Long = 0, val totalRollbacks: Long = 0,
     val delay: Int? = null, val desyncs: Int = 0,
-    val frame: Long = 0, val state: String = "Aguardando sessão"
+    val frame: Long = 0, val state: String = "Aguardando sessão",
+    val iceState: String = "N/D", val natType: String = "N/D",
+    val turnUsed: String = "N/D"
 )
 internal enum class VideoFilter(val label: String, val nativeId: Int, val description: String) {
     ORIGINAL("Original (rápido)", 0, "RGB565 direto, sem processamento extra"),

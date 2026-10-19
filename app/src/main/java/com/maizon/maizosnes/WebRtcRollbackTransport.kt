@@ -30,6 +30,34 @@ internal class WebRtcRollbackTransport private constructor(
         private set
     @Volatile var turnUsed: String = "N/D"
         private set
+    @Volatile var natType: String = "N/D"
+        private set
+
+    fun refreshIceStats() {
+        if (disposed.get()) return
+        pc.getStats { report ->
+            if (disposed.get()) return@getStats
+            val records = report.statsMap
+            val selected = records.values.firstOrNull { stat ->
+                stat.type == "transport" &&
+                    stat.members["selectedCandidatePairId"] is String
+            }?.members?.get("selectedCandidatePairId") as? String
+            val pair = selected?.let(records::get) ?: records.values.firstOrNull { stat ->
+                stat.type == "candidate-pair" &&
+                    stat.members["nominated"] == true &&
+                    stat.members["state"] == "succeeded"
+            }
+            val local = pair?.members?.get("localCandidateId") as? String
+            val remote = pair?.members?.get("remoteCandidateId") as? String
+            val localType = local?.let(records::get)?.members?.get("candidateType") as? String
+            val remoteType = remote?.let(records::get)?.members?.get("candidateType") as? String
+            if (localType != null || remoteType != null) {
+                turnUsed = if (localType == "relay" || remoteType == "relay")
+                    "Sim (relay TURN)" else "Não (peer direto)"
+                natType = "ICE selecionado; tipo NAT não detectável"
+            }
+        }
+    }
 
     /** These methods form the JNI GekkoNetAdapter contract. */
     fun send(packet: ByteArray): Boolean {
@@ -73,6 +101,7 @@ internal class WebRtcRollbackTransport private constructor(
     companion object {
         private val initLock = Any()
         @Volatile private var initialized = false
+        @Volatile private var persistentFactory: PeerConnectionFactory? = null
 
         private fun buildFactory(context: Context): PeerConnectionFactory {
             synchronized(initLock) {
@@ -84,7 +113,11 @@ internal class WebRtcRollbackTransport private constructor(
                     initialized = true
                 }
             }
-            return PeerConnectionFactory.builder().createPeerConnectionFactory()
+            synchronized(initLock) {
+                persistentFactory?.let { return it }
+                return PeerConnectionFactory.builder().createPeerConnectionFactory()
+                    .also { persistentFactory = it }
+            }
         }
 
         private fun signalRoom(id: String): String =

@@ -311,7 +311,8 @@ class MainActivity : ComponentActivity() {
                     onExitGame = ::exitGameplay,
                     onInputChanged = ::updateInput,
                     onSurfaceChanged = ::updateEmulatorSurface,
-                    onGpuReady = ::updateGpuReady
+                    onGpuReady = ::updateGpuReady,
+                    onExportDebug = ::shareNetworkDiagnostics
                 )
             }
         }
@@ -2038,7 +2039,8 @@ class MainActivity : ComponentActivity() {
                             rollbacksPerSec = if (metrics.rollback)
                                 (total - lastRollbackCounter).coerceAtLeast(0) else 0L,
                             totalRollbacks = total, delay = metrics.inputDelayFrames,
-                            iceState = metrics.iceState, turnUsed = metrics.turnUsed,
+                            iceState = metrics.iceState,
+                            natType = metrics.natType, turnUsed = metrics.turnUsed,
                             frame = metrics.frame, state = "Partida em andamento")
                         lastRollbackCounter = total
                         lanStatus.value = if (metrics.rollback)
@@ -2142,6 +2144,36 @@ class MainActivity : ComponentActivity() {
                 current?.nameWithoutExtension ?: "SNES", relayTls = relayTls)
             else session.joinViaRelay(relayServerHost, port, relayRoomId, relayTls = relayTls)
         } else if (host == null) session.host(port) else session.join(host, port)
+    }
+
+    private fun shareNetworkDiagnostics() {
+        val debug = networkDebug.value
+        val details = buildString {
+            appendLine("MaizoSNES • diagnóstico de rede")
+            appendLine("Data: " + java.util.Date())
+            appendLine("Motor: " + debug.mode)
+            appendLine("Transporte: " + debug.transport)
+            appendLine("Estado: " + debug.state)
+            appendLine("ICE: " + debug.iceState)
+            appendLine("TURN: " + debug.turnUsed)
+            appendLine("NAT: " + debug.natType)
+            appendLine("RTT: " + debug.rttMin + " / " + debug.rttAvg +
+                " / " + debug.rttMax)
+            appendLine("Jitter: " + debug.jitterMs)
+            appendLine("Perda: " + debug.packetLoss)
+            appendLine("Correções/s: " + debug.rollbacksPerSec)
+            appendLine("Total: " + debug.totalRollbacks)
+            appendLine("Atraso: " + debug.delay)
+            appendLine("Dessíncronias: " + debug.desyncs)
+            appendLine("Quadro: " + debug.frame)
+            appendLine("Não anexe ROMs, IP público ou dados pessoais.")
+        }
+        startActivity(Intent.createChooser(
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "MaizoSNES • diagnóstico")
+                putExtra(Intent.EXTRA_TEXT, details)
+            }, "Compartilhar diagnóstico"))
     }
 
     private fun stopMultiplayer() {

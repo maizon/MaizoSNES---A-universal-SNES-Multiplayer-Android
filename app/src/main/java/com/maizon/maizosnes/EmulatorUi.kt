@@ -303,7 +303,8 @@ internal fun MaizoEmulatorApp(
     onExitGame: () -> Unit,
     onInputChanged: (Int, Boolean) -> Unit,
     onSurfaceChanged: (Surface?) -> Unit,
-    onGpuReady: (Boolean) -> Unit
+    onGpuReady: (Boolean) -> Unit,
+    onExportDebug: () -> Unit
 ) {
     var editingControls by remember { mutableStateOf(false) }
     var connectionOverlay by remember { mutableStateOf(false) }
@@ -387,15 +388,13 @@ internal fun MaizoEmulatorApp(
                 }
             }
         }
-        if (connectionOverlay) NetplayDebugDialog(networkDebug) {
-            connectionOverlay = false
-        }
+        if (connectionOverlay) NetplayDebugDialog(
+            networkDebug, { connectionOverlay = false }, onExportDebug)
         return
     }
 
-    if (connectionOverlay) NetplayDebugDialog(networkDebug) {
-        connectionOverlay = false
-    }
+    if (connectionOverlay) NetplayDebugDialog(
+        networkDebug, { connectionOverlay = false }, onExportDebug)
 
     Scaffold(
         containerColor = Bg,
@@ -2586,7 +2585,9 @@ private fun SettingSectionTitle(title: String, subtitle: String) {
 }
 
 @Composable
-private fun NetplayDebugDialog(debug: NetworkDebugState, dismiss: () -> Unit) {
+private fun NetplayDebugDialog(
+    debug: NetworkDebugState, dismiss: () -> Unit, export: () -> Unit
+) {
     fun number(v: Double?): String = if (v == null) "N/D" else
         String.format(java.util.Locale.US, "%.1f", v)
     AlertDialog(
@@ -2605,19 +2606,27 @@ private fun NetplayDebugDialog(debug: NetworkDebugState, dismiss: () -> Unit) {
                     " / " + number(debug.rttMax) + " ms")
                 Text("Jitter: " + number(debug.jitterMs) + " ms")
                 Text("Perda de pacotes: " + debug.packetLoss)
+                Text("ICE state: " + debug.iceState)
+                Text("NAT: " + debug.natType)
+                Text("TURN: " + debug.turnUsed)
                 Text("Rollbacks/s: " + debug.rollbacksPerSec)
                 Text("Correções totais: " + debug.totalRollbacks)
                 Text("Input delay: " + (debug.delay?.toString() ?: "N/D") + " quadros")
                 Text("Desyncs detectados: " + debug.desyncs)
                 Text("Quadros executados: " + debug.frame)
                 Text(debug.state, color = Mint, fontSize = 11.sp)
-                Text("WSS não é WebRTC/UDP. Não há perda percentual na API " +
-                    "GekkoNet; nunca estimar sem medição.", color = Muted, fontSize = 10.sp)
+                Text("O transporte mostra o modo REAL: WSS/TCP não é WebRTC. " +
+                    "ICE stats não fornecem perda de pacotes SCTP confiável.", color = Muted, fontSize = 10.sp)
             }
         },
         confirmButton = {
             TextButton(onClick = dismiss, modifier = Modifier.padFocusRing()) {
                 Text("FECHAR")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = export, modifier = Modifier.padFocusRing()) {
+                Text("COMPARTILHAR DIAGNÓSTICO")
             }
         }
     )

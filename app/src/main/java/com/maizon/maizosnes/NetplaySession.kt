@@ -484,6 +484,7 @@ internal class NetplaySession(
                     }
                     if (connected && System.nanoTime() - metricsAt > 1_000_000_000L) {
                         metricsAt = System.nanoTime()
+                        port.refreshIceStats()
                         onMetrics(NetworkMetrics(
                             frame = stats[3].toLong(), peerWaitMs = 0.0,
                             maxPeerWaitMs = 0.0, effectiveFps = 0.0,
@@ -492,7 +493,7 @@ internal class NetplaySession(
                             jitterMs = stats[1] / 10.0,
                             rollbackCount = stats[2].toLong(),
                             rollback = true, webRtc = true, iceState = port.iceState,
-                            turnUsed = port.turnUsed))
+                            turnUsed = port.turnUsed, natType = port.natType))
                     }
                     val sleep = period - (System.nanoTime() - tickStart)
                     if (sleep > 0L) java.util.concurrent.locks.LockSupport.parkNanos(sleep)
