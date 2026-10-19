@@ -56,7 +56,7 @@ function createRelayServer({
       websocketRelay: true,
       rooms: [
         ...[...rooms.values()].filter(r => !r.host.destroyed),
-        ...[...wsRooms.values()].filter(r => !r.peer.socket.destroyed)
+        ...[...wsRooms.values()].filter(r => !r.peer.socket.destroyed && r.game !== "GekkoSignaling")
       ].map(r => ({
         id: r.id, game: r.game, createdAt: r.createdAt,
         romHash: r.romHash, cheats: r.cheats,

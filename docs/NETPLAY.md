@@ -182,3 +182,40 @@ o cliente confere SHA-256 total antes de instalar ou executar. A UI atualiza
 'Enviando/Recebendo ROM: N%' e 'Hash válido, instalando'. A confirmação de
 direitos do host e o consentimento do cliente permanecem exigidos; o código
 DEV 9090 não é requisito para transferência sobre HTTPS/WSS autenticado.
+
+
+## WebRTC DataChannel para GekkoNet (fase experimental)
+
+O SDK `io.github.webrtc-sdk:android-prefixed-stripped:150.7871.01`
+fornece libwebrtc Android para arm64-v8a e armeabi-v7a, com API Java
+`livekit.org.webrtc` e licença BSD-3-Clause (ver avisos completos). Após
+transferência WSS de ROM autorizada, validação SHA-256, sincronização de opções
+e estado inicial MZNP, um *segundo* WSS ao Railway realiza a troca de SDP.
+A sala de sinalização é derivada por SHA-256 do ID da sala e não aparece na
+lista de jogos; nenhuma ROM é enviada nela.
+
+WebRTC usa STUN `stun:stun.l.google.com:19302` e
+`stun:stun.cloudflare.com:3478`. O DataChannel binário é não ordenado e
+não confiável (0 retransmissões); cabeçalho/estado do GekkoNet permanecem
+na biblioteca BSD C++20. O adaptador JNI implementa `GekkoNetAdapter`
+por callbacks `send_data`, `receive_data` e `free_data` com fila limitada.
+SDP/ICE transitam via WSS Railway; pacotes Gekko via DTLS/SCTP WebRTC.
+
+Ambos os pares confirmam o canal aberto antes de iniciar rollback; caso
+falhe ICE/SDP, a conexão WSS de jogo original permanece disponível e retorna
+para Lockstep, sem alterações no wire format MZNP. Um backend TURN não é
+provisionado: Metered oferece tier gratuito condicionado a conta e quota,
+sem credenciais públicas permanentes garantidas; a implementação atual usa
+STUN e falha para TCP quando NAT impede conexão direta. Não foi criado
+servidor UDP Fly.io nem há garantia de custo zero para TURN ilimitado.
+
+O overlay apresenta transporte real: `WebRTC DataChannel` quando Gekko via
+RTC foi iniciado, caso contrário `TCP via Railway (WSS)`. A API RTCStats
+pode identificar candidato tipo relay (TURN) e estado ICE, mas **perda de
+pacotes RTP não equivale a perda de DataChannel/SCTP**; nesse caso, N/D.
+NAT simétrico só pode ser inferido com testes mais profundos, portanto N/D.
+
+**Não testado em dois devices reais:** funcionamento entre diferentes
+operadoras, consumo de dados, jitter, sincronização 10 minutos, armv7
+heterogêneo, detecção/resync de desync e fallback físico. Consulte
+`docs/DEVICE_TESTING.md`. A compilação não substitui esses testes.

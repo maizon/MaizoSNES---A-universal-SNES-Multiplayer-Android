@@ -1,3 +1,19 @@
+## Preview WebRTC rollback online (experimental, 2026-10-19)
+
+Na branch `work/android-foundation`, o MaizoSNES tenta WebRTC DataChannel
+(`ordered=false`, `maxRetransmits=0`) entre dois aparelhos em redes
+diferentes, com Railway HTTPS/WSS APENAS para negociação SDP/ICE e fluxo
+seguro de ROM/estado inicial. O GekkoNet usa o canal SCTP/DTLS para dados de
+rollback; se ICE falhar, o jogo continua com Lockstep pelo WSS original.
+LAN/IP manual continuam usando GekkoNet UDP direto e fallback TCP.
+
+SDK Android WebRTC: `io.github.webrtc-sdk:android-prefixed-stripped:150.7871.01`.
+STUN de Google/Cloudflare; TURN não configurado sem credenciais. NAT simétrico
+e redes restritivas podem manter o Lockstep. As funcionalidades são
+**experimentais até teste real**: CI não garante P2P funcional em celulares.
+Veja [testes guiados](docs/DEVICE_TESTING.md), [checklist](docs/VALIDATION.md)
+e [arquitetura](docs/NETPLAY.md).
+
 # MaizoSNES — emulador SNES Android
 
 Aplicativo **experimental** de emulação SNES para Android ARM64 com Snes9x 1.63 via libretro, feito em Kotlin/Compose + C++/NDK. Não inclui ROM, BIOS, capa, dados de jogo nem conteúdo proprietário.

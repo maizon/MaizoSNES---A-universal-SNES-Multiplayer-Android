@@ -50,3 +50,15 @@ compartilhar logcat contendo dados pessoais, IP público ou ROMs.
 CI verde **não** substitui testagem em hardware. Produção requer: zero
 travamento, save states e ROM checksum corretos, fallback sem desconexão
 inesperada e overlay correspondente ao transporte realmente utilizado.
+
+
+## Cenários WebRTC (precisam de celulares de verdade)
+
+- [ ] Mesmo APK no host/client. Host Wi-Fi e convidado 4G/5G; criar sala Railway online; selecionar Rollback (Recomendado).
+- [ ] Registrar `ICE checking` seguido de `connected`; overlay deve exibir **Rollback + WebRTC DataChannel** SOMENTE quando real.
+- [ ] Testar ROM homebrew com cliente sem arquivo: consentimento anfitrião, oferta cliente, transferência % e SHA-256 validados ANTES do RTC.
+- [ ] Jogar 10 minutos: medir RTT, correções/s, frames, dessincronização e áudio; salvar print do overlay.
+- [ ] Bloquear UDP/STUN / testar CGNAT: o canal WebRTC falha e a mesma sala deve seguir em **Lockstep + TCP via Railway**, sem congelar.
+- [ ] Conferir campo ICE/TURN/NAT no overlay e compartilhar relatório usando o menu de compartilhamento do sistema.
+- [ ] Validar armv7 com arm64; desync e serialização cross-ABI são especialmente relevantes.
+- [ ] Sem credenciais TURN, redes com NAT simétrico podem NÃO completar WebRTC; a fallback TCP é esperado.
