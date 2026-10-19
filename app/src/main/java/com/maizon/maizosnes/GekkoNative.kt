@@ -1,0 +1,18 @@
+package com.maizon.maizosnes
+
+/** Native GekkoNet link is isolated from Snes9x and the stable lockstep bridge. */
+internal object GekkoNative {
+    init { System.loadLibrary("gekko_bridge") }
+    external fun nativeApiVersion(): Int
+    external fun nativeStart(localPort: Int, address: String, remotePort: Int,
+        localPlayer: Int, stateBytes: Int, prediction: Int, delay: Int): Boolean
+    external fun nativeTick(input: Int, callbacks: RollbackCallbacks): Int
+    /** RTT ms, jitter 0.1ms, cumulative loads/rollbacks, advanced frames, connected, aborted. */
+    external fun nativeStats(): IntArray
+    external fun nativeStop()
+}
+internal interface RollbackCallbacks {
+    fun save(): ByteArray
+    fun load(bytes: ByteArray): Boolean
+    fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean
+}
