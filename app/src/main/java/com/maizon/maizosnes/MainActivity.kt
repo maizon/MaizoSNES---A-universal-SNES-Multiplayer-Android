@@ -1237,7 +1237,9 @@ class MainActivity : ComponentActivity() {
                     relayRoomId = roomId,
                     relayServerHost = listing.serverHost,
                     relayTls = listing.tls,
-                    wssEndpoint = if (listing.wss) serverEndpoint else null
+                    wssEndpoint = if (listing.wss && (joinRoomId == null ||
+                        listing.rooms.firstOrNull { it.id == roomId }?.wss == true))
+                        serverEndpoint else null
                 )
             } catch (error: Exception) {
                 lanStatus.value = "Falha ao conectar servidor: " +
