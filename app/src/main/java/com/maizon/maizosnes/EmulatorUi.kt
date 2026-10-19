@@ -228,6 +228,8 @@ internal fun MaizoEmulatorApp(
     onConnectionModeChanged: (NetworkMode) -> Unit,
     netplayLatencyMode: NetplayLatencyMode,
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
+    netcodeMode: NetcodeMode,
+    onNetcodeModeChanged: (NetcodeMode) -> Unit,
     savedConnectionHost: String,
     savedConnectionPort: Int,
     onSaveConnectionTarget: (String, Int) -> Unit,
@@ -408,6 +410,7 @@ internal fun MaizoEmulatorApp(
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
                 connectionMode, onConnectionModeChanged,
                 netplayLatencyMode, onNetplayLatencyModeChanged,
+                netcodeMode, onNetcodeModeChanged,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
                 lanRooms, scanningLan, onScanLan,
                 relayAddress, relayRooms, scanningRelay,
@@ -768,6 +771,8 @@ private fun MultiplayerScreen(
     onConnectionModeChanged: (NetworkMode) -> Unit,
     netplayLatencyMode: NetplayLatencyMode,
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
+    netcodeMode: NetcodeMode,
+    onNetcodeModeChanged: (NetcodeMode) -> Unit,
     savedConnectionHost: String,
     savedConnectionPort: Int,
     onSaveConnectionTarget: (String, Int) -> Unit,
@@ -875,9 +880,26 @@ private fun MultiplayerScreen(
         ) {
             Column(Modifier.fillMaxWidth().padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("PERFIL DE LATÊNCIA • MZNP v5",
+                Text("MOTOR DE MULTIPLAYER",
                     color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text("Envia comandos para quadros futuros, evitando um RTT " +
+                NetcodeMode.values().forEach { choice ->
+                    ChoiceRow(choice.label, choice.info, choice == netcodeMode) {
+                        if (!active) onNetcodeModeChanged(choice)
+                    }
+                }
+                if (netcodeMode == NetcodeMode.ROLLBACK) {
+                    Text("Rollback GekkoNet UDP é usado no IP manual. " +
+                        "Em salas por relay HTTPS/WSS, Lockstep continua como " +
+                        "fallback até existir túnel UDP. Save/load lento, " +
+                        "portas bloqueadas ou peer indisponível também causam fallback.",
+                        fontSize = 11.sp, color = Muted)
+                    Text("RTT, jitter e correções aparecem nas estatísticas; " +
+                        "perda de pacotes não é publicada pela API atual do GekkoNet.",
+                        fontSize = 11.sp, color = Muted)
+                }
+                Text("PERFIL DE LATÊNCIA • LOCKSTEP MZNP v6",
+                    color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("O Lockstep TCP envia comandos para quadros futuros, evitando um RTT " +
                     "a cada frame. Buffer menor reage mais rápido, " +
                     "mas pode engasgar; o host aplica o mesmo buffer aos dois.",
                     color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
