@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
     private data class RomOffer(val filename: String, val digest: String, val bytes: Int)
     private val incomingRomOffer = androidx.compose.runtime.mutableStateOf<RomOffer?>(null)
     private val pendingRomApproval =
-        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.CompletableFuture<Boolean>?>(null)
+        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.ArrayBlockingQueue<Boolean>?>(null)
     private val cheatEntries = androidx.compose.runtime.mutableStateOf<List<CheatEntry>>(emptyList())
     private val activeCheatIds = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
     private val cheatStatus = androidx.compose.runtime.mutableStateOf("Abra uma ROM para consultar cheats.")
@@ -1876,15 +1876,15 @@ class MainActivity : ComponentActivity() {
 
     private fun resolveIncomingRomOffer(approved: Boolean) {
         incomingRomOffer.value = null
-        pendingRomApproval.getAndSet(null)?.complete(approved)
+        pendingRomApproval.getAndSet(null)?.offer(approved)
     }
 
     /** Called only on the network worker; UI thread is free to show the dialog. */
     private fun askIncomingRomApproval(name: String, hash: String, bytes: Int): Boolean {
-        val response = java.util.concurrent.CompletableFuture<Boolean>()
+        val response = java.util.concurrent.ArrayBlockingQueue<Boolean>(1)
         if (!pendingRomApproval.compareAndSet(null, response)) return false
         runOnUiThread { incomingRomOffer.value = RomOffer(name, hash, bytes) }
-        return try { response.get(75, java.util.concurrent.TimeUnit.SECONDS) }
+        return try { response.poll(75, java.util.concurrent.TimeUnit.SECONDS) ?: false }
         catch (_: Exception) { false }
         finally {
             pendingRomApproval.compareAndSet(response, null)
@@ -2060,7 +2060,7 @@ class MainActivity : ComponentActivity() {
         if (netplaySession == null) return
         lanStatus.value = "Cancelando sessão e liberando sala…"
         autoNetworkStatus.value = lanStatus.value
-        pendingRomApproval.getAndSet(null)?.complete(false)
+        pendingRomApproval.getAndSet(null)?.offer(false)
         netplaySession?.stop()
     }
 
