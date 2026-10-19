@@ -153,11 +153,26 @@ internal object OnlineRegistry {
                 runCatching {
                     val start = System.nanoTime()
                     val listing = RelayDirectory.list(server.endpoint)
-                    // The directory can be up while its TCP game relay is
-                    // blocked by a firewall/CDN. Probe the actual game port.
+                    // A plain TCP connect does not prove a TLS relay is safe.
+                    // Validate trusted CA and the advertised hostname while scanning,
+                    // then validate again in the actual netplay socket.
                     java.net.Socket().use { socket ->
                         socket.connect(java.net.InetSocketAddress(
-                            listing.serverHost, listing.relayPort), 1800)
+                            listing.serverHost, listing.relayPort), 2200)
+                        socket.soTimeout = 2500
+                        if (listing.tls) {
+                            val wrapped =
+                                (javax.net.ssl.SSLSocketFactory.getDefault()
+                                    as javax.net.ssl.SSLSocketFactory)
+                                    .createSocket(socket, listing.serverHost,
+                                        listing.relayPort, false) as javax.net.ssl.SSLSocket
+                            wrapped.use { ssl ->
+                                ssl.sslParameters = ssl.sslParameters.apply {
+                                    endpointIdentificationAlgorithm = "HTTPS"
+                                }
+                                ssl.startHandshake()
+                            }
+                        }
                     }
                     val elapsed = ((System.nanoTime() - start) / 1_000_000L)
                         .coerceIn(1L, 120000L)

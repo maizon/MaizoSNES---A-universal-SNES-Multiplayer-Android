@@ -155,7 +155,12 @@ class NetplaySessionTest {
             onStatus = { if (it.startsWith("Conectado")) connected.countDown() },
             onFinish = { stopped.countDown() },
             receiveAllowedByClient = true,
-            onReceiveRomOffer = { _, _, _ -> true },
+            onReceiveRomOffer = { name, hash, size ->
+                assertEquals(rom.name, name)
+                assertEquals(content.size, size)
+                assertEquals(64, hash.length)
+                true
+            },
             onReceiveRom = { name, bytes ->
                 receivedName = name
                 receivedBytes = bytes
@@ -327,4 +332,57 @@ class NetplaySessionTest {
             rom.delete()
         }
     }
+
+    @Test fun declinedRomOfferNeverDeliversBytesOrExecutesFrames() {
+        val rom = File.createTempFile("maizosnes-deny-rom", ".sfc")
+        rom.writeBytes(ByteArray(4096) { (it and 255).toByte() })
+        val privateAddress = NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .firstOrNull { it.isSiteLocalAddress }?.hostAddress
+        assumeTrue("Private interface required", privateAddress != null)
+        val port = availablePort()
+        val listening = CountDownLatch(1)
+        val finished = CountDownLatch(2)
+        val offered = CountDownLatch(1)
+        val deliveries = AtomicInteger()
+        val frames = AtomicInteger()
+        val messages = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val server = NetplaySession(
+            rom = rom, coreOptions = emptyMap(), localInput = { 0 },
+            prepare = { }, saveState = { ByteArray(96) },
+            loadState = { 0 }, step = { _, _ -> frames.incrementAndGet(); 0 },
+            stateHash = { 4L }, framePeriodNs = { 16666667L },
+            onStatus = { if (it.startsWith("Sala disponível")) listening.countDown() },
+            onFinish = { messages.add(it); finished.countDown() },
+            shareAllowedByHost = true
+        )
+        val client = NetplaySession(
+            rom = null, coreOptions = emptyMap(), localInput = { 0 },
+            prepare = { }, saveState = { null }, loadState = { 0 },
+            step = { _, _ -> frames.incrementAndGet(); 0 },
+            stateHash = { 4L }, framePeriodNs = { 16666667L },
+            onStatus = { }, onFinish = { messages.add(it); finished.countDown() },
+            receiveAllowedByClient = true,
+            onReceiveRomOffer = { _, _, _ -> offered.countDown(); false },
+            onReceiveRom = { _, _ -> deliveries.incrementAndGet(); true }
+        )
+        try {
+            server.host(port)
+            assertTrue(listening.await(5, TimeUnit.SECONDS))
+            client.join(privateAddress!!, port)
+            assertTrue("ROM offer was never shown", offered.await(8, TimeUnit.SECONDS))
+            assertTrue("Network workers did not stop", finished.await(8, TimeUnit.SECONDS))
+            assertEquals("Denied bytes must not be imported", 0, deliveries.get())
+            assertEquals("No frame may run after refusal", 0, frames.get())
+            assertTrue(messages.any { it.contains("rejeit", ignoreCase = true) ||
+                it.contains("recus", ignoreCase = true) })
+        } finally {
+            server.stop()
+            client.stop()
+            rom.delete()
+        }
+    }
+
 }

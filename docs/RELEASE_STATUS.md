@@ -31,3 +31,13 @@ com hash diferente no relay TLS, mantendo bloqueio de ROM no relay sem TLS.
 DEV 9090 ativa avançado por padrão e pode ser desligado separadamente do
 compartilhamento LAN. Adicionado teste JVM OnlineRomJoinPolicyTest; requer
 CI e teste real de dois aparelhos via relay TLS antes da versão estável.
+
+
+## Proteção extra de TLS (2026-10-19)
+
+Durante busca automática de servidores, anúncios relayTls=true recebem
+handshake SSL com verificação do certificado e hostname. Um servidor
+mentindo sobre TLS não deve aparecer como apto a receber ROM. Ao conectar
+a sessão repete a checagem TLS. Testes de protocolo também cobrem recusa
+pela parte cliente antes da transmissão de bytes. A compatibilidade entre
+celulares remotos reais ainda precisa ser demonstrada.
