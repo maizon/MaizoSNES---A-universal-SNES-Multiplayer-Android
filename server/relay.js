@@ -13,6 +13,7 @@ const tls = require("node:tls");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { attachWssRelay } = require("./wss-relay");
+const { createIceDirectory } = require("./ice-directory");
 
 function createRelayServer({
   httpPort = 8787, relayPort = 8788, bind = "0.0.0.0",
@@ -42,7 +43,11 @@ function createRelayServer({
     r.writeHead(code, { "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
   };
+  const getIce = createIceDirectory();
   const directory = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/api/ice") {
+      getIce(req, res); return;
+    }
     if (req.method !== "GET" || !["/api/rooms", "/health"].includes(req.url)) {
       header(res, 404); res.end(JSON.stringify({ error: "Not found" })); return;
     }
