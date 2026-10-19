@@ -149,9 +149,14 @@ internal class GekkoRollbackSession(
                         snapshot.size, 6, 1)) { "Falha ao abrir socket UDP nativo" }
                     val callbacks = object : RollbackCallbacks {
                         override fun save(): ByteArray = saveState() ?: error("Save state falhou")
-                        override fun load(bytes: ByteArray) = loadState(bytes) == 0
-                        override fun step(p1: Int, p2: Int, resimulation: Boolean) =
-                            this@GekkoRollbackSession.step(p1, p2) == 0
+                        override fun load(bytes: ByteArray): Boolean {
+                            NativeBridge.nativeSetRollbackReplaying(true)
+                            return loadState(bytes) == 0
+                        }
+                        override fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean {
+                            NativeBridge.nativeSetRollbackReplaying(resimulation)
+                            return this@GekkoRollbackSession.step(p1, p2) == 0
+                        }
                     }
                     val deadline = System.nanoTime() + 8_000_000_000L
                     var statTime = 0L
@@ -187,6 +192,7 @@ internal class GekkoRollbackSession(
                     else fallback = "Erro durante negociação UDP: " + e.message
                 }
             } finally {
+                runCatching { NativeBridge.nativeSetRollbackReplaying(false) }
                 runCatching { GekkoNative.nativeStop() }
                 socket = null
                 listener = null

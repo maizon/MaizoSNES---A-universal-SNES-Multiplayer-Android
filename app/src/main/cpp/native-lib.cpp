@@ -36,6 +36,7 @@ std::atomic<bool> g_paused{false};
 std::atomic<uint32_t> g_inputMask{0};
 std::atomic<uint32_t> g_player2InputMask{0};
 std::atomic<bool> g_netplayMode{false};
+std::atomic<bool> g_rollbackReplaying{false};
 std::atomic<bool> g_netplayCheatSetupAllowed{false};
 std::atomic<uint64_t> g_audioWrite{0};
 std::atomic<uint64_t> g_audioRead{0};
@@ -195,7 +196,7 @@ bool RETRO_CALLCONV environmentCallback(unsigned command, void* data) {
 }
 
 void audioPush(const int16_t* samples, size_t frames) {
-    if (!samples || frames == 0) return;
+    if (!samples || frames == 0 || g_rollbackReplaying.load(std::memory_order_relaxed)) return;
     const size_t count = frames * 2; // stereo frames -> interleaved int16 values.
     if (count > kAudioCapacity) return;
 
@@ -250,6 +251,7 @@ uint16_t convertXrgb8888(uint32_t pixel) {
 }
 
 void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned height, size_t pitch) {
+    if (g_rollbackReplaying.load(std::memory_order_relaxed)) return;
     if (!data || width == 0 || height == 0 || width > 1024 || height > 1024) return;
 
     if (g_gpuEnabled.load(std::memory_order_acquire)) {
@@ -559,6 +561,7 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetPlayer2Input(JNIEnv*, jobject, j
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jboolean enabled) {
     if (enabled == JNI_TRUE) {
+        g_rollbackReplaying.store(false, std::memory_order_release);
         g_netplayMode.store(true, std::memory_order_release);
         g_netplayCheatSetupAllowed.store(true, std::memory_order_release);
         stopFrameThread();
@@ -568,11 +571,18 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jb
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (g_gameLoaded.load(std::memory_order_acquire)) retro_cheat_reset();
     } else {
+        g_rollbackReplaying.store(false, std::memory_order_release);
         g_netplayCheatSetupAllowed.store(false, std::memory_order_release);
         stopFrameThread();
         g_netplayMode.store(false, std::memory_order_release);
         if (g_gameLoaded.load(std::memory_order_acquire)) startFrameThread();
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetRollbackReplaying(
+    JNIEnv*, jobject, jboolean value) {
+    g_rollbackReplaying.store(value == JNI_TRUE, std::memory_order_release);
 }
 
 extern "C" JNIEXPORT jint JNICALL

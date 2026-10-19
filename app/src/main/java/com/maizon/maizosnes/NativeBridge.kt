@@ -16,6 +16,8 @@ object NativeBridge {
     external fun nativeSetPlayer2Input(bits: Int)
     external fun nativeSetNetplayMode(enabled: Boolean)
     external fun nativeNetplayStep(player1: Int, player2: Int): Int
+    /** Mutes speculative rollback re-simulation; preserves stable audio/video normally. */
+    external fun nativeSetRollbackReplaying(enabled: Boolean)
     external fun nativeGetFramePeriodNs(): Long
     external fun nativeNetplayStateHash(): Long
     external fun nativeSetPaused(paused: Boolean)
