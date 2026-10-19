@@ -1,0 +1,112 @@
+name: Publish MaizoSNES ARMv7 32-bit Preview
+
+on:
+  push:
+    branches: [feature/armv7-32bit]
+    paths:
+      - 'release/PUBLISH_ARMV7'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: maizo-armv7-publication
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout exact preview source
+        uses: actions/checkout@v4
+      - name: JDK 17 (ARMv7 packaging)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v4
+      - name: Locate installed Android sdkmanager
+        id: sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -n "$SDKMANAGER"
+          echo "sdkmanager=$SDKMANAGER" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Android SDK and native toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in {1..100}; do printf 'y\n'; done > /tmp/maizo-licenses.txt
+          "${{ steps.sdk.outputs.sdkmanager }}" --licenses < /tmp/maizo-licenses.txt
+          "${{ steps.sdk.outputs.sdkmanager }}" --install "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264" "cmake;3.22.1"
+      - name: Smoke test real public HTTPS directory and TCP relay
+        run: node scripts/verify_public_relay.js
+      - name: Unit tests and build installable Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test server/relay.test.js
+          bash scripts/fetch_snes9x.sh
+          ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - name: Check APK and certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -F 'lib/armeabi-v7a/libnative-lib.so'
+          if unzip -l "$APK" | grep -Eq 'lib/(arm64-v8a|x86|x86_64)/'; then
+            echo "ERROR: non-ARMv7 library found in the 32-bit APK" >&2; exit 1
+          fi
+          unzip -p "$APK" lib/armeabi-v7a/libnative-lib.so >/tmp/maizosnes-armv7.so
+          "$ANDROID_HOME/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h /tmp/maizosnes-armv7.so | tee /tmp/elf-armv7.txt
+          grep -Eq 'Class:[[:space:]]*ELF32' /tmp/elf-armv7.txt
+          grep -Eq 'Machine:[[:space:]]*ARM' /tmp/elf-armv7.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -F "name='com.maizon.maizosnes.debug.armv7'"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK" | tee apk-sha256.txt
+      - name: Upload backup build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MaizoSNES-0.8.1-ARMv7-online-preview
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Publish GitHub prerelease if version not already present
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.8.1-armv7-preview.1
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; preserving it."
+            exit 0
+          fi
+          {
+            cat docs/ARMV7.md
+            echo
+            echo "---"
+            echo
+            echo "MaizoSNES experimental Android 32-bit ARMv7 preview with the same features and MZNP v4 as the ARM64 baseline."
+            echo "Relay traffic is plain TCP (not end-to-end encrypted); use only in trusted tests."
+            echo "Tested: real public HTTPS directory and TCP HOST/JOIN handshake in CI."
+            echo "Android-to-Android gameplay is still experimental and is NOT verified by these checks."
+            echo "This is a DEBUG-signed release candidate; certificate is generated in CI and may not match older APK installs. Production signing requires a persistent private keystore."
+            echo "No commercial game ROMs are included. Snes9x license restricts commercial use."
+          } > /tmp/maizo-armv7-release-notes.md
+          gh release create "$TAG" \
+            "app/build/outputs/apk/debug/app-debug.apk#MaizoSNES-v0.8.1-ARMv7-32bit-preview.apk" \
+            "apk-sha256.txt#MaizoSNES-v0.8.1-ARMv7-SHA256.txt" \
+            --target "$(git rev-parse HEAD)" \
+            --title "MaizoSNES v0.8.1 ARMv7 (32-bit) — Experimental Preview" \
+            --notes-file /tmp/maizo-armv7-release-notes.md \
+            --prerelease --latest=false
