@@ -171,6 +171,8 @@ internal fun MaizoEmulatorApp(
     localRomHashPrefix: String,
     hasLoadedRom: Boolean,
     paused: Boolean,
+    gameMenuOpen: Boolean,
+    onGameMenuChanged: (Boolean) -> Unit,
     settings: AppSettings,
     coreOptions: Map<String, String>,
     performanceText: String,
@@ -247,9 +249,10 @@ internal fun MaizoEmulatorApp(
     onSurfaceChanged: (Surface?) -> Unit,
     onGpuReady: (Boolean) -> Unit
 ) {
-    var showGameMenu by remember { mutableStateOf(false) }
     var editingControls by remember { mutableStateOf(false) }
-    BackHandler(enabled = screen == AppScreen.GAME) { onExitGame() }
+    BackHandler(enabled = screen == AppScreen.GAME) {
+        if (gameMenuOpen) onGameMenuChanged(false) else onExitGame()
+    }
 
     if (screen == AppScreen.GAME) {
         GameScreen(
@@ -262,13 +265,13 @@ internal fun MaizoEmulatorApp(
             onSettingsChanged = onSettingsChanged,
             onExit = onExitGame,
             onPause = onTogglePause,
-            onOpenMenu = { showGameMenu = true },
+            onOpenMenu = { onGameMenuChanged(true) },
             onSurfaceChanged = onSurfaceChanged,
             onGpuReady = onGpuReady,
             onInputChanged = onInputChanged
         )
-        if (showGameMenu) {
-            Dialog(onDismissRequest = { showGameMenu = false }) {
+        if (gameMenuOpen) {
+            Dialog(onDismissRequest = { onGameMenuChanged(false) }) {
                 Surface(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp),
                     shape = RoundedCornerShape(26.dp), color = Bg, tonalElevation = 12.dp
@@ -279,8 +282,12 @@ internal fun MaizoEmulatorApp(
                                 Text("MENU DO EMULADOR", color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                                 Text(currentRomName ?: "Jogo", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             }
-                            TextButton(onClick = { showGameMenu = false }) { Text("FECHAR") }
+                            TextButton(onClick = { onGameMenuChanged(false) }) { Text("FECHAR") }
                         }
+                        TextButton(onClick = {
+                            editingControls = !editingControls
+                            onGameMenuChanged(false)
+                        }) { Text(if (editingControls) "SALVAR CONTROLES" else "EDITAR CONTROLES") }
                         EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
                             onSelectTouchPreset, connectionMode, onConnectionModeChanged,
                             devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged)

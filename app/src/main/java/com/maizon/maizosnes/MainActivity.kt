@@ -53,6 +53,8 @@ class MainActivity : ComponentActivity() {
     private val appSettings = androidx.compose.runtime.mutableStateOf(AppSettings())
     private val coreSettings = androidx.compose.runtime.mutableStateMapOf<String, String>()
     private val paused = androidx.compose.runtime.mutableStateOf(false)
+    private val gameMenuOpen = androidx.compose.runtime.mutableStateOf(false)
+    private var pausedBeforeGameMenu = false
     private val pressedInputs = AtomicInteger(0)
     private val coverBitmaps = androidx.compose.runtime.mutableStateMapOf<String, Bitmap>()
     private var coverJob: Job? = null
@@ -179,6 +181,8 @@ class MainActivity : ComponentActivity() {
                     localRomHashPrefix = currentRomHashPrefix.value,
                     hasLoadedRom = hasLoadedRom,
                     paused = paused.value,
+                    gameMenuOpen = gameMenuOpen.value,
+                    onGameMenuChanged = ::setGameMenuOpen,
                     settings = appSettings.value,
                     coreOptions = coreSettings.toMap(),
                     performanceText = performanceText.value,
@@ -816,6 +820,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadRomFile(file: File) {
+        gameMenuOpen.value = false
         lifecycleScope.launch {
             userPaused = true
             syncPlaybackState()
@@ -1248,6 +1253,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exitGameplay() {
+        if (gameMenuOpen.value) setGameMenuOpen(false)
         netplaySession?.stop()
         userPaused = true
         paused.value = true
@@ -1262,6 +1268,22 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
         syncPlaybackState()
+    }
+
+    private fun setGameMenuOpen(open: Boolean) {
+        if (activeScreen.value != AppScreen.GAME || gameMenuOpen.value == open) return
+        gameMenuOpen.value = open
+        if (netplaySession == null) {
+            if (open) pausedBeforeGameMenu = userPaused
+            userPaused = if (open) true else pausedBeforeGameMenu
+            pressedInputs.set(0)
+            gamepadKeyMasks.clear()
+            gamepadAxisMasks.clear()
+            publishInputs()
+            syncPlaybackState()
+        } else if (open) {
+            statusMessage.value = "Menu online: o jogo não é pausado individualmente para evitar dessincronização."
+        }
     }
 
     private fun togglePause() {
@@ -1555,6 +1577,30 @@ class MainActivity : ComponentActivity() {
         }.sorted()
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val inGame = activeScreen.value == AppScreen.GAME
+        val isPad = event.deviceId in gamepadIds()
+        // START/MODE is a frontend hotkey, not a gameplay input. Consume UP too.
+        if (inGame && isPad && event.keyCode in setOf(
+                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_MODE, 188)) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+                setGameMenuOpen(!gameMenuOpen.value)
+            return true
+        }
+        // Never swallow navigation keys while a Compose screen or modal owns focus.
+        if (!inGame || gameMenuOpen.value) {
+            if (isPad && event.keyCode == KeyEvent.KEYCODE_BUTTON_B) {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+                    onBackPressedDispatcher.onBackPressed()
+                return true
+            }
+            if (isPad && event.keyCode == KeyEvent.KEYCODE_BUTTON_A) {
+                val confirm = KeyEvent(event.downTime, event.eventTime, event.action,
+                    KeyEvent.KEYCODE_DPAD_CENTER, event.repeatCount, event.metaState,
+                    event.deviceId, event.scanCode, event.flags, event.source)
+                return super.dispatchKeyEvent(confirm)
+            }
+            return super.dispatchKeyEvent(event)
+        }
         val bit = snesButtonForKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
             return super.dispatchKeyEvent(event)
