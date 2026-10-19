@@ -84,6 +84,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.composed
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.nativeKeyEvent
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -149,6 +155,40 @@ private val PanelRaised = Color(0xFF242D40)
 private val Accent = Color(0xFFAA96FF)
 private val Mint = Color(0xFF72E8C7)
 private val Muted = Color(0xFFBAC5D7)
+
+/** Visible directional-controller focus, without affecting touch/click actions. */
+private fun Modifier.padFocusRing(): Modifier = composed {
+    var hasFocus by remember { mutableStateOf(false) }
+    this.onFocusChanged { hasFocus = it.isFocused }
+        .border(if (hasFocus) 2.dp else 0.dp,
+            if (hasFocus) Mint else Color.Transparent, RoundedCornerShape(14.dp))
+}
+
+/** Compose Dialog is a separate Android window (not dispatched via Activity).
+ * Convert pad A to ENTER on that window and pad B to Back.
+ */
+private fun Modifier.dialogGamepadKeys(onBack: () -> Unit): Modifier = composed {
+    val view = LocalView.current
+    this.onPreviewKeyEvent { key ->
+        val raw = key.nativeKeyEvent
+        when (raw.keyCode) {
+            android.view.KeyEvent.KEYCODE_BUTTON_B -> {
+                if (raw.action == android.view.KeyEvent.ACTION_DOWN && raw.repeatCount == 0)
+                    onBack()
+                true
+            }
+            android.view.KeyEvent.KEYCODE_BUTTON_A -> {
+                val enter = android.view.KeyEvent(raw.downTime, raw.eventTime,
+                    raw.action, android.view.KeyEvent.KEYCODE_ENTER,
+                    raw.repeatCount, raw.metaState, raw.deviceId,
+                    raw.scanCode, raw.flags, raw.source)
+                view.dispatchKeyEvent(enter)
+                true
+            }
+            else -> false
+        }
+    }
+}
 
 @Composable
 internal fun MaizoTheme(content: @Composable () -> Unit) {
@@ -261,6 +301,7 @@ internal fun MaizoEmulatorApp(
     var editingControls by remember { mutableStateOf(false) }
     if (shareConsentVisible) {
         AlertDialog(onDismissRequest = { onShareConsent(false) },
+            modifier = Modifier.dialogGamepadKeys { onShareConsent(false) },
             title = { Text("Permissão de compartilhar ROM") },
             text = { Text("Confirme somente se a ROM é homebrew, domínio público ou você tem autorização de redistribuição. O compartilhamento é restrito à LAN privada.") },
             confirmButton = { TextButton(onClick = { onShareConsent(true) }) { Text("TENHO PERMISSÃO") } },
@@ -294,7 +335,8 @@ internal fun MaizoEmulatorApp(
             LaunchedEffect(gameMenuOpen) { menuFocus.requestFocus() }
             Dialog(onDismissRequest = { onGameMenuChanged(false) }) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp)
+                        .dialogGamepadKeys { onGameMenuChanged(false) },
                     shape = RoundedCornerShape(26.dp), color = Bg, tonalElevation = 12.dp
                 ) {
                     Column(Modifier.padding(16.dp)) {
@@ -374,6 +416,8 @@ internal fun MaizoEmulatorApp(
 
 @Composable
 private fun CreditsScreen(modifier: Modifier, onOpenInstagram: () -> Unit) {
+    val firstFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { firstFocus.requestFocus() }
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -389,6 +433,7 @@ private fun CreditsScreen(modifier: Modifier, onOpenInstagram: () -> Unit) {
                 Text("Criador e responsável pelo projeto MaizoSNES.",
                     color = Color.White, fontSize = 13.sp)
                 Button(onClick = onOpenInstagram,
+                    modifier = Modifier.focusRequester(firstFocus),
                     colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                     Text("INSTAGRAM • @maicon_nasciment0")
                 }
@@ -553,7 +598,8 @@ private fun LibraryScreen(
         LaunchedEffect(name) { detailFocus.requestFocus() }
         Dialog(onDismissRequest = { selectedRom = null }) {
             Surface(shape = RoundedCornerShape(24.dp), color = Panel,
-                modifier = Modifier.fillMaxWidth().heightIn(max = 670.dp)) {
+                modifier = Modifier.fillMaxWidth().heightIn(max = 670.dp)
+                    .dialogGamepadKeys { selectedRom = null }) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -598,6 +644,7 @@ private fun LibraryScreen(
     }
     confirmRemove?.let { name ->
         AlertDialog(onDismissRequest = { confirmRemove = null },
+            modifier = Modifier.dialogGamepadKeys { confirmRemove = null },
             title = { Text("Remover ROM?") },
             text = { Text("O arquivo será apagado da biblioteca local.") },
             confirmButton = { TextButton(onClick = {
@@ -608,6 +655,7 @@ private fun LibraryScreen(
     renameTarget?.let { name ->
         var editedName by remember(name) { mutableStateOf(File(name).nameWithoutExtension) }
         AlertDialog(onDismissRequest = { renameTarget = null },
+            modifier = Modifier.dialogGamepadKeys { renameTarget = null },
             title = { Text("Renomear ROM") },
             text = { TextField(editedName, { editedName = it }, label = { Text("Nome") }) },
             confirmButton = { TextButton(onClick = {
@@ -628,7 +676,7 @@ private fun RomCard(
     compact: Boolean = false
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        modifier = Modifier.fillMaxWidth().padFocusRing().clickable(onClick = onOpen),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Panel)
     ) {
@@ -732,6 +780,8 @@ private fun MultiplayerScreen(
     var remoteHost by remember(connectionMode) { mutableStateOf(savedConnectionHost) }
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
+    val firstModeFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { firstModeFocus.requestFocus() }
     LaunchedEffect(connectionMode) {
         if (connectionMode == NetworkMode.LAN_AUTO ||
             connectionMode == NetworkMode.AUTO) onScanLan()
@@ -765,9 +815,11 @@ private fun MultiplayerScreen(
                 NetworkMode.values().filter { choice ->
                     advancedNetwork || choice == NetworkMode.AUTO ||
                         choice == NetworkMode.LOCAL || choice == connectionMode
-                }.forEach { choice ->
+                }.forEachIndexed { index, choice ->
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable(enabled = !active) {
+                        modifier = Modifier.fillMaxWidth()
+                            .then(if (index == 0) Modifier.focusRequester(firstModeFocus) else Modifier)
+                            .padFocusRing().clickable(enabled = !active) {
                             onConnectionModeChanged(choice)
                         },
                         shape = RoundedCornerShape(12.dp),
@@ -1074,7 +1126,7 @@ private fun MultiplayerScreen(
                         localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
                     val cheatsAllowed = !room.cheats || onlineCheatsOptIn
                     Card(
-                        modifier = Modifier.fillMaxWidth().clickable(
+                        modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
                             enabled = !active && ready && hashCompatible && cheatsAllowed
                         ) {
                             onJoinRelay(room.id)
@@ -1973,6 +2025,8 @@ private fun EmulatorSettings(
     onDevShareChanged: (Boolean) -> Unit
 ) {
     var category by remember { mutableStateOf("Vídeo") }
+    val firstCategoryFocus = remember { FocusRequester() }
+    LaunchedEffect(inGame) { if (!inGame) firstCategoryFocus.requestFocus() }
     var devCode by remember { mutableStateOf("") }
     var devError by remember { mutableStateOf(false) }
     var confirmBackup by remember { mutableStateOf<String?>(null) }
@@ -1987,10 +2041,12 @@ private fun EmulatorSettings(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            categories.forEach { item ->
+            categories.forEachIndexed { index, item ->
                 androidx.compose.material3.FilterChip(
                     selected = item == category,
                     onClick = { category = item },
+                    modifier = if (index == 0) Modifier.focusRequester(firstCategoryFocus)
+                        else Modifier,
                     label = { Text(item, fontSize = 12.sp) }
                 )
             }
@@ -2359,7 +2415,7 @@ private fun EmulatorSettings(
 @Composable
 private fun ChoiceRow(title: String, description: String, selected: Boolean, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().padFocusRing().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = if (selected) Color(0xFF252447) else Panel),
         shape = RoundedCornerShape(14.dp)
     ) {
