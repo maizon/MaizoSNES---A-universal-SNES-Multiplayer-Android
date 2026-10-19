@@ -9,6 +9,8 @@ import java.net.Inet4Address
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.LockSupport
@@ -124,9 +126,10 @@ internal class NetplaySession(
     /**
      * Outbound TCP relay transport. Both endpoints connect to the same public
      * server; no inbound ports on either phone, so NAT/CGNAT works. The relay
-     * sends READY before the MZNP v4 handshake, including core option sync.
+     * sends READY before the MZNP v6 handshake, including core option sync.
      */
-    fun hostViaRelay(serverHost: String, relayPort: Int, roomId: String, title: String) = launch {
+    fun hostViaRelay(serverHost: String, relayPort: Int, roomId: String,
+        title: String, relayTls: Boolean = false) = launch {
         require(rom?.isFile == true) { "O anfitrião precisa abrir uma ROM." }
         val safeTitle = android.util.Base64.encodeToString(
             title.take(75).toByteArray(Charsets.UTF_8),
@@ -136,30 +139,49 @@ internal class NetplaySession(
             .joinToString("") { "%02x".format(it) }
         val cheats = if (allowOnlineCheats && hostCheatCodes.isNotEmpty()) "1" else "0"
         relayConnect(serverHost, relayPort,
-            "HOST $roomId $safeTitle $fingerprint $cheats", true, roomId)
+            "HOST $roomId $safeTitle $fingerprint $cheats", true, roomId, relayTls)
     }
 
-    fun joinViaRelay(serverHost: String, relayPort: Int, roomId: String) = launch {
+    fun joinViaRelay(serverHost: String, relayPort: Int, roomId: String,
+        relayTls: Boolean = false) = launch {
         require(rom?.isFile == true || receiveAllowedByClient) {
             "Abra a mesma ROM para entrar na sala."
         }
-        relayConnect(serverHost, relayPort, "JOIN $roomId", false, roomId)
+        relayConnect(serverHost, relayPort, "JOIN $roomId", false, roomId, relayTls)
     }
 
     private fun relayConnect(
         serverHost: String, relayPort: Int, hello: String,
-        hosting: Boolean, roomId: String
+        hosting: Boolean, roomId: String, relayTls: Boolean
     ) {
         require(serverHost.isNotBlank() && serverHost.length <= 253 &&
             relayPort in 1..65535) { "Servidor ou porta inválida." }
         require(roomId.matches(Regex("[a-f0-9]{12,24}"))) { "Código de sala inválido." }
         prepare(true)
-        Socket().use { connection ->
+        // Authenticate TLS against the Android trust store AND server hostname.
+        // A directory flag alone never makes an unencrypted socket "secure".
+        val plain = Socket()
+        val connection: Socket = try {
+            plain.connect(InetSocketAddress(serverHost, relayPort), 10000)
+            plain.soTimeout = 10000
+            if (relayTls) {
+                val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory)
+                    .createSocket(plain, serverHost, relayPort, true) as SSLSocket
+                ssl.sslParameters = ssl.sslParameters.apply {
+                    endpointIdentificationAlgorithm = "HTTPS"
+                }
+                ssl.startHandshake()
+                ssl
+            } else plain
+        } catch (error: Exception) {
+            runCatching { plain.close() }
+            throw error
+        }
+        connection.use {
             socket = connection
             connection.tcpNoDelay = true
             onStatus(if (hosting) "Criando sala $roomId no servidor…" else
                 "Entrando na sala $roomId…")
-            connection.connect(InetSocketAddress(serverHost, relayPort), 10000)
             connection.soTimeout = if (hosting) 310000 else 20000
             connection.getOutputStream().write((hello + "\n").toByteArray(Charsets.UTF_8))
             connection.getOutputStream().flush()
@@ -178,7 +200,8 @@ internal class NetplaySession(
             }
             connection.soTimeout = 20000
             onStatus("Túnel TCP estabelecido. Sincronizando emuladores…")
-            runSession(connection, host = hosting)
+            runSession(connection, host = hosting,
+                protectedTransport = relayTls && connection is SSLSocket)
         }
     }
 
@@ -298,7 +321,9 @@ internal class NetplaySession(
                     char in 'A'..'F' || char in "-:+,.; "
             }
 
-    private fun runSession(connection: Socket, host: Boolean) {
+    private fun runSession(
+        connection: Socket, host: Boolean, protectedTransport: Boolean = false
+    ) {
         connection.tcpNoDelay = true
         connection.keepAlive = true
         runCatching { connection.trafficClass = 0x10 } // IPTOS_LOWDELAY best-effort
@@ -342,12 +367,12 @@ internal class NetplaySession(
                 connection.inetAddress.isSiteLocalAddress &&
                 connection.localAddress is Inet4Address &&
                 connection.localAddress.isSiteLocalAddress
-            val canTransfer = !matches && privatePeer &&
+            val canTransfer = !matches && (privatePeer || protectedTransport) &&
                 shareAllowedByHost && clientReceives
             output.writeByte(if (matches) READY else if (canTransfer) TRANSFER else DENIED)
             output.flush()
             require(matches || canTransfer) {
-                "ROM diferente. Transferência bloqueada: requer consentimento dos dois e rede privada."
+                "ROM diferente. Transferência requer autorização bilateral e LAN privada ou relay TLS."
             }
             if (canTransfer) {
                 onStatus("Enviando ROM com permissão de redistribuição…")
@@ -416,9 +441,10 @@ internal class NetplaySession(
                 }
                 TRANSFER -> {
                     require(receiveAllowedByClient) { "Recebimento não autorizado." }
-                    require(connection.inetAddress.isSiteLocalAddress &&
-                        connection.localAddress.isSiteLocalAddress) {
-                        "Transferência de ROM somente em rede privada."
+                    require(protectedTransport ||
+                        (connection.inetAddress.isSiteLocalAddress &&
+                         connection.localAddress.isSiteLocalAddress)) {
+                        "Transferência de ROM somente em LAN privada ou relay TLS."
                     }
                     onStatus("Recebendo ROM autorizada do host…")
                     connection.soTimeout = 90000
