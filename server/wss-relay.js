@@ -43,14 +43,22 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
     socket.setNoDelay(true);
     socket.setTimeout(5 * 60 * 1000, () => socket.destroy());
     const peer = { socket, partner: null, roomId: null, started: false, pending: Buffer.alloc(0) };
-    const send = (other, payload, opcode = 2) => {
+    const send = (other, payload, opcode = 2, source = null) => {
       if (other.socket.destroyed) return;
-      // Never allow unlimited buffering of an upload into a slow or dead peer.
+      // Backpressure is essential for a 64 MiB ROM: the sender may outrun a
+      // mobile peer by orders of magnitude. Pause the origin until drain
+      // rather than exhausting relay memory and killing a valid session.
       if (other.socket.writableLength > maxBuffered) {
         other.socket.destroy();
         return;
       }
-      other.socket.write(frame(opcode, payload));
+      const writable = other.socket.write(frame(opcode, payload));
+      if (!writable && source && !source.socket.destroyed) {
+        source.socket.pause();
+        other.socket.once("drain", () => {
+          if (!source.socket.destroyed) source.socket.resume();
+        });
+      }
     };
     socket.on("close", () => {
       sockets.delete(socket);
@@ -108,7 +116,7 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
         socket.destroy(); return;
       }
       if (!peer.partner) { socket.destroy(); return; }
-      send(peer.partner, payload);
+      send(peer.partner, payload, 2, peer);
     }
     function consume(chunk) {
       peer.pending = Buffer.concat([peer.pending, chunk]);
