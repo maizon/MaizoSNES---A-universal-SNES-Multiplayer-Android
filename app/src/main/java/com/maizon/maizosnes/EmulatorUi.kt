@@ -1255,7 +1255,7 @@ private fun MultiplayerScreen(
                 ToggleSettingRow(
                     "Compartilhar minha ROM autorizada",
                     "ON por padrão; o host confirma autorização por sessão. " +
-                        "Na Internet requer DEV 9090 e relay TLS.",
+                        "Na Internet requer relay HTTPS/WSS autenticado.",
                     shareRomAllowed,
                     { if (!active) onShareRomAllowedChanged(it) }
                 )

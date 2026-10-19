@@ -155,3 +155,19 @@ host/client mismatch when different builds are installed, cross-ABI snapshots,
 competitive frame pacing, rollback audio smoothness, and multi-minute
 determinism. This transport is not authenticated/encrypted and should be used
 on trusted LAN/VPN only; web-based room sharing remains encrypted HTTPS/WSS.
+
+
+## Auditoria de transporte e compartilhamento (outubro 2026)
+
+O GekkoNet oferece um adaptador de transporte com `GekkoNetAdapter.send_data`,
+`receive_data` e `free_data`, visto no header oficial. Porém **o app atual
+não contém WebRTC DataChannel nem sinalização SDP/ICE real**: WSS sobre
+Railway é TCP confiável e não simula UDP/WebRTC. Sem biblioteca WebRTC Android,
+sinalização ICE e TURN disponível, a solução sem custo garantido é manter
+GekkoNet UDP para LAN/IP direto e Lockstep TCP no WSS online. Não afirmar
+rollback nas salas Railway. Não pressupor gratuidade de um provedor de relay.
+
+O compartilhamento de arquivos ROM que o usuário pode redistribuir não requer
+código DEV 9090. Host mantém confirmação de autorização por sessão e cliente
+mantém confirmação individual antes de receber bytes. HTTPS/WSS autenticado
+é exigido para compartilhamento entre redes.

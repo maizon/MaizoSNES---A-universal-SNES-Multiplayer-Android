@@ -184,7 +184,7 @@ class MainActivity : ComponentActivity() {
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
-        devShareEnabled.value = prefs.getBoolean("dev_share_advanced", true) && devUnlocked.value
+        devShareEnabled.value = prefs.getBoolean("dev_share_advanced", true)
         shareRomAllowed.value = prefs.getBoolean("share_rom_enabled", true)
         receiveRomAllowed.value = prefs.getBoolean("receive_rom_enabled", true)
         runCatching {
@@ -2016,7 +2016,7 @@ class MainActivity : ComponentActivity() {
                 }
             },
             shareAllowedByHost = hostShareThisSession &&
-                (relayRoomId == null || ((relayTls || wssEndpoint != null) && devShareEnabled.value)),
+                (relayRoomId == null || (relayTls || wssEndpoint != null)),
             receiveAllowedByClient = receiveRomAllowed.value && host != null,
             onReceiveRom = ::installReceivedRom,
             onReceiveRomOffer = ::askIncomingRomApproval,

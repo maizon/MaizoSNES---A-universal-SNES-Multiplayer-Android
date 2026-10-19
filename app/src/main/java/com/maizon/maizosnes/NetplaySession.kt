@@ -84,7 +84,8 @@ internal class NetplaySession(
     @Volatile private var rollback: GekkoRollbackSession? = null
 
     private fun tryRollback(host: String?, port: Int): Boolean {
-        if (netcodeMode != NetcodeMode.ROLLBACK || rom?.isFile != true ||
+        if (netcodeMode != NetcodeMode.ROLLBACK ||
+            (rom?.isFile != true && !receiveAllowedByClient) ||
             hostCheatCodes.isNotEmpty()) return false
         if (port !in 1024..65534) {
             onStatus("Porta sem UDP disponível; Lockstep TCP será usado.")

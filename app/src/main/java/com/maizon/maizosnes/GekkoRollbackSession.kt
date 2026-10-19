@@ -18,7 +18,7 @@ import java.util.concurrent.locks.LockSupport
  * Failure before the first gameplay frame returns to original MZNP lockstep.
  */
 internal class GekkoRollbackSession(
-    private val rom: File,
+    private val rom: File?,
     private val options: Map<String, String>,
     private val localInput: () -> Int,
     private val prepare: (Boolean) -> Unit,
@@ -48,6 +48,7 @@ internal class GekkoRollbackSession(
     }
     private fun hash(): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256")
+        if (rom == null) return ByteArray(32)
         rom.inputStream().buffered().use { stream ->
             val buffer = ByteArray(16384)
             while (true) {
@@ -80,7 +81,8 @@ internal class GekkoRollbackSession(
                 val benchmark = RollbackBenchmark(snapshot?.size ?: 0,
                     (clockB - clockA) / 1e6, (clockC - clockB) / 1e6,
                     udpOK && restoreOk)
-                val rejection = RollbackFeasibility.rejection(benchmark)
+                val rejection = if (rom == null) "Cliente sem ROM: transferir no Lockstep"
+                    else RollbackFeasibility.rejection(benchmark)
                 onStatus(if (rejection == null) "GekkoNet: testando UDP e save/load."
                     else "Rollback não viável: " + rejection + ". Preparando Lockstep.")
                 val control = if (host == null) {
@@ -91,7 +93,7 @@ internal class GekkoRollbackSession(
                         // the default (AUTO/LAN_AUTO both discover this room).
                         val fp = hash().take(8).joinToString("") { "%02x".format(it) }
                         announcement = LanDiscovery.announce(
-                            port, rom.nameWithoutExtension, fp, false)
+                            port, rom?.nameWithoutExtension ?: "SNES", fp, false)
                         try {
                             onStatus("Sala LAN disponível: Gekko UDP negociado na porta " + port)
                             server.accept()
@@ -212,7 +214,7 @@ internal class GekkoRollbackSession(
                 runCatching { announcement?.close() }
                 announcement = null
                 if (!stopped.get() && fallback != null && !started) {
-                    if (host != null) runCatching { Thread.sleep(8500) }
+                    if (host != null) runCatching { Thread.sleep(1000) }
                     onFallback(fallback!!)
                 } else {
                     prepare(false)
