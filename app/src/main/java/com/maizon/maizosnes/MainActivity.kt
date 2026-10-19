@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private val performanceText = androidx.compose.runtime.mutableStateOf("Aguardando métricas…")
     private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.AUTO)
     private val netplayLatencyMode = androidx.compose.runtime.mutableStateOf(NetplayLatencyMode.BALANCED)
+    private val netcodeMode = androidx.compose.runtime.mutableStateOf(NetcodeMode.ROLLBACK)
     private val savedHost = androidx.compose.runtime.mutableStateOf("")
     private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
     private val relayAddress = androidx.compose.runtime.mutableStateOf("")
@@ -177,6 +178,9 @@ class MainActivity : ComponentActivity() {
             NetplayLatencyMode.valueOf(prefs.getString("netplay_latency_mode",
                 NetplayLatencyMode.BALANCED.name) ?: NetplayLatencyMode.BALANCED.name)
         }.getOrDefault(NetplayLatencyMode.BALANCED)
+        netcodeMode.value = runCatching {
+            NetcodeMode.valueOf(prefs.getString("netcode_mode", NetcodeMode.ROLLBACK.name)!!)
+        }.getOrDefault(NetcodeMode.ROLLBACK)
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
@@ -219,6 +223,8 @@ class MainActivity : ComponentActivity() {
                     onConnectionModeChanged = ::changeConnectionMode,
                     netplayLatencyMode = netplayLatencyMode.value,
                     onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
+                    netcodeMode = netcodeMode.value,
+                    onNetcodeModeChanged = ::changeNetcodeMode,
                     savedConnectionHost = savedHost.value,
                     savedConnectionPort = savedPort.value,
                     onSaveConnectionTarget = ::saveConnectionTarget,
@@ -363,7 +369,10 @@ class MainActivity : ComponentActivity() {
                             "Vídeo %.2f ms • Áudio %d quadros", fps, nominal,
                         emuMs, videoMs, counters[5])
                     performanceText.value = if (network == null) base else base +
-                        String.format(java.util.Locale.US,
+                        if (network.rollback) String.format(java.util.Locale.US,
+                            "\nRollback • RTT %.0f ms • jitter %.1f ms • %d correções",
+                            network.sampledRttMs, network.jitterMs, network.rollbackCount)
+                        else String.format(java.util.Locale.US,
                             "\nPeer espera %.1f / pico %.1f ms • %d travamentos/s" +
                                 " • buffer %d quadros",
                             network.peerWaitMs, network.maxPeerWaitMs,
@@ -379,6 +388,16 @@ class MainActivity : ComponentActivity() {
         val prefix = "network_" + connectionMode.value.name + "_"
         savedHost.value = prefs.getString(prefix + "host", "") ?: ""
         savedPort.value = prefs.getInt(prefix + "port", 55435).coerceIn(1024, 65535)
+    }
+
+    private fun changeNetcodeMode(next: NetcodeMode) {
+        if (netplaySession != null) {
+            lanStatus.value = "Encerre a sessão antes de trocar motor de rede."
+            return
+        }
+        netcodeMode.value = next
+        prefs.edit().putString("netcode_mode", next.name).apply()
+        lanStatus.value = next.label
     }
 
     private fun changeNetplayLatencyMode(next: NetplayLatencyMode) {
@@ -1975,17 +1994,24 @@ class MainActivity : ComponentActivity() {
                 }
             },
             mode = connectionMode.value,
+            netcodeMode = netcodeMode.value,
             latencyMode = netplayLatencyMode.value,
             onMetrics = { metrics ->
                 runOnUiThread {
                     if (netplaySession === session) {
                         lastNetworkMetrics.value = metrics
-                        lanStatus.value = String.format(java.util.Locale.US,
+                        lanStatus.value = if (metrics.rollback)
+                            String.format(java.util.Locale.US,
+                                "GekkoNet • quadro %d • RTT %.0f ms • jitter %.1f ms • " +
+                                    "rollbacks %d • atraso %d quadros",
+                                metrics.frame, metrics.sampledRttMs, metrics.jitterMs,
+                                metrics.rollbackCount, metrics.inputDelayFrames)
+                        else String.format(java.util.Locale.US,
                             "Quadro %d • espera peer %.1f ms (pico %.1f ms) • " +
                                 "%.1f FPS • atrasos %d/s • buffer %d quadros",
-                            metrics.frame, metrics.peerWaitMs,
-                            metrics.maxPeerWaitMs, metrics.effectiveFps,
-                            metrics.stalledFrames, metrics.inputDelayFrames)
+                            metrics.frame, metrics.peerWaitMs, metrics.maxPeerWaitMs,
+                            metrics.effectiveFps, metrics.stalledFrames,
+                            metrics.inputDelayFrames)
                     }
                 }
             },
