@@ -67,3 +67,13 @@ and UDP binding are viability gates. Manual TCP is preserved; WSS relay
 continues to use Lockstep (not falsely labeled UDP rollback). CI validation
 and real device test of two simultaneous players are required before any
 production readiness claim.
+
+
+### ROM sharing e métricas (19/10/2026)
+
+Eliminado gate do PIN DEV para compartilhar ROMs de redistribuição autorizada
+na LAN e HTTPS/WSS, preservando confirmação host por sessão e aceite client.
+Transferência reporta progresso em chunks, com timeout longo próprio e hash.
+Novo debug dialog disponível em Multiplayer, Ajustes e menu no jogo; exibe
+motor REAL, transporte REAL, RTT min/média/máx, jitter, correções/s, delay,
+perda N/D e desyncs. Sem WebRTC inexistente/servidor Fly.io fictício.

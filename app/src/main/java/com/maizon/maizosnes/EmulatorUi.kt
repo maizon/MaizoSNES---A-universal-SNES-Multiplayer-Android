@@ -2418,12 +2418,12 @@ private fun EmulatorSettings(
                             "Compartilhamento geral (homebrew e comercial autorizado)",
                             "Libera a opção avançada de enviar qualquer arquivo ROM " +
                                 "cuja redistribuição seja autorizada pelo titular. " +
-                                "O código 9090 não autoriza copiar jogos comerciais " +
+                                "O código DEV não autoriza copiar jogos comerciais " +
                                 "protegidos; ambas as pessoas precisam concordar.",
                             devShareEnabled,
                             onDevShareChanged
                         )
-                        Text("DEV 9090: compartilhamento avançado ligado inicialmente, " +
+                        Text("Compartilhamento autorizado funciona sem código 9090; " +
                             "mas pode ser desativado. A Internet exige relay TLS " +
                             "e consentimento por sessão. O relay pode ler o tráfego.",
                             color = Color(0xFFFFC47E), fontSize = 11.sp)

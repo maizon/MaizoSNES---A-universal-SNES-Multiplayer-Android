@@ -171,3 +171,14 @@ O compartilhamento de arquivos ROM que o usuário pode redistribuir não requer
 código DEV 9090. Host mantém confirmação de autorização por sessão e cliente
 mantém confirmação individual antes de receber bytes. HTTPS/WSS autenticado
 é exigido para compartilhamento entre redes.
+
+
+### Fluxo de ROM em rede (telemetria, 19/10/2026)
+
+A leitura/escrita de ROM usa chunks de 32 KiB, status de 512 KiB com percentual
+visível, limites de 64 MiB, timeout de aprovação independente (90s) e timeout
+de transferência de 180s. O host somente transmite bytes após o aceite remoto;
+o cliente confere SHA-256 total antes de instalar ou executar. A UI atualiza
+'Enviando/Recebendo ROM: N%' e 'Hash válido, instalando'. A confirmação de
+direitos do host e o consentimento do cliente permanecem exigidos; o código
+DEV 9090 não é requisito para transferência sobre HTTPS/WSS autenticado.

@@ -468,12 +468,26 @@ internal class NetplaySession(
                 require(MessageDigest.isEqual(digest(bytes), ownRom)) {
                     "Arquivo foi alterado durante o envio."
                 }
+                // 75-second consent UI + transfer of up to 64 MiB must
+                // have separate deadlines (90 seconds combined can hang).
                 connection.soTimeout = 90000
                 output.writeInt(bytes.size)
                 output.flush()
                 // Do not transmit one ROM byte until the client has approved the offer.
                 require(input.readBoolean()) { "O cliente rejeitou a ROM." }
-                output.write(bytes)
+                connection.soTimeout = 180000
+                val chunks = 32 * 1024
+                var sent = 0
+                while (sent < bytes.size) {
+                    val count = minOf(chunks, bytes.size - sent)
+                    output.write(bytes, sent, count)
+                    sent += count
+                    if (sent % (512 * 1024) < chunks || sent == bytes.size) {
+                        output.flush()
+                        onStatus("Enviando ROM: " + (sent * 100L / bytes.size) + "% (" +
+                            sent / 1024 + " / " + bytes.size / 1024 + " KiB)")
+                    }
+                }
                 output.flush()
                 require(input.readUnsignedByte() == 1) {
                     "O cliente recusou ou não conseguiu importar a ROM."
@@ -543,11 +557,23 @@ internal class NetplaySession(
                     output.writeBoolean(agreed)
                     output.flush()
                     require(agreed) { "Transferência da ROM recusada pelo cliente." }
+                    connection.soTimeout = 180000
                     val bytes = ByteArray(size)
-                    input.readFully(bytes)
+                    var received = 0
+                    while (received < size) {
+                        val chunk = minOf(32 * 1024, size - received)
+                        input.readFully(bytes, received, chunk)
+                        received += chunk
+                        if (received % (512 * 1024) < chunk || received == size) {
+                            onStatus("Recebendo ROM: " + (received * 100L / size) + "% (" +
+                                received / 1024 + " / " + size / 1024 + " KiB)")
+                        }
+                    }
+                    onStatus("Transferência completa. Verificando SHA-256 integral…")
                     require(MessageDigest.isEqual(digest(bytes), hostRom)) {
                         "Verificação SHA-256 da ROM transferida falhou."
                     }
+                    onStatus("Hash válido. Instalando e inicializando Snes9x…")
                     val accepted = runCatching { onReceiveRom(hostName, bytes) }.getOrDefault(false)
                     output.writeByte(if (accepted) 1 else 0)
                     output.flush()
@@ -560,7 +586,7 @@ internal class NetplaySession(
         }
 
         negotiateOnlineCheats(input, output, host)
-        onStatus("ROM, opções e cheats conferidos. Sincronizando estado inicial…")
+        onStatus("ROM e SHA-256 conferidos. Configurando jogo e sincronizando estado inicial…")
         if (host) {
             val state = saveState() ?: error("Não foi possível criar o estado inicial.")
             require(state.size in 29..MAX_STATE) { "Estado inicial inválido." }
