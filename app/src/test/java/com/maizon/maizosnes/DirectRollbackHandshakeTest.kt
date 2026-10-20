@@ -190,4 +190,63 @@ class DirectRollbackHandshakeTest {
             rom.delete()
         }
     }
+    @Test fun wrongLocalRomIsReplacedByAuthorizedHostRomBeforeRollback() {
+        val address = privateAddress()
+        assumeTrue("Private IPv4 required", address != null)
+        val source = File.createTempFile("maizo-host-different-", ".sfc")
+        val wrong = File.createTempFile("maizo-guest-different-", ".sfc")
+        val original = ByteArray(7169) { (it % 223).toByte() }
+        source.writeBytes(original)
+        wrong.writeBytes(ByteArray(8192) { 11 })
+        val a = FakeUdp()
+        val b = FakeUdp()
+        val ready = CountDownLatch(1)
+        val imported = CountDownLatch(1)
+        val connected = CountDownLatch(2)
+        val stopped = CountDownLatch(2)
+        val tcpPort = port()
+        fun peer(host: Boolean): NetplaySession = NetplaySession(
+            rom = if (host) source else wrong, coreOptions = emptyMap(),
+            localInput = { if (host) 1 else 2 }, prepare = {},
+            saveState = { ByteArray(96) { 9 } }, loadState = { 0 },
+            step = { _, _ -> 0 }, stateHash = { 41L },
+            framePeriodNs = { 16_666_667L },
+            onStatus = { status ->
+                if (host && status.startsWith("Sala disponível")) ready.countDown()
+                if (status.contains("Conectado como") &&
+                    status.contains("Rollback")) connected.countDown()
+            }, onFinish = { stopped.countDown() },
+            netcodeMode = NetcodeMode.ROLLBACK,
+            shareAllowedByHost = host,
+            receiveAllowedByClient = !host,
+            onReceiveRomOffer = { _, digest, bytes ->
+                digest.length == 64 && bytes == original.size
+            },
+            onReceiveRom = { _, bytes ->
+                if (bytes.contentEquals(original) && b.starts.get() == 0) {
+                    imported.countDown()
+                    true
+                } else false
+            },
+            directDriver = if (host) a else b
+        )
+        val host = peer(true)
+        val guest = peer(false)
+        try {
+            host.host(tcpPort)
+            assertTrue(ready.await(6, TimeUnit.SECONDS))
+            guest.join(address!!, tcpPort)
+            assertTrue("Wrong ROM should be replaced before starting UDP",
+                imported.await(9, TimeUnit.SECONDS))
+            assertTrue("Both peers should connect using new authorized ROM",
+                connected.await(10, TimeUnit.SECONDS))
+            assertEquals(1, a.starts.get())
+            assertEquals(1, b.starts.get())
+        } finally {
+            host.stop(); guest.stop()
+            assertTrue(stopped.await(5, TimeUnit.SECONDS))
+            source.delete(); wrong.delete()
+        }
+    }
+
 }
