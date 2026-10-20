@@ -599,7 +599,10 @@ internal class NetplaySession(
                     peerConnected = true
                     break
                 }
-                LockSupport.parkNanos(2_000_000L)
+                // Never spin at 500 Gekko ticks/sec while the peer connects:
+                // it can advance hundreds of speculative frames prematurely.
+                LockSupport.parkNanos(framePeriodNs().coerceIn(
+                    10_000_000L, 20_000_000L))
             }
             output.writeBoolean(peerConnected)
             output.flush()
