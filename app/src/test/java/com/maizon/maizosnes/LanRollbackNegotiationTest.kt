@@ -118,7 +118,7 @@ class LanRollbackNegotiationTest {
                 gotRom.await(12, TimeUnit.SECONDS))
             assertTrue("Both peers must safely choose TCP after UDP refusal",
                 joined.await(12, TimeUnit.SECONDS))
-            assertTrue(statuses.any { it.contains("Rollback LAN não disponível") })
+            assertTrue(statuses.any { it.contains("Rollback UDP não viável") })
         } finally {
             host.stop(); guest.stop()
             assertTrue(finished.await(6, TimeUnit.SECONDS))
