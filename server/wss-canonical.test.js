@@ -44,7 +44,7 @@ async function sendRawFrame(port, extendedBits, payloadSize) {
     const closed = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Noncanonical frame was accepted")), 3000);
       socket.once("close", () => { clearTimeout(timer); resolve(); });
-      socket.once("error", err => { clearTimeout(timer); reject(err); });
+      socket.once("error", err => { clearTimeout(timer); if (err.code === "ECONNRESET") resolve(); else reject(err); });
     });
     socket.write(Buffer.concat([header, mask, body]));
     await closed;
