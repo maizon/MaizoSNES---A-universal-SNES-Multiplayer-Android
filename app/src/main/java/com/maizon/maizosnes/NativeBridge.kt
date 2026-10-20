@@ -18,6 +18,8 @@ object NativeBridge {
     external fun nativeNetplayStep(player1: Int, player2: Int): Int
     /** Mutes speculative rollback re-simulation; preserves stable audio/video normally. */
     external fun nativeSetRollbackReplaying(enabled: Boolean)
+    /** 1: show all; 2: skip half video presents without skipping SNES frames. */
+    external fun nativeSetNetplayPresentationStride(stride: Int)
     external fun nativeGetFramePeriodNs(): Long
     external fun nativeNetplayStateHash(): Long
     external fun nativeSetPaused(paused: Boolean)

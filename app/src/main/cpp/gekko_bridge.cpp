@@ -19,6 +19,7 @@ unsigned int stateCapacity = 0;
 int64_t rollbackCount = 0, advances = 0;
 bool connected = false;
 bool aborted = false;
+std::atomic<bool> requestedLimitedSaving{false};
 JavaVM* rtcVm = nullptr;
 jobject rtcPort = nullptr; // global ref, only while active
 std::vector<GekkoNetResult*> rtcResults;
@@ -127,6 +128,12 @@ bool javaException(JNIEnv* env) {
 }
 } // namespace
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_GekkoNative_nativeConfigureLimitedSaving(
+    JNIEnv*, jobject, jboolean enabled) {
+    requestedLimitedSaving.store(enabled == JNI_TRUE);
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_maizon_maizosnes_GekkoNative_nativeApiVersion(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(sessionLock);
@@ -157,8 +164,12 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStart(
     config.input_size = sizeof(uint32_t);
     config.state_size = static_cast<unsigned int>(size);
     config.max_input_prediction_window = static_cast<unsigned char>(prediction);
-    config.desync_detection = true;
-    config.limited_saving = false;
+    // The pinned GekkoNet release only guarantees health checks with
+    // full saving; Limited Saving is chosen only for expensive Snes9x
+    // serialization before creating a session.
+    const bool limited = requestedLimitedSaving.exchange(false);
+    config.desync_detection = !limited;
+    config.limited_saving = limited;
     gekko_start(session, &config);
     GekkoNetAdapter* adapter = rtcPort ? &rtcAdapter :
         gekko_default_adapter(static_cast<unsigned short>(localPort));

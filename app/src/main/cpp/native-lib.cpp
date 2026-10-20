@@ -37,6 +37,8 @@ std::atomic<uint32_t> g_inputMask{0};
 std::atomic<uint32_t> g_player2InputMask{0};
 std::atomic<bool> g_netplayMode{false};
 std::atomic<bool> g_rollbackReplaying{false};
+std::atomic<int> g_netplayRenderStride{1};
+std::atomic<unsigned int> g_netplayVideoCount{0};
 std::atomic<bool> g_netplayCheatSetupAllowed{false};
 std::atomic<uint64_t> g_audioWrite{0};
 std::atomic<uint64_t> g_audioRead{0};
@@ -252,6 +254,12 @@ uint16_t convertXrgb8888(uint32_t pixel) {
 
 void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned height, size_t pitch) {
     if (g_rollbackReplaying.load(std::memory_order_relaxed)) return;
+    // Network stalls: skip only presentation, NEVER SNES emulation,
+    // sound, input, save states or checksum.
+    const int stride = g_netplayRenderStride.load(std::memory_order_relaxed);
+    if (g_netplayMode.load(std::memory_order_relaxed) && stride > 1 &&
+        g_netplayVideoCount.fetch_add(1, std::memory_order_relaxed) %
+            static_cast<unsigned int>(stride) != 0) return;
     if (!data || width == 0 || height == 0 || width > 1024 || height > 1024) return;
 
     if (g_gpuEnabled.load(std::memory_order_acquire)) {
@@ -575,8 +583,15 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jb
         g_netplayCheatSetupAllowed.store(false, std::memory_order_release);
         stopFrameThread();
         g_netplayMode.store(false, std::memory_order_release);
+        g_netplayRenderStride.store(1, std::memory_order_release);
         if (g_gameLoaded.load(std::memory_order_acquire)) startFrameThread();
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayPresentationStride(
+    JNIEnv*, jobject, jint stride) {
+    g_netplayRenderStride.store(stride == 2 ? 2 : 1, std::memory_order_release);
 }
 
 extern "C" JNIEXPORT void JNICALL

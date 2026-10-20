@@ -4,6 +4,8 @@ package com.maizon.maizosnes
 internal object GekkoNative {
     init { System.loadLibrary("gekko_bridge") }
     external fun nativeApiVersion(): Int
+    /** Applies to the next GekkoNet session, not to running games. */
+    external fun nativeConfigureLimitedSaving(enabled: Boolean)
     external fun nativeStart(localPort: Int, address: String, remotePort: Int,
         localPlayer: Int, stateBytes: Int, prediction: Int, delay: Int): Boolean
     external fun nativeTick(input: Int, callbacks: RollbackCallbacks): Int
