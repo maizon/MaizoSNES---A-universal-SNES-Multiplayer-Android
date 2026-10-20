@@ -76,3 +76,17 @@ Limites: Android pode eliminar o processo sob pressão de memória, mudança de
 rede ou fechamento explícito. O serviço melhora a persistência em background,
 mas **não é uma garantia de sobrevivência após force-stop ou encerramento do
 processo**. O botão PS/Xbox central abre o menu; Start joga como Start SNES.
+
+
+### Energia, áudio e conexão em segundo plano (2026-10-20)
+
+Com uma partida LAN/online ativa, abra outro app por 90 segundos e volte.
+O serviço conectado exibirá uma notificação persistente e manterá locks de
+CPU/Wi-Fi enquanto a sessão existir. No retorno, não deve reproduzir áudio
+atrasado de segundos anteriores. Compare o quadro atual do host e do guest.
+
+Repita com a tela apagada por 2 minutos. Alguns fabricantes encerram sessões
+sob Doze/agressivas restrições de bateria; registre o modelo e a versão do
+Android. O app **não pode garantir** a partida depois de `Forçar parada`,
+encerramento do processo, reinício do dispositivo ou troca de endereço IP.
+A conexão só continua enquanto os sockets e a sessão nativa seguem vivos.

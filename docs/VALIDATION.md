@@ -97,3 +97,21 @@ inesperada e overlay correspondente ao transporte realmente utilizado.
 - [ ] Wi-Fi ↔ 4G online WebRTC: test for 10 minutes, log RTT, delay changes,
       corrections per second and any full video/audio stall.
 - [ ] Run after 30s uninterrupted and 2min in background on both ARM64/ARMv7.
+
+
+### Additional 2026-10-20 background / fallback verification
+
+- [ ] Android 10, 12, 14 and ARMv7/ARM64, if available: create LAN room and
+      background host/client for 90 seconds. Confirm ongoing FGS notification.
+- [ ] On Wi-Fi with screen off, ensure peer network frames keep advancing;
+      check battery optimizer/Doze restrictions, record manufacturer and model.
+- [ ] Check that resuming from Home shows CURRENT frame, not prior freeze,
+      and audio does not play several seconds of stale buffered PCM.
+- [ ] Resume and end session: confirm the notification disappears and
+      CPU/Wi-Fi locks are released (Android battery stats/system tools).
+- [ ] Force UDP preflight failure after several handshake polls: both peers
+      restore initial state and continue on synchronized Lockstep frame zero.
+- [ ] Force WebRTC/ICE to fail after Gekko negotiated but before first connected
+      message: same state restoration and TCP fallback.
+- [ ] Leave Wi-Fi to cellular: this does NOT promise connection migration;
+      current sockets may disconnect; capture logs and actual overlay state.

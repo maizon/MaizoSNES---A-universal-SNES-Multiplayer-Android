@@ -141,3 +141,17 @@ may remain pinned to an older commit until an independently verified deployment.
   conservando compatibilidade e sem ativar -ffast-math.
 - LAN Gekko, ROM real e background em dois Androids ainda necessitam de
   validação humana; não prometer zero falhas até esses testes passarem.
+
+
+## 2026-10-20 — second-pass hardening (build/device status)
+
+- Added Wi-Fi high-performance lock to foreground multiplayer service and
+  discard-on-return PCM JNI entrypoint, preserving live netplay clock on
+  Activity/surface pause. Device behavior still unverified.
+- Restored the exact negotiated Snes9x state after failed speculative Gekko
+  LAN/RTC preflight, BEFORE resuming unmodified MZNP TCP lockstep.
+- Tested compile of foreground service and APK universal in GitHub Actions;
+  regression test coverage for MZNP v7 mixed netcode mode and authorized LAN
+  ROM transfer is implemented.
+- Do not claim successful hardware two-phone netplay or uninterrupted game
+  after Android process death; these require user testing/protocol redesign.

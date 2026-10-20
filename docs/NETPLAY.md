@@ -310,3 +310,26 @@ limite de 14 segundos. Uma espera TCP bloqueante poderia impedir que o
 segundo jogador terminasse o handshake UDP e provocar fallback indevido.
 A decisão de fallback continua compartilhada pelos dois peers antes dos
 primeiros quadros visíveis de jogo. Teste em dois aparelhos ainda necessário.
+
+
+### 2026-10-20 — persistence and deterministic fallback hardening
+
+A foreground `connectedDevice` service owns only a **live-session lifetime
+notification** (not the network socket itself). It holds a partial CPU wake
+lock plus a full high-performance Wi-Fi lock until session shutdown, even
+while the Activity surface is detached. Both resources are released on normal
+end. This may consume more battery; Android can still kill/force-stop the app.
+While backgrounded, emulation keeps advancing as the existing netplay worker
+owns its clock, video surface may detach, and AudioTrack is stopped. On
+return, obsolete PCM queued during the absence is discarded before audio is
+re-enabled. This avoids stale audio playback without rewinding core state.
+
+If a direct LAN/IP Gekko or online WebRTC handshake fails **after speculative
+native frames**, the negotiated initial Snes9x state is restored before the
+unmodified Lockstep TCP path begins. A failed state restoration aborts visibly
+rather than continuing a desynchronized session.
+
+This is compile/CI verified but **not device verified**. Screens off, battery
+optimizers, partial network outages and vendor background task restrictions
+may behave differently. MZNP v7 is used only for direct Rollback-capable
+host sessions; older v6-only APK guests should update or select Lockstep.
