@@ -2288,8 +2288,8 @@ class MainActivity : ComponentActivity() {
         // Only local/offline play follows Activity visibility.
         val liveSession = netplaySession != null
         if (!shouldRun) audioOutput?.stop()
-        runCatching { NativeBridge.nativeSetPaused(if (liveSession)
-            false else !shouldRun) }
+        runCatching { NativeBridge.nativeSetPaused(
+            NetplayBackgroundPolicy.pauseCore(liveSession, shouldRun)) }
         if (shouldRun) {
             // Only a backgrounded NETPLAY has kept producing PCM while
             // AudioTrack was stopped. Drop its stale queue before playback.
