@@ -49,3 +49,30 @@
    duração, ICE state e modo efetivo. Não envie tokens nem ROMs.
 
 Instalar/configurar Open Relay ou credenciais Metered: docs/TURN_SETUP.md.
+
+
+### NOVO — testar LAN Rollback e troca de aplicativos
+
+1. Atualize os dois aparelhos usando o **mesmo APK** desta branch. Mantenha
+   os dois no mesmo Wi-Fi, de preferência sem isolamento de clientes.
+2. No host, abra uma ROM homebrew de redistribuição autorizada, escolha
+   Rollback (Recomendado), crie sala LAN e confirme a autorização de envio.
+3. No segundo aparelho, escolha a sala mesmo sem ROM, confirme a oferta e
+   veja o progresso até 100% e o hash conferido. Após a sincronização, o
+   painel deve mostrar **Rollback (GekkoNet) / UDP direto**.
+4. Se mostrar Lockstep TCP, registre o texto exato do erro. O aplicativo deve
+   continuar a partida sem obrigar a criar outra sala.
+5. Com o jogo rodando, pressione Home ou abra WhatsApp/navegador por 1 minuto
+   e retorne. Uma notificação persistente 'MaizoSNES — multiplayer ativo'
+   deve aparecer durante a sessão. Confirme que a partida continuou e que
+   os dois aparelhos permaneceram conectados.
+6. Repita a troca de apps por 2 minutos em ambos os aparelhos, observando
+   modo de economia de bateria, FPS, áudio e estabilidade. Evite usar a opção
+   'Forçar parada' nas configurações do Android: ela pode matar toda sessão.
+7. Repita no multiplayer online Wi-Fi/4G. Confirme rollback real no overlay,
+   observe atrasos adaptativos e compartilhe o diagnóstico se travar.
+
+Limites: Android pode eliminar o processo sob pressão de memória, mudança de
+rede ou fechamento explícito. O serviço melhora a persistência em background,
+mas **não é uma garantia de sobrevivência após force-stop ou encerramento do
+processo**. O botão PS/Xbox central abre o menu; Start joga como Start SNES.

@@ -121,3 +121,23 @@ frames longer than 125 bytes and one-byte close payloads rather than emitting
 an invalid pong. These are synthetic protocol tests only: they do not validate
 Android WebRTC, ICE/NAT traversal or two-device ROM transfer. Production Railway
 may remain pinned to an older commit until an independently verified deployment.
+
+
+## 2026-10-20 — correção relatada por usuário (LAN, ROM, background)
+
+- Investigado: a integração direta Gekko anterior negociava UDP antes de
+  executar a transferência de ROM MZNP; faltava completar autorização,
+  envio SHA-256 e sincronização antes do engine. Corrigido no caminho LAN
+  MZNP v7 com troca dinâmica de portas UDP e fallback simétrico TCP.
+- Eliminado conflito entre UDP 55436 de descoberta e porta do jogo usando
+  porta UDP efêmera anunciada no mesmo canal TCP.
+- Novas verificações de não regressão: host Rollback + cliente Lockstep,
+  cliente sem ROM autorizada com fallback após preflight. Testes JVM não
+  usam JNI Gekko nem representam teste físico de UDP.
+- Foreground connectedDevice service e wake lock mantêm rede/emulação ativa
+  durante troca de aplicativo; Snes9x netplay não depende de Surface.
+- Alívio de travadas: limpar estado especulativo no fim de cada Gekko tick,
+  estender tolerância de desconexão, ajustar delay de input após jitter,
+  conservando compatibilidade e sem ativar -ffast-math.
+- LAN Gekko, ROM real e background em dois Androids ainda necessitam de
+  validação humana; não prometer zero falhas até esses testes passarem.

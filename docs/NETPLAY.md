@@ -243,3 +243,44 @@ quando houver dados; não inferir perda usando estatísticas RTP.
 **Atenção:** textos anteriores deste documento descrevem versões históricas
 sem WebRTC. O código de DataChannel agora existe, mas não foi validado ainda
 entre dois Android reais, nem fornece garantia de ausência de custo/quota TURN.
+
+
+## 2026-10-20 — LAN ROM + Rollback v7 (experimental)
+
+The previous direct Gekko TCP negotiation ran BEFORE the rights-checked ROM
+handshake and could reject a guest with no local ROM. This branch preserves
+MZNP v6 Lockstep/WSS unmodified and adds a **separate MZNP v7 direct-IP
+negotiation** when the host chooses Rollback. The client may opt out: both
+then use v6-compatible Lockstep input pipelining. For two updated peers:
+
+1. Host advertises LAN room using existing UDP discovery on 55436.
+2. Joiner connects TCP on the original room port and synchronizes full ROM
+   SHA-256, core settings and optional authorized transfer with explicit host
+   rights affirmation plus guest approval. **No ROM bytes on UDP.**
+3. Both exchange/restore the host's initial Snes9x state over TCP.
+4. On identical state size and viable serialize/restore time (<=24ms), peers
+   exchange ephemeral UDP ports over the same TCP stream, initialize native
+   GekkoNet and confirm that BOTH UDP peers connected within 10s.
+5. GekkoNet runs the game directly over UDP; the same TCP stream stays open
+   for control. If either UDP preflight/handshake fails BEFORE gameplay, both
+   stay on the original TCP Lockstep frame stream with no new socket needed.
+
+Using an ephemeral UDP port on each side avoids a collision with the LAN
+broadcast discovery listener on UDP 55436. No router port forwarding is
+needed when both phones share a trusted Wi-Fi network without AP isolation.
+For cross-internet direct IP, an inbound UDP mapping may still be required.
+A host in Rollback mode uses MZNP v7, so guests with the older v6-only APK
+should update to the same universal APK or select Lockstep compatibility.
+
+Audio/video speculative replay suppression is cleared at each Gekko tick
+boundary. A live adaptive input delay increases slightly during frequent
+rollbacks/jitter and decays after sustained stability, minimizing expensive
+save-load bursts. Gekko native timeout increased to 30s for transient
+background/network scheduling delays. Actual smoothness must be measured on
+physical Android devices; this is not proof of zero stutter.
+
+For app switching/background: a connected-device foreground service with
+persistent notification and partial CPU wake lock is active ONLY for a live
+multiplayer session. Temporary onPause/surface loss does not stop the network
+thread. Android force-stop, process termination or connectivity changes can
+still end the session; no reconnection protocol is claimed.

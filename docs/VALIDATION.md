@@ -77,3 +77,23 @@ inesperada e overlay correspondente ao transporte realmente utilizado.
 - [ ] Verificar START (jogo) e GUIDE (menu) e navegar os ajustes por gamepad.
 - [ ] Não divulgar senha de TURN, chave API, IP público ou ROM no relatório.
 - [ ] Testar ARMv7 e ARM64, 10 minutos sem desync e sem stall excessivo.
+
+
+## LAN UDP + ROM + background regression tests (2026-10-20)
+
+- [ ] Host Rollback, guest Rollback, both on same Wi-Fi: verify direct UDP
+      rollback in debug with dynamic UDP port, not the discovery port 55436.
+- [ ] Guest WITHOUT homebrew ROM: after host authorizes redistribution and
+      guest accepts, observe 100% TCP transfer, SHA-256, state sync then rollback.
+- [ ] Guest rejects transfer: no ROM installed; visible message, no freeze.
+- [ ] Restrict UDP locally: both peers must return to Lockstep on the SAME TCP
+      connection after the 10s preflight, without recreating a room.
+- [ ] Host Rollback, guest selects Lockstep: MZNP v7 opt-out must run TCP.
+- [ ] Switch to another app for 1 minute on both devices and return: persistent
+      multiplayer notification visible, active session still in same frame
+      continuity; no dialog replacing the game.
+- [ ] Turn the screen off/on; verify battery restrictions, wake lock and
+      reconnection behavior; distinguish normal app switching from force-stop.
+- [ ] Wi-Fi ↔ 4G online WebRTC: test for 10 minutes, log RTT, delay changes,
+      corrections per second and any full video/audio stall.
+- [ ] Run after 30s uninterrupted and 2min in background on both ARM64/ARMv7.
