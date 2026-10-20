@@ -46,13 +46,17 @@ internal class WssRelaySocket private constructor(
                 val amount = second and 127
                 val size = when (amount) {
                     127 -> WssFrameLength.read64(input)
-                    126 -> (readByte(input) shl 8) or readByte(input)
+                    126 -> WssFrameLength.read16(input)
                     else -> amount
                 }
                 if (size > 65536) throw IOException("Quadro WSS excessivo")
-                if (opcode == 8) { closedByPeer = true; return -1 }
+                WssFrameLength.validateControl(opcode, size)
+                if (opcode == 8) {
+                    if (size > 0) readFully(input, ByteArray(size))
+                    closedByPeer = true
+                    return -1
+                }
                 if (opcode == 9) {
-                    if (size > 125) throw IOException("Ping WSS excessivo")
                     val payload = ByteArray(size)
                     readFully(input, payload)
                     sendFrame(10, payload, 0, payload.size)
