@@ -548,149 +548,170 @@ internal class NetplaySession(
     private fun tryDirectUdpRollback(connection: Socket,
                                     input: DataInputStream, output: DataOutputStream,
                                     host: Boolean): Boolean {
-        val measureStart = System.nanoTime()
-        val state = saveState()
-        val restored = state != null && loadState(state) == 0
-        val elapsedMs = (System.nanoTime() - measureStart) / 1e6
+        // The exact ROM, settings and initial state have already been checked
+        // and transferred over TCP with explicit redistribution consent.
+        val benchmark = System.nanoTime()
+        val synchronizedState = saveState()
+        val stateLoaded = synchronizedState != null && loadState(synchronizedState) == 0
+        val saveLoadMs = (System.nanoTime() - benchmark) / 1e6
         val address = connection.inetAddress as? Inet4Address
-        // Preserve the documented TCP_port + 1 forwarding convention for
-        // manually reachable INTERNET hosts. LAN peers use ephemeral UDP
-        // ports, avoiding interference with the discovery listener (55436).
-        val preferredPort = if (host && mode == NetworkMode.INTERNET &&
-            connection.localPort in 1024..65534) connection.localPort + 1 else 0
-        val udpPort = if (address != null) runCatching {
-            DatagramSocket(preferredPort).use { it.localPort }
-        }.getOrDefault(0) else 0
-        val viable = restored && state != null &&
-            state.size in 32..16_777_216 && elapsedMs <= 24.0 &&
-            udpPort in 1024..65535 && !closed.get()
-        output.writeBoolean(viable)
-        output.writeInt(udpPort)
+        val readyForUdp = stateLoaded && synchronizedState != null &&
+            synchronizedState.size in 32..RollbackFeasibility.MAX_STATE_BYTES &&
+            saveLoadMs <= 24.0 && address != null && !closed.get()
+        // Both sides must agree to skip UDP before entering the unchanged TCP
+        // frame-pipelining path. A slow Snes9x may still use Lockstep.
+        output.writeBoolean(readyForUdp)
         output.flush()
-        val peerViable = input.readBoolean()
-        val remotePort = input.readInt()
-        if (!viable || !peerViable || remotePort !in 1024..65535) {
-            onStatus("Rollback LAN não disponível (save/load " +
-                String.format(java.util.Locale.US, "%.1f", elapsedMs) +
-                " ms ou UDP bloqueado). Usando Lockstep TCP.")
+        val peerReady = input.readBoolean()
+        if (!readyForUdp || !peerReady) {
+            onStatus("Rollback UDP não viável (save/load " +
+                String.format(java.util.Locale.US, "%.1f", saveLoadMs) +
+                " ms); ROM sincronizada, usando Lockstep TCP.")
             return false
         }
-        val delay = when (latencyMode) {
-            NetplayLatencyMode.RESPONSIVE -> 0
-            NetplayLatencyMode.BALANCED -> 1
-            NetplayLatencyMode.STABLE -> 3
+        val state = synchronizedState!!
+        val ip = address!!.hostAddress
+        val period = framePeriodNs().coerceIn(10_000_000L, 50_000_000L)
+        val controller = RollbackDelayController(latencyMode)
+        val callbacks = object : RollbackCallbacks {
+            override fun save(): ByteArray =
+                saveState() ?: error("Snes9x não serializou durante rollback")
+            override fun load(bytes: ByteArray): Boolean {
+                NativeBridge.nativeSetRollbackReplaying(true)
+                return loadState(bytes) == 0
+            }
+            override fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean {
+                NativeBridge.nativeSetRollbackReplaying(resimulation)
+                return this@NetplaySession.step(p1, p2) == 0
+            }
         }
-        val adaptiveDelay = RollbackDelayController(latencyMode)
-        var nativeStarted = false
-        var rollbackCommitted = false
-        try {
-            nativeStarted = GekkoNative.nativeStart(udpPort, address!!.hostAddress,
-                remotePort, if (host) 0 else 1, state!!.size, 6, delay)
-            output.writeBoolean(nativeStarted)
+        val preferred = if (host && mode == NetworkMode.INTERNET)
+            connection.localPort + 1 else 0
+        for (attempt in 1..DirectUdpRetryPolicy.ATTEMPTS) {
+            if (closed.get()) return false
+            // Each retry is symmetric: both exchange a new candidate port,
+            // acknowledge native bind, poll Gekko, then exchange ready bits.
+            val port = DirectUdpRetryPolicy.reservePort(preferred, attempt)
+            onStatus("Rollback LAN UDP: tentativa $attempt/" +
+                DirectUdpRetryPolicy.ATTEMPTS + ", porta local " +
+                if (port > 0) port.toString() else "indisponível")
+            output.writeInt(port)
             output.flush()
-            if (!input.readBoolean() || !nativeStarted) {
-                onStatus("Socket UDP indisponível em um dos jogadores; Lockstep TCP.")
-                return false
-            }
-            val callbacks = object : RollbackCallbacks {
-                override fun save(): ByteArray =
-                    saveState() ?: error("Snes9x não serializou estado durante rollback")
-                override fun load(bytes: ByteArray): Boolean {
-                    NativeBridge.nativeSetRollbackReplaying(true)
-                    return loadState(bytes) == 0
+            val peerPort = input.readInt()
+            val candidateValid = port in 1024..65535 && peerPort in 1024..65535
+            var started = false
+            var committed = false
+            try {
+                // Reset speculative Gekko frames before each reattempt.
+                check(loadState(state) == 0) {
+                    "Estado inicial do host não pôde ser restaurado."
                 }
-                override fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean {
-                    NativeBridge.nativeSetRollbackReplaying(resimulation)
-                    return this@NetplaySession.step(p1, p2) == 0
-                }
-            }
-            // Establish both UDP peers before declaring that emulation began.
-            val deadline = System.nanoTime() + 10_000_000_000L
-            var peerConnected = false
-            while (!closed.get() && System.nanoTime() < deadline) {
-                val tick = GekkoNative.nativeTick(0, callbacks)
-                NativeBridge.nativeSetRollbackReplaying(false)
-                if (tick < 0) break
-                val stats = GekkoNative.nativeStats()
-                if (stats.size >= 6 && stats[4] == 1) {
-                    peerConnected = true
-                    break
-                }
-                // Never spin at 500 Gekko ticks/sec while the peer connects:
-                // it can advance hundreds of speculative frames prematurely.
-                LockSupport.parkNanos(framePeriodNs().coerceIn(
-                    10_000_000L, 20_000_000L))
-            }
-            output.writeBoolean(peerConnected)
-            output.flush()
-            // A peer can see GekkoPlayerConnected BEFORE the other peer does.
-            // Blocking here on TCP would stop Gekko UDP polling/heartbeats,
-            // so the second peer might never complete its UDP handshake.
-            // Poll the TCP acknowledgment non-blockingly while continuing
-            // to service Gekko networking until both are ready.
-            connection.soTimeout = 14000
-            var otherConnected: Boolean? = null
-            val readyDeadline = System.nanoTime() + 14_000_000_000L
-            while (!closed.get() && otherConnected == null &&
-                System.nanoTime() < readyDeadline) {
-                if (input.available() > 0) {
-                    otherConnected = input.readBoolean()
-                    break
-                }
-                val polled = GekkoNative.nativeTick(0, callbacks)
-                NativeBridge.nativeSetRollbackReplaying(false)
-                if (polled < 0) break
-                LockSupport.parkNanos(framePeriodNs().coerceIn(
-                    10_000_000L, 20_000_000L))
-            }
-            if (!peerConnected || otherConnected != true) {
-                onStatus("Gekko UDP não conectou ambos em tempo hábil; Lockstep TCP.")
-                return false
-            }
-            rollbackCommitted = true
-            onStatus(if (host) "Conectado como jogador 1 (Rollback UDP direto)"
-                else "Conectado como jogador 2 (Rollback UDP direto)")
-            // Game clock stays exclusively on this network worker.
-            val period = framePeriodNs().coerceIn(10_000_000L, 50_000_000L)
-            var lastStat = 0L
-            var nextFrame = System.nanoTime()
-            while (!closed.get()) {
-                val tick = GekkoNative.nativeTick(localInput(), callbacks)
-                NativeBridge.nativeSetRollbackReplaying(false)
-                if (tick < 0) error("Conexão GekkoNet UDP perdida: " + tick)
-                val now = System.nanoTime()
-                if (now - lastStat >= 1_000_000_000L) {
-                    val stats = GekkoNative.nativeStats()
-                    adaptiveDelay.offer(now, stats[2].toLong(),
-                        stats[0].toDouble(), stats[1] / 10.0)?.let {
-                        if (GekkoNative.nativeSetLocalDelay(it))
-                            onStatus("GekkoNet LAN: atraso dinâmico " + it + " quadros.")
+                started = if (candidateValid) runCatching {
+                    GekkoNative.nativeStart(port, ip, peerPort,
+                        if (host) 0 else 1, state.size, 6, controller.delay)
+                }.getOrDefault(false) else false
+                output.writeBoolean(started)
+                output.flush()
+                val peerStarted = input.readBoolean()
+                if (started && peerStarted) {
+                    var connected = false
+                    val probeDeadline = System.nanoTime() +
+                        7_000_000_000L + (attempt - 1) * 2_000_000_000L
+                    while (!closed.get() && System.nanoTime() < probeDeadline) {
+                        val event = runCatching { GekkoNative.nativeTick(0, callbacks) }
+                            .getOrDefault(-1)
+                        NativeBridge.nativeSetRollbackReplaying(false)
+                        if (event < 0) break
+                        val stats = GekkoNative.nativeStats()
+                        if (stats.size >= 6 && stats[4] == 1) {
+                            connected = true
+                            break
+                        }
+                        LockSupport.parkNanos(period)
                     }
-                    onMetrics(NetworkMetrics(stats[3].toLong(),
-                        0.0, 0.0, 0.0, 0, adaptiveDelay.delay, stats[0].toDouble(),
-                        stats[1] / 10.0, stats[2].toLong(), rollback = true))
-                    lastStat = now
+                    output.writeBoolean(connected)
+                    output.flush()
+                    // One peer may see GekkoPlayerConnected earlier. Keep
+                    // Gekko polling while waiting for the peer's ready bit.
+                    // TCP stream is buffered; available() is non-blocking.
+                    val ackDeadline = System.nanoTime() + 8_000_000_000L
+                    var peerConnected: Boolean? = null
+                    while (!closed.get() && peerConnected == null &&
+                        System.nanoTime() < ackDeadline) {
+                        if (input.available() > 0) {
+                            peerConnected = input.readBoolean()
+                            break
+                        }
+                        val event = runCatching { GekkoNative.nativeTick(0, callbacks) }
+                            .getOrDefault(-1)
+                        NativeBridge.nativeSetRollbackReplaying(false)
+                        if (event < 0) break
+                        LockSupport.parkNanos(period)
+                    }
+                    if (connected && peerConnected == true) {
+                        committed = true
+                        onStatus(if (host) "Conectado como jogador 1 (Rollback UDP direto)"
+                            else "Conectado como jogador 2 (Rollback UDP direto)")
+                        var lastMetric = 0L
+                        var deadline = System.nanoTime()
+                        var peakTickNs = 0L
+                        var stalls = 0L
+                        while (!closed.get()) {
+                            val beforeTick = System.nanoTime()
+                            val event = GekkoNative.nativeTick(localInput(), callbacks)
+                            NativeBridge.nativeSetRollbackReplaying(false)
+                            if (event < 0) error("Gekko UDP desconectado: $event")
+                            val now = System.nanoTime()
+                            val elapsed = now - beforeTick
+                            peakTickNs = maxOf(peakTickNs, elapsed)
+                            if (elapsed > 500_000_000L) {
+                                stalls++
+                                onStatus("Aviso: Gekko UDP demorou " +
+                                    (elapsed / 1_000_000L) + " ms neste quadro.")
+                            }
+                            if (now - lastMetric >= 1_000_000_000L) {
+                                val stats = GekkoNative.nativeStats()
+                                controller.offer(now, stats[2].toLong(),
+                                    stats[0].toDouble(), stats[1] / 10.0)?.let {
+                                    GekkoNative.nativeSetLocalDelay(it)
+                                }
+                                onMetrics(NetworkMetrics(stats[3].toLong(),
+                                    0.0, 0.0, 0.0, stalls, controller.delay,
+                                    stats[0].toDouble(), stats[1] / 10.0,
+                                    stats[2].toLong(), rollback = true,
+                                    saveLoadMs = saveLoadMs,
+                                    maxFrameStallMs = peakTickNs / 1e6))
+                                peakTickNs = 0L
+                                lastMetric = now
+                            }
+                            deadline += period
+                            if (deadline < now - period * 2) deadline = now
+                            val sleep = deadline - System.nanoTime()
+                            if (sleep > 0) LockSupport.parkNanos(sleep)
+                        }
+                        return true
+                    }
+                } else {
+                    onStatus("Rollback LAN: bind UDP falhou na tentativa " +
+                        "$attempt/" + DirectUdpRetryPolicy.ATTEMPTS)
                 }
-                nextFrame += period
-                if (nextFrame < now - period * 2) nextFrame = now
-                val sleep = nextFrame - System.nanoTime()
-                if (sleep > 0) LockSupport.parkNanos(sleep)
+            } finally {
+                NativeBridge.nativeSetRollbackReplaying(false)
+                if (started) GekkoNative.nativeStop()
+                if (!committed && !closed.get()) {
+                    val restore = loadState(state)
+                    check(restore == 0) { "Falha ao restaurar estado após UDP: $restore" }
+                }
             }
-            return true
-        } finally {
-            NativeBridge.nativeSetRollbackReplaying(false)
-            if (nativeStarted) GekkoNative.nativeStop()
-            if (!rollbackCommitted && !closed.get()) {
-                // Rewind speculative handshake frames on BOTH peers.
-                // The negotiated MZNP Lockstep session starts at the
-                // identical host-authoritative state rather than from
-                // two diverged UDP preflight timelines.
-                val reset = loadState(state!!)
-                check(reset == 0) {
-                    "Falha ao restaurar estado no fallback UDP: $reset"
-                }
+            if (attempt < DirectUdpRetryPolicy.ATTEMPTS) {
+                onStatus("UDP não respondeu, tentando outra porta (" +
+                    (attempt + 1) + "/" + DirectUdpRetryPolicy.ATTEMPTS + ")…")
             }
         }
+        onStatus("Não foi possível estabelecer Gekko UDP após 3 tentativas. " +
+            "Verifique isolamento de clientes (AP Isolation) ou firewall do " +
+            "roteador. ROM já recebida; entrando em Lockstep TCP automaticamente.")
+        return false
     }
 
     private fun runSession(
