@@ -61,7 +61,10 @@ internal class NetplaySession(
         if (codes.isEmpty()) 0 else -6
     },
     /** Session-only and validated: client temporarily applies host core options. */
-    private val applyHostCoreOptions: (Map<String, String>) -> Boolean = { false }
+    private val applyHostCoreOptions: (Map<String, String>) -> Boolean = { false },
+    // Test seam: two loopback peers can exercise native-bind retries and
+    // bilateral fallback without loading a commercial ROM or native libraries.
+    private val directDriver: DirectRollbackDriver = NativeDirectRollbackDriver
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
@@ -597,11 +600,11 @@ internal class NetplaySession(
             override fun save(): ByteArray =
                 saveState() ?: error("Snes9x não serializou durante rollback")
             override fun load(bytes: ByteArray): Boolean {
-                NativeBridge.nativeSetRollbackReplaying(true)
+                directDriver.setReplay(true)
                 return loadState(bytes) == 0
             }
             override fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean {
-                NativeBridge.nativeSetRollbackReplaying(resimulation)
+                directDriver.setReplay(resimulation)
                 return this@NetplaySession.step(p1, p2) == 0
             }
         }
@@ -627,8 +630,8 @@ internal class NetplaySession(
                     "Estado inicial do host não pôde ser restaurado."
                 }
                 started = if (candidateValid) runCatching {
-                    GekkoNative.nativeConfigureLimitedSaving(limitedSaving)
-                    GekkoNative.nativeStart(port, ip, peerPort,
+                    directDriver.configureLimitedSaving(limitedSaving)
+                    directDriver.start(port, ip, peerPort,
                         if (host) 0 else 1, state.size, 6, controller.delay)
                 }.getOrDefault(false) else false
                 output.writeBoolean(started)
@@ -639,11 +642,11 @@ internal class NetplaySession(
                     val probeDeadline = System.nanoTime() +
                         7_000_000_000L + (attempt - 1) * 2_000_000_000L
                     while (!closed.get() && System.nanoTime() < probeDeadline) {
-                        val event = runCatching { GekkoNative.nativeTick(0, callbacks) }
+                        val event = runCatching { directDriver.tick(0, callbacks) }
                             .getOrDefault(-1)
-                        NativeBridge.nativeSetRollbackReplaying(false)
+                        directDriver.setReplay(false)
                         if (event < 0) break
-                        val stats = GekkoNative.nativeStats()
+                        val stats = directDriver.stats()
                         if (stats.size >= 6 && stats[4] == 1) {
                             connected = true
                             break
@@ -663,9 +666,9 @@ internal class NetplaySession(
                             peerConnected = input.readBoolean()
                             break
                         }
-                        val event = runCatching { GekkoNative.nativeTick(0, callbacks) }
+                        val event = runCatching { directDriver.tick(0, callbacks) }
                             .getOrDefault(-1)
-                        NativeBridge.nativeSetRollbackReplaying(false)
+                        directDriver.setReplay(false)
                         if (event < 0) break
                         LockSupport.parkNanos(period)
                     }
@@ -679,8 +682,8 @@ internal class NetplaySession(
                         var stalls = 0L
                         while (!closed.get()) {
                             val beforeTick = System.nanoTime()
-                            val event = GekkoNative.nativeTick(localInput(), callbacks)
-                            NativeBridge.nativeSetRollbackReplaying(false)
+                            val event = directDriver.tick(localInput(), callbacks)
+                            directDriver.setReplay(false)
                             if (event < 0) error("Gekko UDP desconectado: $event")
                             val now = System.nanoTime()
                             val elapsed = now - beforeTick
@@ -691,13 +694,13 @@ internal class NetplaySession(
                                     (elapsed / 1_000_000L) + " ms neste quadro.")
                             }
                             if (now - lastMetric >= 1_000_000_000L) {
-                                val stats = GekkoNative.nativeStats()
+                                val stats = directDriver.stats()
                                 controller.offer(now, stats[2].toLong(),
                                     stats[0].toDouble(), stats[1] / 10.0)?.let {
-                                    GekkoNative.nativeSetLocalDelay(it)
+                                    directDriver.setLocalDelay(it)
                                 }
                                 val stride = presentation.offer(stats[0].toDouble())
-                                NativeBridge.nativeSetNetplayPresentationStride(stride)
+                                directDriver.setPresentationStride(stride)
                                 onMetrics(NetworkMetrics(stats[3].toLong(),
                                     0.0, 0.0, 0.0, stalls, controller.delay,
                                     stats[0].toDouble(), stats[1] / 10.0,
@@ -721,9 +724,9 @@ internal class NetplaySession(
                         "$attempt/" + DirectUdpRetryPolicy.ATTEMPTS)
                 }
             } finally {
-                NativeBridge.nativeSetRollbackReplaying(false)
-                if (started) GekkoNative.nativeStop()
-                NativeBridge.nativeSetNetplayPresentationStride(1)
+                directDriver.setReplay(false)
+                if (started) directDriver.stop()
+                directDriver.setPresentationStride(1)
                 if (!committed && !closed.get()) {
                     val restore = loadState(state)
                     check(restore == 0) { "Falha ao restaurar estado após UDP: $restore" }
