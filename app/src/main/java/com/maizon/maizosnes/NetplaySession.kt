@@ -473,6 +473,9 @@ internal class NetplaySession(
                 while (!closed.get()) {
                     val tickStart = System.nanoTime()
                     val executed = GekkoNative.nativeTick(localInput(), callbacks)
+                    // End speculative frame suppression at the tick boundary.
+                    // A rollback event may be the last event of a tick.
+                    NativeBridge.nativeSetRollbackReplaying(false)
                     if (executed < 0) {
                         if (!connected) {
                             onStatus("WebRTC handshake Gekko falhou antes de jogar; Lockstep.")
@@ -581,6 +584,7 @@ internal class NetplaySession(
             var peerConnected = false
             while (!closed.get() && System.nanoTime() < deadline) {
                 val tick = GekkoNative.nativeTick(0, callbacks)
+                NativeBridge.nativeSetRollbackReplaying(false)
                 if (tick < 0) break
                 val stats = GekkoNative.nativeStats()
                 if (stats.size >= 6 && stats[4] == 1) {
@@ -605,6 +609,7 @@ internal class NetplaySession(
             var nextFrame = System.nanoTime()
             while (!closed.get()) {
                 val tick = GekkoNative.nativeTick(localInput(), callbacks)
+                NativeBridge.nativeSetRollbackReplaying(false)
                 if (tick < 0) error("Conexão GekkoNet UDP perdida: " + tick)
                 val now = System.nanoTime()
                 if (now - lastStat >= 1_000_000_000L) {

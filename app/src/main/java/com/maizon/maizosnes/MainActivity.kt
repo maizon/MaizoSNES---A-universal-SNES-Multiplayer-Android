@@ -111,6 +111,27 @@ class MainActivity : ComponentActivity() {
     private var lastUiDirectionAt = 0L
     private var netplaySession: NetplaySession? = null
     private var hostWifiLock: WifiManager.MulticastLock? = null
+    private var sessionKeepAliveStarted = false
+
+    private fun startMultiplayerKeepAlive() {
+        if (sessionKeepAliveStarted) return
+        val action = Intent(this, MultiplayerKeepAliveService::class.java)
+        runCatching {
+            androidx.core.content.ContextCompat.startForegroundService(this, action)
+            sessionKeepAliveStarted = true
+        }.onFailure {
+            // On Android variants that block FGS initiation, native TCP/UDP
+            // still works while the Activity is in foreground.
+            lanStatus.value = "Multiplayer ativo, sem proteção de segundo plano: " +
+                (it.message ?: "permissão do Android")
+        }
+    }
+
+    private fun stopMultiplayerKeepAlive() {
+        if (!sessionKeepAliveStarted) return
+        sessionKeepAliveStarted = false
+        runCatching { stopService(Intent(this, MultiplayerKeepAliveService::class.java)) }
+    }
 
     private var audioOutput: AudioOutput? = null
     private var hasLoadedRom = false
@@ -2133,6 +2154,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (netplaySession === session) {
                         netplaySession = null
+                        stopMultiplayerKeepAlive()
                         runCatching { NativeBridge.nativeSetPaused(true) }
                         createMultiplayerBackup("after")
                         lastNetworkMetrics.value = null
@@ -2165,6 +2187,7 @@ class MainActivity : ComponentActivity() {
             }
         )
         netplaySession = session
+        startMultiplayerKeepAlive()
         if (host == null && relayRoomId == null) hostWifiLock = createDiscoveryLock()
         lanStatus.value = if (host == null) "Abrindo sala…" else "Conectando…"
         autoNetworkStatus.value = lanStatus.value
@@ -2236,8 +2259,13 @@ class MainActivity : ComponentActivity() {
 
     private fun syncPlaybackState() {
         val shouldRun = activityResumed && surfaceAttached && hasLoadedRom && !userPaused
+        // Keep Snes9x's netplay clock running on the network worker even
+        // when Surface/Activity disappear while switching to another app.
+        // Only local/offline play follows Activity visibility.
+        val liveSession = netplaySession != null
         if (!shouldRun) audioOutput?.stop()
-        runCatching { NativeBridge.nativeSetPaused(!shouldRun) }
+        runCatching { NativeBridge.nativeSetPaused(if (liveSession)
+            false else !shouldRun) }
         if (shouldRun) audioOutput?.start()
         paused.value = userPaused || !shouldRun
     }
@@ -2264,6 +2292,7 @@ class MainActivity : ComponentActivity() {
         coverJob?.cancel()
         perfJob?.cancel()
         netplaySession?.stop()
+        stopMultiplayerKeepAlive()
         runCatching { hostWifiLock?.release() }
         hostWifiLock = null
         activityResumed = false
