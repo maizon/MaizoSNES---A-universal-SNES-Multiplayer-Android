@@ -298,3 +298,15 @@ com DataChannel, a janela máxima de previsão de inputs é 10 quadros (em vez
 de 6), para tolerar picos transitórios de jitter de rede móvel; pode haver
 mais reprocessamento quando a perda é intensa e isso deve ser avaliado em
 dois celulares reais.
+
+
+### 2026-10-20 — handshake UDP bilateral
+
+A confirmação `GekkoPlayerConnected` pode chegar em horários diferentes para
+host e cliente. Agora o primeiro lado que vê a conexão **não bloqueia o
+thread da rede** esperando um byte TCP; continua executando o polling Gekko
+pela porta UDP dinâmica enquanto aguarda o ACK bilateral, dentro do tempo
+limite de 14 segundos. Uma espera TCP bloqueante poderia impedir que o
+segundo jogador terminasse o handshake UDP e provocar fallback indevido.
+A decisão de fallback continua compartilhada pelos dois peers antes dos
+primeiros quadros visíveis de jogo. Teste em dois aparelhos ainda necessário.
