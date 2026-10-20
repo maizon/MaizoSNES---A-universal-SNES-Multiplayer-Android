@@ -178,3 +178,16 @@ conexão entre dois celulares**: requer teste físico e validação do overlay.
 Em NAT/ICE indisponível, a partida usa Lockstep TCP via Railway sem inventar
 modo UDP. Não foi provisionado Fly.io pago nem existe SLA de TURN público.
 Configuração: docs/TURN_SETUP.md; teste: docs/DEVICE_TESTING.md.
+
+
+## MaizoSNES — correções LAN/ROM/rollback e segundo plano (20/10/2026)
+
+Atualização experimental em `work/android-foundation`:
+
+- LAN/IP manual: ROM e direitos verificados pelo TCP **ANTES** do GekkoNet UDP. Convidado sem ROM pode aceitá-la mediante direitos de redistribuição do host e aceite próprio, seguido de hash SHA-256 e estado inicial. Sem PIN 9090.
+- Handshake GekkoNet UDP com até **3 tentativas/portas** por sessão, limitadas no tempo, negociadas por TCP; erro de UDP volta para Lockstep na mesma sala sem retransmitir ROM. AP Isolation/firewall não podem ser contornados simplesmente trocando porta.
+- Online WebRTC/Gekko: controle adaptativo de atraso, medição de picos de travada >500 ms, estados de save/load no overlay, *Limited Saving* quando medição >8ms e *render skip* em RTT alto sem pular emulação/áudio.
+- Troca de aplicativo: foreground service com notificação, CPU/Wi-Fi wake lock e jogo de rede em andamento com áudio suspenso; controle **Multiplayer em segundo plano** ativado por padrão, desligável no app.
+- Tests JVM cobrem negociação de dois peers com fake JNI, retries, fallback, ROM compartilhada autorizada, política de vídeo e política de background. **Não equivalem a teste de rede em dois aparelhos reais.**
+
+Veja [Netplay](docs/NETPLAY.md), [Segundo plano](docs/BACKGROUND.md), [Validação](docs/VALIDATION.md) e [Teste guiado](docs/DEVICE_TESTING.md).

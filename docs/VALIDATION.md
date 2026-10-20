@@ -115,3 +115,20 @@ inesperada e overlay correspondente ao transporte realmente utilizado.
       message: same state restoration and TCP fallback.
 - [ ] Leave Wi-Fi to cellular: this does NOT promise connection migration;
       current sockets may disconnect; capture logs and actual overlay state.
+
+
+## Matriz de aceitação — correções de 20/10/2026
+
+- [ ] **LAN rollback:** dois telefones na mesma Wi-Fi, mesma versão universal, verificar tentativa UDP 1/3 (ou 2/3, 3/3) e overlay `Rollback GekkoNet / UDP direto` durante 10 minutos.
+- [ ] **LAN com P2 sem ROM:** host com ROM homebrew cuja redistribuição é autorizada, cliente sem arquivo; confirmar aceite do host, aceite cliente, progresso de 0 a 100%, SHA-256 e jogo via rollback sem retransferir ROM.
+- [ ] **ROM diferente:** cliente com arquivo distinto recebe oferta, aceita, verifica SHA-256 e depois usa rollback.
+- [ ] **ROM idêntica:** nenhum upload é necessário; ambos entram por UDP.
+- [ ] **Falha UDP:** bloquear UDP entre celulares; observar até três tentativas e fallback Lockstep **na mesma sala**, sem congelar tela.
+- [ ] **AP Isolation:** ativar isolamento de clientes no roteador: UDP pode não conectar, e TCP também pode falhar se o isolamento bloquear unicast; não prometer fallback quando TCP for bloqueado.
+- [ ] **Online Wi-Fi/4G:** verificar overlay WebRTC real, jogar 10 minutos, medir picos >500 ms e input delay adaptativo, registrar Limited Saving, modo de apresentação, RTT e rollbacks/s.
+- [ ] **Troca de apps:** mandar A e B ao Home por 1–2 min e voltar, repetindo LAN e online; sessão e notificação devem continuar se processo permanecer vivo.
+- [ ] **Bateria/áudio:** desligar opção de proteção em segundo plano, testar economia de bateria e áudio ao voltar sem fila atrasada.
+- [ ] **Desync:** confirmar gameplay estável; em Limited Saving ON verificar em dois devices por mais tempo, pois a checagem nativa de desync fica desabilitada nesse modo.
+- [ ] **ARMv7 e ARM64:** repetir em arquiteturas diferentes; confirmar nenhuma ROM/BIOS incluída no APK.
+
+**Automatizado ≠ validado em aparelho:** CI executa testes JVM de protocolo e builds para dois ABIs. LAN unicast UDP, Wi-Fi lock, WebRTC via CGNAT e ROM instalada por SAF exigem teste físico.

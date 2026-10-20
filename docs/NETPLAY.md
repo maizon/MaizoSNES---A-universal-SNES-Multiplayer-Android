@@ -333,3 +333,14 @@ This is compile/CI verified but **not device verified**. Screens off, battery
 optimizers, partial network outages and vendor background task restrictions
 may behave differently. MZNP v7 is used only for direct Rollback-capable
 host sessions; older v6-only APK guests should update or select Lockstep.
+
+
+## 2026-10-20 — robustez direta LAN e instrumentação de travadas
+
+A negociação MZNP v7 pela LAN executa **antes de qualquer UDP**: SHA-256 das ROMs, confirmação bilateral de redistribuição, transferência TCP autorizada (blocos 32 KiB, progresso, hash integral), opções Snes9x e estado inicial confirmado. Host e convidado, ambos atualizados, então tentam Gekko UDP direto. A porta UDP de LAN é efêmera, não a 55436 da descoberta. No modo IP manual INTERNET, a primeira tentativa preserva o encaminhamento explícito **UDP=TCP+1**, inclusive quando a descoberta 55436 já foi fechada após aceitar TCP.
+
+Até **três tentativas**: cada par troca a porta candidata pelo mesmo TCP, confirma o resultado do bind nativo, mantém polling Gekko durante a barreira de prontidão bilateral e impõe prazos explícitos por tentativa. Portas alternativas ajudam em conflitos/bind; **não conseguem atravessar AP/client isolation ou filtros UDP do roteador**. O overlay exibe tentativa N/3, erro e recomendação de verificar AP Isolation. Se todas falharem antes da jogatina, restaura o estado inicial e retorna ao **Lockstep na mesma conexão TCP**, sem repetir transferência da ROM. Protocolo WSS online v6 permanece intacto.
+
+**Desempenho:** o benchmark de save+load ocorre antes de iniciar a sessão. Acima de 8 ms, o Gekko ativa `limited_saving` para reduzir frequência de snapshots. A versão pinned upstream não garante a detecção nativa de desync nesse modo e, por isso, `desync_detection` é desligada enquanto `limited_saving` está ativa. O overlay apresenta Limited Saving ON/OFF e a medição de save/load; não afirmar proteção de desync que não foi executada. O Gekko inclui ajuste conservador de input delay após janelas de jitter/rollbacks excessivos. Se o RTT ficar acima de 150ms por três amostras consecutivas, só a **apresentação de vídeo** cai para 1/2; `retro_run()`, áudio, entradas, save states e checksums continuam normalmente. Volta a apresentar todos os quadros após cinco amostras abaixo de 110ms. Picos de processamento de Gekko e quadros com >500 ms são registrados no overlay/diagnóstico.
+
+**Limites:** nenhuma métrica isolada comprova causalidade das travadas. Capture o overlay antes/depois da oscilação para distinguir rede (RTT/jitter) de serialização/CPU. Recuperação de desync completa por troca de estado assinado não está pronta; não seria seguro simplesmente carregar save state em um único peer. Um pacote perdido por dezenas de segundos ou mudança de rede pode terminar a sessão. Ver docs/BACKGROUND.md e docs/DEVICE_TESTING.md.

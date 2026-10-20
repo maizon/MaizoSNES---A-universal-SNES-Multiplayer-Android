@@ -155,3 +155,8 @@ may remain pinned to an older commit until an independently verified deployment.
   ROM transfer is implemented.
 - Do not claim successful hardware two-phone netplay or uninterrupted game
   after Android process death; these require user testing/protocol redesign.
+
+
+## 2026-10-20 — continuidade autônoma LAN/ROM/stutter/background (experimental)
+
+Adicionada negociação direta MZNP v7 com até três trocas de porta UDP, barreira bilateral e retorno ao Lockstep pela mesma conexão depois do SHA-256/transporte de ROM autorizado. Testes JVM com driver Gekko falso exercitam tentativas fracassadas e sucesso subsequente, fallback completo e ROM compartilhada antes do rollback. Monitor de save/load, stalls >500ms, Limited Saving quando >8ms, ajuste de delay e apresentação de vídeo 1/2 em RTT sustentado >150ms. Foreground service de segundo plano é controlável e ativada por padrão. Nenhuma das quatro situações de dois celulares deve ser declarada 100% validada sem executar docs/VALIDATION.md no hardware.

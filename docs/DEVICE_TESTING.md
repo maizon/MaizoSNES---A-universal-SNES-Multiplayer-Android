@@ -90,3 +90,16 @@ sob Doze/agressivas restrições de bateria; registre o modelo e a versão do
 Android. O app **não pode garantir** a partida depois de `Forçar parada`,
 encerramento do processo, reinício do dispositivo ou troca de endereço IP.
 A conexão só continua enquanto os sockets e a sessão nativa seguem vivos.
+
+
+## Teste revisado: UDP 3 tentativas, métricas e segundo plano (20/10/2026)
+
+1. Use o último APK verde em dois aparelhos; host e cliente devem estar na **mesma versão**. Selecione Rollback (Recomendado).
+2. Teste LAN Wi-Fi com ROM idêntica: após confirmação da sala, o overlay deve dizer UDP direto. Se aparecer tentativa 2/3 ou 3/3, anote. Se TCP, mande a mensagem de erro e verifique AP Isolation no roteador.
+3. Teste LAN com P2 sem ROM: o host confirma que detém direitos para redistribuir sua ROM homebrew; cliente aceita o arquivo, acompanha porcentagem, espera SHA-256 e só depois UDP.
+4. Em modo online Wi-Fi/4G, registre por 10 minutos RTT, jitter, rollbacks por segundo, pico de stall, custo save+load, Limited Saving ON/OFF e renderização 1/1 ou 1/2. Se travar, use Status de Conexão → Compartilhar Diagnóstico.
+5. Com proteção padrão **Multiplayer em segundo plano** ativada, pressione Home por 60 segundos, abra outro aplicativo e volte. Confirme que notificação persistente aparece e que a sala não mudou. Repita por dois minutos e no segundo celular.
+6. Desative proteção na aba Multiplayer apenas se desejar economizar bateria. Essa opção não desconecta imediatamente, mas Android pode suspender rede/cpu; forçar parada ou perder rede por muito tempo pode encerrar a sessão.
+7. Antes de enviar relatório, retire chaves, IPs públicos e dados privados. Anote Android, modelos, arquiteturas, conexão LAN ou online e tempo exato de travada.
+
+Veja docs/BACKGROUND.md para limites Android. O código não fornece reconexão transparente quando o sistema mata o processo, nem ressincronização cruzada de saves após desync grave.
