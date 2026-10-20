@@ -1,0 +1,19 @@
+package com.maizon.maizosnes
+
+import java.io.EOFException
+import java.io.IOException
+import java.io.InputStream
+
+/** Decode the RFC6455 64-bit length field under the relay's 64 KiB limit. */
+internal object WssFrameLength {
+    fun read64(input: InputStream): Int {
+        var size = 0L
+        repeat(8) {
+            val byte = input.read()
+            if (byte < 0) throw EOFException("Tamanho WSS incompleto")
+            size = (size shl 8) or byte.toLong()
+        }
+        if (size != 65536L) throw IOException("Quadro WSS excessivo ou não canônico")
+        return 65536
+    }
+}

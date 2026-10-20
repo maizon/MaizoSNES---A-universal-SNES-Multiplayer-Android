@@ -45,7 +45,7 @@ internal class WssRelaySocket private constructor(
                 val opcode = flags and 15
                 val amount = second and 127
                 val size = when (amount) {
-                    127 -> throw IOException("Quadro WSS excessivo")
+                    127 -> WssFrameLength.read64(input)
                     126 -> (readByte(input) shl 8) or readByte(input)
                     else -> amount
                 }
