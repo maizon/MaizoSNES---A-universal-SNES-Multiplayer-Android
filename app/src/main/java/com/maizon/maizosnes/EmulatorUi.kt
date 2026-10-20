@@ -231,6 +231,8 @@ internal fun MaizoEmulatorApp(
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     netcodeMode: NetcodeMode,
     onNetcodeModeChanged: (NetcodeMode) -> Unit,
+    backgroundNetplayEnabled: Boolean,
+    onBackgroundNetplayChanged: (Boolean) -> Unit,
     iceServerOverrides: String,
     onIceOverridesChanged: (String) -> Unit,
     iceTestStatus: String,
@@ -428,6 +430,7 @@ internal fun MaizoEmulatorApp(
                 connectionMode, onConnectionModeChanged,
                 netplayLatencyMode, onNetplayLatencyModeChanged,
                 netcodeMode, onNetcodeModeChanged,
+                backgroundNetplayEnabled, onBackgroundNetplayChanged,
                 iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
                 lanRooms, scanningLan, onScanLan,
@@ -798,6 +801,8 @@ private fun MultiplayerScreen(
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     netcodeMode: NetcodeMode,
     onNetcodeModeChanged: (NetcodeMode) -> Unit,
+    backgroundNetplayEnabled: Boolean,
+    onBackgroundNetplayChanged: (Boolean) -> Unit,
     iceServerOverrides: String,
     onIceOverridesChanged: (String) -> Unit,
     iceTestStatus: String,
@@ -929,6 +934,23 @@ private fun MultiplayerScreen(
                     Text("RTT, jitter e correções aparecem nas estatísticas; " +
                         "perda de pacotes não é publicada pela API atual do GekkoNet.",
                         fontSize = 11.sp, color = Muted)
+                }
+                Row(
+                    Modifier.fillMaxWidth().padFocusRing(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Multiplayer em segundo plano",
+                            color = Mint, fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold)
+                        Text("Ativado por padrão. Mantém CPU/Wi-Fi conectados " +
+                            "ao trocar de app; aumenta o consumo de bateria. " +
+                            "Desligue aqui se preferir pausar a proteção.",
+                            color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = backgroundNetplayEnabled,
+                        onCheckedChange = onBackgroundNetplayChanged)
                 }
                 Text("PERFIL DE LATÊNCIA • LOCKSTEP MZNP v6",
                     color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)

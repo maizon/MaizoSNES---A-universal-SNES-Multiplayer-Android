@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity() {
     private val scanningLan = androidx.compose.runtime.mutableStateOf(false)
     private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(true)
+    private val keepMultiplayerInBackground = androidx.compose.runtime.mutableStateOf(true)
     private val shareConsentVisible = androidx.compose.runtime.mutableStateOf(false)
     private data class PendingHost(val port: Int, val roomId: String?, val relayHost: String?,
         val relayTls: Boolean, val wssEndpoint: String?)
@@ -113,8 +114,16 @@ class MainActivity : ComponentActivity() {
     private var hostWifiLock: WifiManager.MulticastLock? = null
     private var sessionKeepAliveStarted = false
 
+    private fun changeBackgroundNetplay(enabled: Boolean) {
+        keepMultiplayerInBackground.value = enabled
+        prefs.edit().putBoolean("netplay_background_enabled", enabled).apply()
+        if (netplaySession != null) {
+            if (enabled) startMultiplayerKeepAlive() else stopMultiplayerKeepAlive()
+        }
+    }
+
     private fun startMultiplayerKeepAlive() {
-        if (sessionKeepAliveStarted) return
+        if (!keepMultiplayerInBackground.value || sessionKeepAliveStarted) return
         val action = Intent(this, MultiplayerKeepAliveService::class.java)
         runCatching {
             androidx.core.content.ContextCompat.startForegroundService(this, action)
@@ -208,6 +217,8 @@ class MainActivity : ComponentActivity() {
         netcodeMode.value = runCatching {
             NetcodeMode.valueOf(prefs.getString("netcode_mode", NetcodeMode.ROLLBACK.name)!!)
         }.getOrDefault(NetcodeMode.ROLLBACK)
+        keepMultiplayerInBackground.value =
+            prefs.getBoolean("netplay_background_enabled", true)
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
         iceServerOverrides.value = prefs.getString("ice_servers_override", "") ?: ""
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
@@ -254,6 +265,8 @@ class MainActivity : ComponentActivity() {
                     onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
                     netcodeMode = netcodeMode.value,
                     onNetcodeModeChanged = ::changeNetcodeMode,
+                    backgroundNetplayEnabled = keepMultiplayerInBackground.value,
+                    onBackgroundNetplayChanged = ::changeBackgroundNetplay,
                     iceServerOverrides = iceServerOverrides.value,
                     onIceOverridesChanged = ::changeIceOverrides,
                     iceTestStatus = iceTestStatus.value,
