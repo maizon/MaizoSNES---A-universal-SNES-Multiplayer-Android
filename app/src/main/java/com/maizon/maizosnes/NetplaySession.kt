@@ -449,7 +449,7 @@ internal class NetplaySession(
             }
             val adaptiveDelay = RollbackDelayController(latencyMode)
             val active = GekkoNative.nativeStartRtc(
-                if (host) 0 else 1, snapshot.size, 6, delayFrames, port)
+                if (host) 0 else 1, snapshot.size, 10, delayFrames, port)
             if (!active) {
                 onStatus("Inicialização Gekko RTC indisponível; TCP preservado.")
                 return false
@@ -542,8 +542,13 @@ internal class NetplaySession(
         val restored = state != null && loadState(state) == 0
         val elapsedMs = (System.nanoTime() - measureStart) / 1e6
         val address = connection.inetAddress as? Inet4Address
+        // Preserve the documented TCP_port + 1 forwarding convention for
+        // manually reachable INTERNET hosts. LAN peers use ephemeral UDP
+        // ports, avoiding interference with the discovery listener (55436).
+        val preferredPort = if (host && mode == NetworkMode.INTERNET &&
+            connection.localPort in 1024..65534) connection.localPort + 1 else 0
         val udpPort = if (address != null) runCatching {
-            DatagramSocket(0).use { it.localPort }
+            DatagramSocket(preferredPort).use { it.localPort }
         }.getOrDefault(0) else 0
         val viable = restored && state != null &&
             state.size in 32..16_777_216 && elapsedMs <= 24.0 &&
