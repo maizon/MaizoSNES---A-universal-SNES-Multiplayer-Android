@@ -5,6 +5,7 @@ import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -65,6 +66,9 @@ internal class NetplaySession(
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
         private const val VERSION = 6
+        // V7 is used only for direct LAN/IP rollback-aware control channels;
+        // V6 Lockstep/WSS layout is intentionally unchanged.
+        private const val VERSION_DIRECT_ROLLBACK = 7
         private const val MAX_ROM = 64 * 1024 * 1024
         private const val MAX_STATE = 64 * 1024 * 1024 + 28
         // Avoid heavy full-state snapshots every 2 seconds on slow ARM SoCs.
@@ -118,10 +122,13 @@ internal class NetplaySession(
     }
 
     fun host(port: Int) {
-        if (!tryRollback(null, port)) hostLockstep(port)
+        // Always complete the established MZNP ROM/option/rights handshake
+        // BEFORE choosing the native UDP transport. Direct rollback is
+        // negotiated within that TCP control session after ROM/state sync.
+        hostLockstep(port)
     }
     fun join(host: String, port: Int) {
-        if (!tryRollback(host, port)) joinLockstep(host, port)
+        joinLockstep(host, port)
     }
 
 
@@ -508,6 +515,117 @@ internal class NetplaySession(
         }
     }
 
+    /**
+     * Direct LAN/IP rollback upgrade over an ALREADY ROM-synchronized MZNP
+     * control socket. No extra TCP connection, no fixed UDP 55436 conflict
+     * with LAN discovery, no lost/duplicate ROM transfer.
+     *
+     * All opt-ins and local start results are exchanged symmetrically; when
+     * either peer declines/UDP fails before play, both resume the untouched
+     * MZNP frame-pipelined Lockstep protocol on the same TCP stream.
+     */
+    private fun tryDirectUdpRollback(connection: Socket,
+                                    input: DataInputStream, output: DataOutputStream,
+                                    host: Boolean): Boolean {
+        val measureStart = System.nanoTime()
+        val state = saveState()
+        val restored = state != null && loadState(state) == 0
+        val elapsedMs = (System.nanoTime() - measureStart) / 1e6
+        val address = connection.inetAddress as? Inet4Address
+        val udpPort = if (address != null) runCatching {
+            DatagramSocket(0).use { it.localPort }
+        }.getOrDefault(0) else 0
+        val viable = restored && state != null &&
+            state.size in 32..16_777_216 && elapsedMs <= 24.0 &&
+            udpPort in 1024..65535 && !closed.get()
+        output.writeBoolean(viable)
+        output.writeInt(udpPort)
+        output.flush()
+        val peerViable = input.readBoolean()
+        val remotePort = input.readInt()
+        if (!viable || !peerViable || remotePort !in 1024..65535) {
+            onStatus("Rollback LAN não disponível (save/load " +
+                String.format(java.util.Locale.US, "%.1f", elapsedMs) +
+                " ms ou UDP bloqueado). Usando Lockstep TCP.")
+            return false
+        }
+        val delay = when (latencyMode) {
+            NetplayLatencyMode.RESPONSIVE -> 0
+            NetplayLatencyMode.BALANCED -> 1
+            NetplayLatencyMode.STABLE -> 3
+        }
+        var nativeStarted = false
+        try {
+            nativeStarted = GekkoNative.nativeStart(udpPort, address!!.hostAddress,
+                remotePort, if (host) 0 else 1, state!!.size, 6, delay)
+            output.writeBoolean(nativeStarted)
+            output.flush()
+            if (!input.readBoolean() || !nativeStarted) {
+                onStatus("Socket UDP indisponível em um dos jogadores; Lockstep TCP.")
+                return false
+            }
+            val callbacks = object : RollbackCallbacks {
+                override fun save(): ByteArray =
+                    saveState() ?: error("Snes9x não serializou estado durante rollback")
+                override fun load(bytes: ByteArray): Boolean {
+                    NativeBridge.nativeSetRollbackReplaying(true)
+                    return loadState(bytes) == 0
+                }
+                override fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean {
+                    NativeBridge.nativeSetRollbackReplaying(resimulation)
+                    return this@NetplaySession.step(p1, p2) == 0
+                }
+            }
+            // Establish both UDP peers before declaring that emulation began.
+            val deadline = System.nanoTime() + 10_000_000_000L
+            var peerConnected = false
+            while (!closed.get() && System.nanoTime() < deadline) {
+                val tick = GekkoNative.nativeTick(0, callbacks)
+                if (tick < 0) break
+                val stats = GekkoNative.nativeStats()
+                if (stats.size >= 6 && stats[4] == 1) {
+                    peerConnected = true
+                    break
+                }
+                LockSupport.parkNanos(2_000_000L)
+            }
+            output.writeBoolean(peerConnected)
+            output.flush()
+            connection.soTimeout = 14000
+            val otherConnected = input.readBoolean()
+            if (!peerConnected || !otherConnected) {
+                onStatus("Gekko UDP não conectou os dois peers em 10s; Lockstep TCP.")
+                return false
+            }
+            onStatus(if (host) "Conectado como jogador 1 (Rollback UDP direto)"
+                else "Conectado como jogador 2 (Rollback UDP direto)")
+            // Game clock stays exclusively on this network worker.
+            val period = framePeriodNs().coerceIn(10_000_000L, 50_000_000L)
+            var lastStat = 0L
+            var nextFrame = System.nanoTime()
+            while (!closed.get()) {
+                val tick = GekkoNative.nativeTick(localInput(), callbacks)
+                if (tick < 0) error("Conexão GekkoNet UDP perdida: " + tick)
+                val now = System.nanoTime()
+                if (now - lastStat >= 1_000_000_000L) {
+                    val stats = GekkoNative.nativeStats()
+                    onMetrics(NetworkMetrics(stats[3].toLong(),
+                        0.0, 0.0, 0.0, 0, delay, stats[0].toDouble(),
+                        stats[1] / 10.0, stats[2].toLong(), rollback = true))
+                    lastStat = now
+                }
+                nextFrame += period
+                if (nextFrame < now - period * 2) nextFrame = now
+                val sleep = nextFrame - System.nanoTime()
+                if (sleep > 0) LockSupport.parkNanos(sleep)
+            }
+            return true
+        } finally {
+            NativeBridge.nativeSetRollbackReplaying(false)
+            if (nativeStarted) GekkoNative.nativeStop()
+        }
+    }
+
     private fun runSession(
         connection: Socket, host: Boolean, protectedTransport: Boolean = false,
         rtcEndpoint: String? = null, rtcRoomId: String? = null
@@ -521,11 +639,16 @@ internal class NetplaySession(
         val input = DataInputStream(BufferedInputStream(connection.getInputStream(), 8192))
         val output = DataOutputStream(BufferedOutputStream(connection.getOutputStream(), 4096))
         val ownRom = romDigest(rom)
+        // Host advertises optional post-ROM UDP rollback without changing
+        // the stable MZNP v6 Lockstep path. A v7 peer can opt out to TCP.
+        var protocolVersion = if (host && rtcEndpoint == null &&
+            netcodeMode == NetcodeMode.ROLLBACK) VERSION_DIRECT_ROLLBACK else VERSION
+        var peerAllowsRollback = false
         // A client computes its settings fingerprint AFTER applying host choices.
         if (host) {
             val ownOptions = optionsDigest()
             output.writeInt(MAGIC)
-            output.writeInt(VERSION)
+            output.writeInt(protocolVersion)
             output.write(ownRom)
             output.write(ownOptions)
             output.writeUTF(rom!!.name.take(110))
@@ -540,12 +663,15 @@ internal class NetplaySession(
             }
             output.flush()
 
-            require(input.readInt() == MAGIC && input.readInt() == VERSION) {
+            require(input.readInt() == MAGIC && input.readInt() == protocolVersion) {
                 "Cliente com protocolo incompatível."
             }
             val clientRom = read32(input)
             val clientOptions = read32(input)
             val clientReceives = input.readBoolean()
+            if (protocolVersion == VERSION_DIRECT_ROLLBACK) {
+                peerAllowsRollback = input.readBoolean()
+            }
             require(MessageDigest.isEqual(clientOptions, ownOptions)) {
                 "Opções do núcleo diferentes. Iguale as configurações."
             }
@@ -596,8 +722,10 @@ internal class NetplaySession(
                 connection.soTimeout = 20000
             }
         } else {
-            require(input.readInt() == MAGIC && input.readInt() == VERSION) {
-                "Host com protocolo incompatível."
+            require(input.readInt() == MAGIC) { "Host com protocolo incompatível." }
+            protocolVersion = input.readInt()
+            require(protocolVersion == VERSION || protocolVersion == VERSION_DIRECT_ROLLBACK) {
+                "Versão de protocolo MZNP incompatível: " + protocolVersion
             }
             val hostRom = read32(input)
             val hostOptions = read32(input)
@@ -628,10 +756,13 @@ internal class NetplaySession(
             val ownOptions = optionsDigest(serverOptions)
 
             output.writeInt(MAGIC)
-            output.writeInt(VERSION)
+            output.writeInt(protocolVersion)
             output.write(ownRom)
             output.write(ownOptions)
             output.writeBoolean(receiveAllowedByClient)
+            if (protocolVersion == VERSION_DIRECT_ROLLBACK) {
+                output.writeBoolean(netcodeMode == NetcodeMode.ROLLBACK)
+            }
             output.flush()
 
             require(MessageDigest.isEqual(hostOptions, ownOptions)) {
@@ -708,6 +839,13 @@ internal class NetplaySession(
             }
             output.writeByte(1)
             output.flush()
+        }
+
+        // Both peers now have the same ROM, core settings and Snes9x state.
+        // Do not touch this preflight before ROM approval/transfer completes.
+        if (rtcEndpoint == null && protocolVersion == VERSION_DIRECT_ROLLBACK &&
+            (if (host) peerAllowsRollback else netcodeMode == NetcodeMode.ROLLBACK)) {
+            if (tryDirectUdpRollback(connection, input, output, host)) return
         }
 
         if (rtcEndpoint != null && rtcRoomId != null &&
