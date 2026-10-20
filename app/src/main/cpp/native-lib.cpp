@@ -922,6 +922,15 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetPaused(JNIEnv*, jobject, jboolea
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeDiscardAudioQueue(JNIEnv*, jobject) {
+    // The game/netplay must not stop advancing just because the display is
+    // backgrounded. Discard only unheard PCM so foreground resume has no
+    // seconds-long backlog from the previous Surface.
+    const auto head = g_audioWrite.load(std::memory_order_acquire);
+    g_audioRead.store(head, std::memory_order_release);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
     g_paused.store(true, std::memory_order_release);
     stopFrameThread();

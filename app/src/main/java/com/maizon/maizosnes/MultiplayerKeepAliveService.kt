@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.net.wifi.WifiManager
 import android.content.pm.ServiceInfo
 
 /**
@@ -21,6 +22,7 @@ import android.content.pm.ServiceInfo
  */
 class MultiplayerKeepAliveService : Service() {
     private var wake: PowerManager.WakeLock? = null
+    private var wifi: WifiManager.WifiLock? = null
     private val channelId = "maizosnes_multiplayer"
 
     override fun onCreate() {
@@ -62,6 +64,21 @@ class MultiplayerKeepAliveService : Service() {
                     acquire()
                 }
         }
+        // A partial CPU wake lock alone cannot prevent Wi-Fi power saving
+        // from suspending the socket on some Android devices while screen off.
+        // Keep the Wi-Fi radio available for the duration of this session only.
+        if (wifi?.isHeld != true) {
+            runCatching {
+                val manager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                wifi = manager.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                    "MaizoSNES:MultiplayerWiFi").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        }
         // Restarting a service without its Activity-owned sockets cannot
         // reconstruct a deterministic session; don't create a fake room.
         return START_NOT_STICKY
@@ -70,6 +87,8 @@ class MultiplayerKeepAliveService : Service() {
     override fun onDestroy() {
         runCatching { if (wake?.isHeld == true) wake?.release() }
         wake = null
+        runCatching { if (wifi?.isHeld == true) wifi?.release() }
+        wifi = null
         super.onDestroy()
     }
     override fun onBind(intent: Intent?): IBinder? = null

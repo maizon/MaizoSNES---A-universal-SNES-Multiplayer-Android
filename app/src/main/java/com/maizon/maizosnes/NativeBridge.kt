@@ -21,6 +21,8 @@ object NativeBridge {
     external fun nativeGetFramePeriodNs(): Long
     external fun nativeNetplayStateHash(): Long
     external fun nativeSetPaused(paused: Boolean)
+    /** Discard outdated PCM written while multiplayer ran without audible output. */
+    external fun nativeDiscardAudioQueue()
     /** Cheap optional RGB565 filters (0 original, 1 scanline, 2 soft, 3 combined). */
     external fun nativeSetVideoFilter(mode: Int)
     /** Nearest-neighbor output framebuffer multiplier (1..4), not SNES PPU upscale. */

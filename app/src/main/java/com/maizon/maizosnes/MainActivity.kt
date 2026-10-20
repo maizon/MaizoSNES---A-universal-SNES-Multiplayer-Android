@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
     private var audioOutput: AudioOutput? = null
     private var hasLoadedRom = false
     private var activityResumed = false
+    private var audioOutputWasAudible = false
     private var surfaceAttached = false
     private var userPaused = false
 
@@ -2266,7 +2267,15 @@ class MainActivity : ComponentActivity() {
         if (!shouldRun) audioOutput?.stop()
         runCatching { NativeBridge.nativeSetPaused(if (liveSession)
             false else !shouldRun) }
-        if (shouldRun) audioOutput?.start()
+        if (shouldRun) {
+            // Only a backgrounded NETPLAY has kept producing PCM while
+            // AudioTrack was stopped. Drop its stale queue before playback.
+            if (liveSession && !audioOutputWasAudible) {
+                runCatching { NativeBridge.nativeDiscardAudioQueue() }
+            }
+            audioOutput?.start()
+        }
+        audioOutputWasAudible = shouldRun
         paused.value = userPaused || !shouldRun
     }
 
