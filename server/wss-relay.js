@@ -139,6 +139,7 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
           if (peer.pending.length < 10) return;
           // Never convert attacker-controlled 64-bit lengths to imprecise Number.
           if (peer.pending.readUInt32BE(2) !== 0 ||
+              peer.pending.readUInt32BE(6) < 65536 ||
               peer.pending.readUInt32BE(6) > maxFrame) {
             socket.destroy(); return;
           }
@@ -146,6 +147,8 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
         } else if (n === 126) {
           if (peer.pending.length < 4) return;
           n = peer.pending.readUInt16BE(2); offset = 4;
+          // RFC 6455 requires the shortest available length encoding.
+          if (n < 126) { socket.destroy(); return; }
         }
         if (n > maxFrame) { socket.destroy(); return; }
         if (peer.pending.length < offset + 4 + n) return;
