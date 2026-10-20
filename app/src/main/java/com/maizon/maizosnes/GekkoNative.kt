@@ -11,6 +11,8 @@ internal object GekkoNative {
         prediction: Int, delay: Int, port: WebRtcRollbackTransport): Boolean
     /** RTT ms, jitter 0.1ms, cumulative loads/rollbacks, advanced frames, connected, aborted. */
     external fun nativeStats(): IntArray
+    /** Live per-peer delay; official GekkoNet local input scheduling. */
+    external fun nativeSetLocalDelay(frames: Int): Boolean
     external fun nativeStop()
 }
 internal interface RollbackCallbacks {

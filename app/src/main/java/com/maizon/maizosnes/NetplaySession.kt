@@ -447,6 +447,7 @@ internal class NetplaySession(
                 NetplayLatencyMode.BALANCED -> 1
                 NetplayLatencyMode.STABLE -> 3
             }
+            val adaptiveDelay = RollbackDelayController(latencyMode)
             val active = GekkoNative.nativeStartRtc(
                 if (host) 0 else 1, snapshot.size, 6, delayFrames, port)
             if (!active) {
@@ -497,10 +498,16 @@ internal class NetplaySession(
                     if (connected && System.nanoTime() - metricsAt > 1_000_000_000L) {
                         metricsAt = System.nanoTime()
                         port.refreshIceStats()
+                        adaptiveDelay.offer(metricsAt, stats[2].toLong(),
+                            stats[0].toDouble(), stats[1] / 10.0)?.let {
+                            if (GekkoNative.nativeSetLocalDelay(it))
+                                onStatus("GekkoNet: atraso ajustado automaticamente para " +
+                                    it + " quadros.")
+                        }
                         onMetrics(NetworkMetrics(
                             frame = stats[3].toLong(), peerWaitMs = 0.0,
                             maxPeerWaitMs = 0.0, effectiveFps = 0.0,
-                            stalledFrames = 0, inputDelayFrames = delayFrames,
+                            stalledFrames = 0, inputDelayFrames = adaptiveDelay.delay,
                             sampledRttMs = stats[0].toDouble(),
                             jitterMs = stats[1] / 10.0,
                             rollbackCount = stats[2].toLong(),
@@ -557,6 +564,7 @@ internal class NetplaySession(
             NetplayLatencyMode.BALANCED -> 1
             NetplayLatencyMode.STABLE -> 3
         }
+        val adaptiveDelay = RollbackDelayController(latencyMode)
         var nativeStarted = false
         try {
             nativeStarted = GekkoNative.nativeStart(udpPort, address!!.hostAddress,
@@ -614,8 +622,13 @@ internal class NetplaySession(
                 val now = System.nanoTime()
                 if (now - lastStat >= 1_000_000_000L) {
                     val stats = GekkoNative.nativeStats()
+                    adaptiveDelay.offer(now, stats[2].toLong(),
+                        stats[0].toDouble(), stats[1] / 10.0)?.let {
+                        if (GekkoNative.nativeSetLocalDelay(it))
+                            onStatus("GekkoNet LAN: atraso dinâmico " + it + " quadros.")
+                    }
                     onMetrics(NetworkMetrics(stats[3].toLong(),
-                        0.0, 0.0, 0.0, 0, delay, stats[0].toDouble(),
+                        0.0, 0.0, 0.0, 0, adaptiveDelay.delay, stats[0].toDouble(),
                         stats[1] / 10.0, stats[2].toLong(), rollback = true))
                     lastStat = now
                 }

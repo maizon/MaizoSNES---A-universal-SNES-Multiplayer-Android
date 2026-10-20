@@ -39,8 +39,9 @@ class MultiplayerKeepAliveService : Service() {
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = Notification.Builder(this,
-            if (Build.VERSION.SDK_INT >= 26) channelId else "")
+        val builder = if (Build.VERSION.SDK_INT >= 26)
+            Notification.Builder(this, channelId) else Notification.Builder(this)
+        val notification = builder
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setContentTitle("MaizoSNES — multiplayer ativo")
             .setContentText("Sessão LAN/online em andamento • toque para voltar")

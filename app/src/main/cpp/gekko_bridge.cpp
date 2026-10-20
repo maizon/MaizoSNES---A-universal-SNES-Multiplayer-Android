@@ -184,7 +184,9 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStart(
     }
     gekko_set_local_delay(session, localHandle, static_cast<unsigned char>(delay));
     gekko_set_input_prediction_window(session, static_cast<unsigned char>(prediction));
-    gekko_set_disconnect_timeout(session, 6000);
+    // Network changes and Android scheduling can delay incoming packets.
+    // Do not tear down a valid multiplayer session after a 6-second hiccup.
+    gekko_set_disconnect_timeout(session, 30000);
     stateCapacity = static_cast<unsigned int>(size);
     rollbackCount = 0;
     advances = 0;
@@ -325,6 +327,16 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStats(JNIEnv* env, jobject) {
     jintArray array = env->NewIntArray(6);
     if (array) env->SetIntArrayRegion(array, 0, 6, values);
     return array;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_maizon_maizosnes_GekkoNative_nativeSetLocalDelay(
+    JNIEnv*, jobject, jint frames) {
+    std::lock_guard<std::mutex> lock(sessionLock);
+    if (!session || localHandle < 0 || frames < 0 || frames > 8)
+        return JNI_FALSE;
+    gekko_set_local_delay(session, localHandle, static_cast<unsigned char>(frames));
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL
