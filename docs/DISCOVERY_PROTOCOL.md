@@ -29,4 +29,13 @@ This file is a **verification checklist**, not a replacement wire specification.
 5. Transfer a redistributable homebrew ROM only after host authorization and client consent; verify destination SHA-256.
 6. Confirm the debug overlay reports the *actual* transport.
 
-Exact discovery datagram field names, encoding, version and size limits must be extracted from the implementation and independently covered by tests before this document is promoted to a normative wire specification.
+## Verified datagram format (LanDiscovery.kt)
+
+- UDP port: `55436`. Scanner sends the ASCII probe `MZSCAN2` as a broadcast datagram (global and interface-specific broadcast destinations), repeating about every 650 ms during the scan window.
+- Advertiser replies only to probes from site-local addresses. Reply is UTF-8: `MZOFFER2|<tcpPort>|<gameName>|<romHashPrefix>|<cheats>`.
+- `tcpPort` must be between 1024 and 65535; `gameName` is sanitized to 76 characters; `romHashPrefix` is either empty or exactly 16 lowercase hexadecimal characters; `cheats` is `1` or `0`.
+- Datagram receive buffer: 512 bytes. Default scan window: 1750 ms, clamped to 250–5000 ms; socket receive timeout: 220 ms.
+- The scanner accepts replies from site-local addresses only, deduplicates by `host:port` and sorts by game then host.
+- This is **discovery v2**, independent of the **MZNP v7 TCP negotiation protocol**. Neither probe nor offer transfers ROM contents.
+- Parsing behavior has been read from the implementation; physical discovery and packet-loss resilience remain **unverified on two devices**.
+
