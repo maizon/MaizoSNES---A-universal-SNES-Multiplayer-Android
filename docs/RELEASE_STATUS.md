@@ -111,3 +111,13 @@ Added real loopback WebSocket integration coverage at 126, 65,535 and 65,536
 bytes in both directions. The normal 32 KiB ROM chunks are unchanged.
 This is a protocol regression test, **not** evidence of two-device NAT/ICE
 connectivity or permissioned ROM transfer on hardware.
+
+## 2026-10-19 — signaling and WebSocket control-frame hardening
+
+Added local relay integration coverage for a hidden GekkoSignaling room, binary
+TURN-capability exchange, segmented SDP, trickle candidate and bilateral
+Lockstep fallback acknowledgment. The WSS parser now rejects RFC 6455 control
+frames longer than 125 bytes and one-byte close payloads rather than emitting
+an invalid pong. These are synthetic protocol tests only: they do not validate
+Android WebRTC, ICE/NAT traversal or two-device ROM transfer. Production Railway
+may remain pinned to an older commit until an independently verified deployment.

@@ -154,6 +154,11 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
         peer.pending = peer.pending.subarray(offset + 4 + n);
         for (let k = 0; k < data.length; k++) data[k] ^= mask[k % 4];
         const opcode = one & 15;
+        // RFC 6455 control frames cannot exceed 125 bytes; a close frame
+        // with a one-byte payload is invalid. Reject before echoing a ping.
+        if ((opcode & 8) && (n > 125 || (opcode === 8 && n === 1))) {
+          socket.destroy(); return;
+        }
         if (opcode === 8) { socket.end(); return; }
         if (opcode === 9) { send(peer, data, 10); continue; }
         if (opcode === 10) continue;
