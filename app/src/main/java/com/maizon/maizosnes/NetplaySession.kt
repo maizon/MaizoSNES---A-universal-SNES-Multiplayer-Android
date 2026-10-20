@@ -611,10 +611,28 @@ internal class NetplaySession(
             }
             output.writeBoolean(peerConnected)
             output.flush()
+            // A peer can see GekkoPlayerConnected BEFORE the other peer does.
+            // Blocking here on TCP would stop Gekko UDP polling/heartbeats,
+            // so the second peer might never complete its UDP handshake.
+            // Poll the TCP acknowledgment non-blockingly while continuing
+            // to service Gekko networking until both are ready.
             connection.soTimeout = 14000
-            val otherConnected = input.readBoolean()
-            if (!peerConnected || !otherConnected) {
-                onStatus("Gekko UDP não conectou os dois peers em 10s; Lockstep TCP.")
+            var otherConnected: Boolean? = null
+            val readyDeadline = System.nanoTime() + 14_000_000_000L
+            while (!closed.get() && otherConnected == null &&
+                System.nanoTime() < readyDeadline) {
+                if (input.available() > 0) {
+                    otherConnected = input.readBoolean()
+                    break
+                }
+                val polled = GekkoNative.nativeTick(0, callbacks)
+                NativeBridge.nativeSetRollbackReplaying(false)
+                if (polled < 0) break
+                LockSupport.parkNanos(framePeriodNs().coerceIn(
+                    10_000_000L, 20_000_000L))
+            }
+            if (!peerConnected || otherConnected != true) {
+                onStatus("Gekko UDP não conectou ambos em tempo hábil; Lockstep TCP.")
                 return false
             }
             onStatus(if (host) "Conectado como jogador 1 (Rollback UDP direto)"
