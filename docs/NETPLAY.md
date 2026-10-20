@@ -284,3 +284,17 @@ persistent notification and partial CPU wake lock is active ONLY for a live
 multiplayer session. Temporary onPause/surface loss does not stop the network
 thread. Android force-stop, process termination or connectivity changes can
 still end the session; no reconnection protocol is claimed.
+
+
+### Refinamento de UDP no modo IP manual (20/10/2026)
+
+Na LAN, GekkoNet usa portas UDP efêmeras, negociadas pelo canal TCP depois da
+transferência/checagem SHA-256; isso evita a porta UDP 55436 da descoberta.
+No modo **Internet/IP manual** com porta TCP explicitamente exposta, o host
+preserva a convenção anterior **UDP = TCP + 1** para permitir encaminhamento
+de porta no roteador. O cliente continua usando UDP efêmero; se a rota falhar,
+ambos tentam permanecer na mesma partida via Lockstep TCP. No modo WebRTC
+com DataChannel, a janela máxima de previsão de inputs é 10 quadros (em vez
+de 6), para tolerar picos transitórios de jitter de rede móvel; pode haver
+mais reprocessamento quando a perda é intensa e isso deve ser avaliado em
+dois celulares reais.
