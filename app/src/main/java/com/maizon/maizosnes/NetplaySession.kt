@@ -448,6 +448,9 @@ internal class NetplaySession(
                 NetplayLatencyMode.STABLE -> 3
             }
             val adaptiveDelay = RollbackDelayController(latencyMode)
+            val limitedSaving = elapsedMs > 8.0
+            val presentation = NetplayPresentationPolicy()
+            GekkoNative.nativeConfigureLimitedSaving(limitedSaving)
             val active = GekkoNative.nativeStartRtc(
                 if (host) 0 else 1, snapshot.size, 10, delayFrames, port)
             if (!active) {
@@ -472,6 +475,8 @@ internal class NetplaySession(
                 val period = framePeriodNs().coerceIn(10000000L, 50000000L)
                 var connected = false
                 var metricsAt = 0L
+                var worstTick = 0L
+                var stallCount = 0L
                 while (!closed.get()) {
                     val tickStart = System.nanoTime()
                     val executed = GekkoNative.nativeTick(localInput(), callbacks)
@@ -506,6 +511,8 @@ internal class NetplaySession(
                                 onStatus("GekkoNet: atraso ajustado automaticamente para " +
                                     it + " quadros.")
                         }
+                        val stride = presentation.offer(stats[0].toDouble())
+                        NativeBridge.nativeSetNetplayPresentationStride(stride)
                         onMetrics(NetworkMetrics(
                             frame = stats[3].toLong(), peerWaitMs = 0.0,
                             maxPeerWaitMs = 0.0, effectiveFps = 0.0,
@@ -514,15 +521,26 @@ internal class NetplaySession(
                             jitterMs = stats[1] / 10.0,
                             rollbackCount = stats[2].toLong(),
                             rollback = true, webRtc = true, iceState = port.iceState,
-                            turnUsed = port.turnUsed, natType = port.natType))
+                            turnUsed = port.turnUsed, natType = port.natType,
+                            saveLoadMs = elapsedMs, maxFrameStallMs = worstTick / 1e6,
+                            presentationStride = stride, limitedSaving = limitedSaving))
+                        worstTick = 0L
                     }
-                    val sleep = period - (System.nanoTime() - tickStart)
+                    val tickNs = System.nanoTime() - tickStart
+                    worstTick = maxOf(worstTick, tickNs)
+                    if (tickNs > 500_000_000L) {
+                        stallCount++
+                        onStatus("Aviso: GekkoNet WebRTC parou " +
+                            (tickNs / 1_000_000L) + " ms; pico " + stallCount)
+                    }
+                    val sleep = period - tickNs
                     if (sleep > 0L) java.util.concurrent.locks.LockSupport.parkNanos(sleep)
                 }
                 return true
             } finally {
                 NativeBridge.nativeSetRollbackReplaying(false)
                 GekkoNative.nativeStop()
+                NativeBridge.nativeSetNetplayPresentationStride(1)
                 if (!rtcSessionStarted && !closed.get()) {
                     // A partially negotiated Gekko instance may have
                     // speculatively advanced Snes9x. Restore the exact
@@ -573,6 +591,8 @@ internal class NetplaySession(
         val ip = address!!.hostAddress
         val period = framePeriodNs().coerceIn(10_000_000L, 50_000_000L)
         val controller = RollbackDelayController(latencyMode)
+        val limitedSaving = saveLoadMs > 8.0
+        val presentation = NetplayPresentationPolicy()
         val callbacks = object : RollbackCallbacks {
             override fun save(): ByteArray =
                 saveState() ?: error("Snes9x não serializou durante rollback")
@@ -607,6 +627,7 @@ internal class NetplaySession(
                     "Estado inicial do host não pôde ser restaurado."
                 }
                 started = if (candidateValid) runCatching {
+                    GekkoNative.nativeConfigureLimitedSaving(limitedSaving)
                     GekkoNative.nativeStart(port, ip, peerPort,
                         if (host) 0 else 1, state.size, 6, controller.delay)
                 }.getOrDefault(false) else false
@@ -675,12 +696,16 @@ internal class NetplaySession(
                                     stats[0].toDouble(), stats[1] / 10.0)?.let {
                                     GekkoNative.nativeSetLocalDelay(it)
                                 }
+                                val stride = presentation.offer(stats[0].toDouble())
+                                NativeBridge.nativeSetNetplayPresentationStride(stride)
                                 onMetrics(NetworkMetrics(stats[3].toLong(),
                                     0.0, 0.0, 0.0, stalls, controller.delay,
                                     stats[0].toDouble(), stats[1] / 10.0,
                                     stats[2].toLong(), rollback = true,
                                     saveLoadMs = saveLoadMs,
-                                    maxFrameStallMs = peakTickNs / 1e6))
+                                    maxFrameStallMs = peakTickNs / 1e6,
+                                    presentationStride = stride,
+                                    limitedSaving = limitedSaving))
                                 peakTickNs = 0L
                                 lastMetric = now
                             }
@@ -698,6 +723,7 @@ internal class NetplaySession(
             } finally {
                 NativeBridge.nativeSetRollbackReplaying(false)
                 if (started) GekkoNative.nativeStop()
+                NativeBridge.nativeSetNetplayPresentationStride(1)
                 if (!committed && !closed.get()) {
                     val restore = loadState(state)
                     check(restore == 0) { "Falha ao restaurar estado após UDP: $restore" }
