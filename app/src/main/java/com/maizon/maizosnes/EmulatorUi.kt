@@ -2632,6 +2632,12 @@ private fun NetplayDebugDialog(
                 Text("Rollbacks/s: " + debug.rollbacksPerSec)
                 Text("Correções totais: " + debug.totalRollbacks)
                 Text("Input delay: " + (debug.delay?.toString() ?: "N/D") + " quadros")
+                Text("Snes9x save+load: " + number(debug.saveLoadMs) + " ms")
+                Text("Maior parada Gekko: " +
+                    String.format(java.util.Locale.US, "%.0f", debug.peakFrameStallMs) + " ms")
+                Text("Render exibido: " +
+                    if (debug.presentationStride > 1) "1 em 2 quadros" else "todos")
+                Text("Limited Saving: " + if (debug.limitedSaving) "ON" else "OFF")
                 Text("Desyncs detectados: " + debug.desyncs)
                 Text("Quadros executados: " + debug.frame)
                 Text(debug.state, color = Mint, fontSize = 11.sp)

@@ -2093,7 +2093,13 @@ class MainActivity : ComponentActivity() {
                             totalRollbacks = total, delay = metrics.inputDelayFrames,
                             iceState = metrics.iceState,
                             natType = metrics.natType, turnUsed = metrics.turnUsed,
-                            frame = metrics.frame, state = "Partida em andamento")
+                            frame = metrics.frame,
+                            saveLoadMs = metrics.saveLoadMs.takeIf { it > 0.0 },
+                            peakFrameStallMs = maxOf(old.peakFrameStallMs,
+                                metrics.maxFrameStallMs),
+                            presentationStride = metrics.presentationStride,
+                            limitedSaving = metrics.limitedSaving,
+                            state = "Partida em andamento")
                         lastRollbackCounter = total
                         lanStatus.value = if (metrics.rollback)
                             String.format(java.util.Locale.US,
@@ -2217,6 +2223,10 @@ class MainActivity : ComponentActivity() {
             appendLine("RTT: " + debug.rttMin + " / " + debug.rttAvg +
                 " / " + debug.rttMax)
             appendLine("Jitter: " + debug.jitterMs)
+            appendLine("Snes9x save+load: " + debug.saveLoadMs + " ms")
+            appendLine("Pico de processamento Gekko: " + debug.peakFrameStallMs + " ms")
+            appendLine("Renderização: 1/" + debug.presentationStride + " quadros")
+            appendLine("Limited Saving: " + debug.limitedSaving)
             appendLine("Perda: " + debug.packetLoss)
             appendLine("Correções/s: " + debug.rollbacksPerSec)
             appendLine("Total: " + debug.totalRollbacks)
