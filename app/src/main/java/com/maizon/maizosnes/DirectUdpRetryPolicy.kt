@@ -13,8 +13,11 @@ internal object DirectUdpRetryPolicy {
 
     fun candidatePreferred(preferred: Int, attempt: Int): Int {
         require(attempt in 1..ATTEMPTS)
-        return if (attempt == 1 && preferred in 1024..65535 &&
-            preferred != DISCOVERY_PORT) preferred else 0
+        // In direct INTERNET TCP+1, the discovery UDP listener is already
+        // closed after TCP accept. That preferred port is safe to reuse.
+        // LAN remains ephemeral and cannot collide with discovery.
+        return if (attempt == 1 && preferred in 1024..65535)
+            preferred else 0
     }
 
     fun reservePort(preferred: Int, attempt: Int,
@@ -23,6 +26,9 @@ internal object DirectUdpRetryPolicy {
                     }): Int {
         val candidate = candidatePreferred(preferred, attempt)
         val port = runCatching { bind(candidate) }.getOrDefault(0)
-        return port.takeIf { it in 1024..65535 && it != DISCOVERY_PORT } ?: 0
+        return port.takeIf {
+            it in 1024..65535 &&
+                (it != DISCOVERY_PORT || (candidate == DISCOVERY_PORT && attempt == 1))
+        } ?: 0
     }
 }

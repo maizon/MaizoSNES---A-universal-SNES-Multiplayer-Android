@@ -15,8 +15,8 @@ class DirectUdpRetryPolicyTest {
             }
         }
         assertEquals(3, asked.size)
-        assertTrue(asked.all { it == 0 })
-        assertEquals(listOf(0, 50008, 50009), results)
+        assertEquals(listOf(55436, 0, 0), asked)
+        assertEquals(listOf(55436, 50008, 50009), results)
     }
 
     @Test fun internetFirstUsesForwardedPortThenEphemeralRetries() {
