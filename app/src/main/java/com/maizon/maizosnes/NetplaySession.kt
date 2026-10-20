@@ -454,6 +454,7 @@ internal class NetplaySession(
                 onStatus("Inicialização Gekko RTC indisponível; TCP preservado.")
                 return false
             }
+            var rtcSessionStarted = false
             try {
                 val callbacks = object : RollbackCallbacks {
                     override fun save(): ByteArray =
@@ -487,6 +488,7 @@ internal class NetplaySession(
                     val stats = GekkoNative.nativeStats()
                     if (stats.size >= 6 && stats[4] == 1 && !connected) {
                         connected = true
+                        rtcSessionStarted = true
                         onStatus(if (host)
                             "Conectado como jogador 1 (Rollback WebRTC DataChannel)."
                             else "Conectado como jogador 2 (Rollback WebRTC DataChannel).")
@@ -521,6 +523,15 @@ internal class NetplaySession(
             } finally {
                 NativeBridge.nativeSetRollbackReplaying(false)
                 GekkoNative.nativeStop()
+                if (!rtcSessionStarted && !closed.get()) {
+                    // A partially negotiated Gekko instance may have
+                    // speculatively advanced Snes9x. Restore the exact
+                    // MZNP initial state before both peers resume Lockstep.
+                    val reset = loadState(snapshot)
+                    check(reset == 0) {
+                        "Não foi possível restaurar estado após falha RTC: $reset"
+                    }
+                }
             }
         }
     }
@@ -571,6 +582,7 @@ internal class NetplaySession(
         }
         val adaptiveDelay = RollbackDelayController(latencyMode)
         var nativeStarted = false
+        var rollbackCommitted = false
         try {
             nativeStarted = GekkoNative.nativeStart(udpPort, address!!.hostAddress,
                 remotePort, if (host) 0 else 1, state!!.size, 6, delay)
@@ -635,6 +647,7 @@ internal class NetplaySession(
                 onStatus("Gekko UDP não conectou ambos em tempo hábil; Lockstep TCP.")
                 return false
             }
+            rollbackCommitted = true
             onStatus(if (host) "Conectado como jogador 1 (Rollback UDP direto)"
                 else "Conectado como jogador 2 (Rollback UDP direto)")
             // Game clock stays exclusively on this network worker.
@@ -667,6 +680,16 @@ internal class NetplaySession(
         } finally {
             NativeBridge.nativeSetRollbackReplaying(false)
             if (nativeStarted) GekkoNative.nativeStop()
+            if (!rollbackCommitted && !closed.get()) {
+                // Rewind speculative handshake frames on BOTH peers.
+                // The negotiated MZNP Lockstep session starts at the
+                // identical host-authoritative state rather than from
+                // two diverged UDP preflight timelines.
+                val reset = loadState(state!!)
+                check(reset == 0) {
+                    "Falha ao restaurar estado no fallback UDP: $reset"
+                }
+            }
         }
     }
 
