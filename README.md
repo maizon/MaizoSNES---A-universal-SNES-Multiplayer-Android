@@ -16,6 +16,21 @@ A biblioteca de jogos, a navegação para celular/tablet/TV, os cartões com cap
 
 ---
 
+## Revisão visual 21/10 — mais fiel ao NeoStation
+
+A interface anterior era predominantemente Material 3: muitas cartas sólidas, abas fixas no rodapé, destaque pequeno e títulos sob a barra de status. A revisão adotou os elementos realmente observados nas capturas do NeoStation incluídas no ZIP fornecido pelo usuário:
+
+- **Barra superior flutuante:** cápsula de navegação com quatro ícones, seleção azul clara e identidade Maizo; botão PLAY do jogo com destaque verde.
+- **Biblioteca imersiva:** banner de 284dp com arte da capa em fundo, gradientes de legibilidade, título e ação Jogar/Continuar. Sem ROM, desenho vetorial próprio do SNES em vez de jogos embutidos.
+- **Vidro/overlay:** cartões de jogos translúcidos; lista, grade, busca, favoritos, recentes e detalhes continuam conectados aos dados reais.
+- **Seleção tipo launcher:** linhas compactas com o item selecionado em azul claro e texto escuro, em vez de cartões roxos.
+- **Multiplayer priorizado:** configuração avançada do motor de rede recolhida inicialmente para mostrar salas mais cedo; link de diagnóstico mantido.
+- **Correção de interface comprovável pelo código:** respeita insets da barra de status Android (a captura anterior mostrava relógio e cabeçalho sobrepostos).
+- **Telas pequenas:** navegação superior e rolagem vertical. **Telas largas:** navegação lateral, biblioteca responsiva.
+
+Snes9x, ROM autorizada, netplay UDP, WSS, fallback TCP e mapeamento START não foram modificados. Isto é uma adaptação independente Kotlin/Compose da linguagem visual observada: não reproduz mídias, logotipos nem código Flutter do NeoStation. Necessita execução de CI e avaliação visual em aparelhos; não declare semelhança perfeita ou teste físico aprovado sem evidências.
+
+
 
 **Estado da branch `work/android-foundation`: candidato à versão 1.0, ainda sem release final publicada.** O usuário confirmou em teste físico que gameplay LAN e online e os recursos usados funcionaram bem; identificou uma falha específica: salas LAN com ROM diferente não permitiam solicitar a transferência autorizada. A interface de salas foi ajustada para permitir entrar quando **Aceitar ROM** está habilitado. Isso não dispensa consentimento explícito do host e cliente, nem a verificação SHA-256 antes da partida. A correção precisa de novo teste físico em dois aparelhos antes da etiqueta 1.0.
 

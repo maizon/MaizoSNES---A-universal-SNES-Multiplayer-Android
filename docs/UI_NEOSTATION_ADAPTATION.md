@@ -35,3 +35,12 @@ Esta rodada é exclusiva de UI: não alterar `native-lib.cpp`, `NetplaySession.k
 5. Verificar telas pequenas, 720dp+, paisagem e fontes grandes. Resultado físico depende de logs e testes do usuário, não do CI.
 
 Não publicar como "v1.0 definitiva validada" somente pelo CI.
+
+
+## Correção de fidelidade visual após capturas no dispositivo (21/10/2026)
+
+A versão inicial não reproduzia o padrão característico do NeoStation. As capturas enviadas pelo usuário mostraram excesso de cartões Material, navegação inferior e cabeçalhos sob os ícones Android. A revisão corrige a organização visual (sem trazer Flutter): **navegação em cápsula superior**, painel/hero de jogo com arte de capa e gradiente, paleta focada em azul claro e PLAY verde, cartões translúcidos, seleção de linhas com preenchimento azul, motor de multiplayer recolhível e status bar segura. Sem capas próprias, a biblioteca mostra arte vetorial original genérica, por isso não terá o fundo de um jogo específico até uma ROM/capa estar disponível.
+
+A referência NeoStation para composição de biblioteca inclui as capturas em `docs/screenshots/list-view-size/` do ZIP original, vistas para referência visual apenas. Não adicionar capturas/artwork do projeto GPLv3 ou de jogos comerciais aos recursos Android; não distribuir mídia sem autorização.
+
+**Conferência física pendente:** telas pequenas, fontes ampliadas, área status/navigation e comportamento real do gamepad; capturas do usuário não equivalem a validação da nova build.

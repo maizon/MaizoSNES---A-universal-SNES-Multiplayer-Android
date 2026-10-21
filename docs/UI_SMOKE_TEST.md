@@ -30,3 +30,14 @@
 - [ ] CI verde e APK com ambas ABIs.
 - [ ] Assinatura de Release reprodutível (APK de CI debug não é Release final).
 - [ ] Licenças de terceiros e créditos preservados.
+
+
+## Verificação específica desta revisão visual
+- [ ] Relógio, câmera frontal e ícones de status Android não cobrem cabeçalhos/cápsula.
+- [ ] Ícones Biblioteca / Multiplayer / Configurações / Créditos aparecem em cápsula no topo no celular e todas as rotas funcionam.
+- [ ] Sem ROM: ilustração genérica, Importar acessível, nenhuma arte comercial ou conteúdo externo.
+- [ ] Com capa no cache: banner exibe arte ao fundo, com texto legível e PLAY visível.
+- [ ] Gamepad: navegar cápsula, lista azul clara, botões de jogo e tela de detalhes.
+- [ ] Configurações: todas as oito categorias continuam acessíveis, sem cartões altos desnecessários; sem regressão em filtros/save state.
+- [ ] Multiplayer: seção Motor expande/recolhe, UDP/WebRTC e fallback seguem funcionais; atalho de status/log preservado.
+- [ ] Ajustar fontes maiores, 360dp de largura, landscape e tablet >=720dp sem sobreposição.
