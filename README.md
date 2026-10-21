@@ -1,3 +1,19 @@
+# MaizoSNES — Android SNES multiplayer
+
+**Estado da branch `work/android-foundation`: candidato à versão 1.0, ainda sem release final publicada.** O usuário confirmou em teste físico que gameplay LAN e online e os recursos usados funcionaram bem; identificou uma falha específica: salas LAN com ROM diferente não permitiam solicitar a transferência autorizada. A interface de salas foi ajustada para permitir entrar quando **Aceitar ROM** está habilitado. Isso não dispensa consentimento explícito do host e cliente, nem a verificação SHA-256 antes da partida. A correção precisa de novo teste físico em dois aparelhos antes da etiqueta 1.0.
+
+## Entrar em sala LAN sem a mesma ROM
+
+1. O anfitrião abre a ROM e cria uma sala LAN; ao iniciar, **autoriza explicitamente** compartilhar uma ROM que tem direito de redistribuir.
+2. O cliente habilita **Aceitar ROM** nas opções multiplayer e atualiza as salas LAN.
+3. O cliente pode tocar em **Entrar** mesmo quando o aviso mostra **ROM DIFERENTE**; o protocolo verifica a ROM e oferece a transferência autorizada somente em LAN privada.
+4. O cliente confirma a oferta. A ROM recebida é conferida por SHA-256 antes da sincronização inicial e da negociação Gekko UDP.
+5. Se não houver autorização, a conexão é recusada com uma mensagem explícita; não existe compartilhamento automático de ROM comercial.
+
+O modo manual IP:porta, o rollback GekkoNet e o fallback TCP continuam disponíveis. **Não contém ROMs nem BIOS.** O artefato `app-debug` do CI não deve ser anunciado como release estável assinada. Veja [validação](docs/VALIDATION.md), [testes em aparelhos](docs/DEVICE_TESTING.md) e [licenças](THIRD_PARTY_NOTICES.md).
+
+---
+
 ## Preview WebRTC rollback online (experimental, 2026-10-19)
 
 Na branch `work/android-foundation`, o MaizoSNES tenta WebRTC DataChannel
