@@ -1148,7 +1148,7 @@ class MainActivity : ComponentActivity() {
             val title = room.game.lowercase().replace(Regex("[^a-z0-9]"), "")
             val sameLegacyTitle = room.romHash.isBlank() &&
                 title.isNotBlank() && title == currentTitle
-            (sameHash || sameLegacyTitle) &&
+            (sameHash || sameLegacyTitle || receiveRomAllowed.value) &&
                 (!room.cheats || onlineCheatsOptIn.value)
         }
         if (lanCandidate != null) {
