@@ -44,3 +44,10 @@ A versão inicial não reproduzia o padrão característico do NeoStation. As ca
 A referência NeoStation para composição de biblioteca inclui as capturas em `docs/screenshots/list-view-size/` do ZIP original, vistas para referência visual apenas. Não adicionar capturas/artwork do projeto GPLv3 ou de jogos comerciais aos recursos Android; não distribuir mídia sem autorização.
 
 **Conferência física pendente:** telas pequenas, fontes ampliadas, área status/navigation e comportamento real do gamepad; capturas do usuário não equivalem a validação da nova build.
+
+
+## Biblioteca completa e UX multiplayer — 21/10/2026
+
+A implementação tem agora modos Grade 2/3/4, Lista vertical, Fileira horizontal e Coleção com seções Favoritos/Recentes/Todos, com rolagem única que inclui o banner em vez de prender a coleção a um espaço residual. Capas por título de SNES/arquivo normalizado podem ser carregadas opcionalmente do índice público libretro e mantidas em cache; não são recursos gráficos NeoStation nem jogos empacotados.
+
+A tela de redes prioriza salas antes de detalhes técnicos, mantém edição de consentimento e acesso aos perfis de rede. O editor de controles foi unificado para todos os layouts e salva escala/opacidade por botão. Ainda é **adaptação em Kotlin** de princípios visuais, não execução do frontend Flutter original.

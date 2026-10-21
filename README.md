@@ -1,11 +1,25 @@
 # MaizoSNES — Super Nintendo Android / LAN + Online
 
+## Experiência de biblioteca, capas e controles — candidato final (21/10/2026)
+
+A biblioteca agora usa **rolagem vertical única**: nenhum jogo fica inacessível abaixo do destaque. Selecione um dos quatro modos, sempre disponíveis na mesma tela: **▦ Grade (2/3/4 colunas), ☷ Lista, ↔ Fileira horizontal e ◫ Coleção** (Favoritos, Recentes e Todos). Use busca por título, filtro e ordenação por título/recência/arquivo. As escolhas sobrevivem à troca entre telas. Na paisagem o banner de destaque é compacto para deixar mais jogos visíveis.
+
+**Capas opcionais:** o libretro Named_Boxarts é consultado em HTTPS quando o usuário habilita Capas automáticas. A busca tenta identificar o jogo por catálogo ROM e por nome do header SNES, nome de arquivo sem tags/idioma e **título normalizado no índice de capas** (incluindo jogos com subtítulo/região). As imagens são verificadas como PNG e guardadas no armazenamento privado do app; **nenhuma capa, ROM ou BIOS está embutida no APK**. Ações ↻ BUSCAR CAPAS POR NOME e cache local permitem repetir a busca. O catálogo é atualizado no máximo semanalmente. Correspondência não é garantida para ROMs muito renomeadas/homebrew ou servidor offline. Consulte [capas](docs/COVER_ART.md).
+
+**Multiplayer para iniciantes:** modos Automático, LAN e Offline local estão visíveis; listas de salas e botões para entrar/criar aparecem antes dos ajustes técnicos. Configurações de rollback, latência e ICE continuam na mesma aba em painel expansível. Compartilhar/aceitar ROM requer consentimento e permanece acessível. O transporte UDP/Gekko, WebRTC e TCP não foi alterado.
+
+**Controles:** uma nova disposição adaptativa coloca direcional e ABXY nas bordas inferiores (landscape e retrato), ombreiras nos cantos superiores e SELECT/START em local acessível; os estilos existentes continuam disponíveis. Você pode mover grupos ou cada botão com toque no editor e, em Ajustes > Controles, mudar **tamanho e opacidade individualmente** para D-Pad, ABXY, L/R e SELECT/START. O perfil salvo por jogo é compatível com configurações antigas. O botão START continua sendo START do SNES.
+
+**Status de validação:** publicação de código e testes/CI não significam que todos os layouts e redes passaram em celular. Para considerar `v1.0` final, instalar APK em aparelho e completar [roteiro de testes](docs/UI_SMOKE_TEST.md). O APK de CI usa assinatura debug e não é Release final de produção.
+
+---
+
 ## Nova interface unificada — NeoStation-inspired (Jetpack Compose)
 
 A biblioteca de jogos, a navegação para celular/tablet/TV, os cartões com capas, a busca, o painel de detalhes, os ajustes, os créditos, o multiplayer e o menu sobreposto no jogo agora compartilham uma identidade visual consistente, com inspiração **de design** no [NeoStation Frontend](https://github.com/misobadev/neostation-frontend). O MaizoSNES continua **inteiramente Android nativo em Kotlin/Compose**, sem trazer Flutter nem recursos gráficos GPLv3 de terceiros.
 
 - **Biblioteca:** destaque do jogo aberto/recente, acesso a Jogar/Continuar, capas com placeholder, coleções Todos/Favoritos/Recentes, pesquisa, grade 2/3/4, lista horizontal, painel de jogo, renomear e patch.
-- **Navegação:** barra inferior em celulares e menu lateral nas telas a partir de 720 dp; gamepad com foco visual preservado.
+- **Navegação:** cápsula flutuante superior nos celulares e menu lateral em telas >=720dp, com foco visual para gamepad.
 - **Multiplayer:** nova apresentação de status e modos, com todas as ações LAN, online, transferência autorizada e debug originais.
 - **Ajustes:** categorias e cartões temáticos para vídeo, áudio, controles, rede, estados, cheats, núcleo e desenvolvedor.
 - **Gameplay:** UI de pausa, menu e edição de controles tematizada; **START continua sendo o botão START do SNES**, não abre o menu.

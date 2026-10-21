@@ -38,4 +38,24 @@ class TouchProfilesTest {
             assertTrue(defaults.opacity in 0.2f..0.9f)
         }
     }
+    @Test fun perButtonSizeAndOpacityPersistWithoutBreakingLegacyProfiles() {
+        val preset = TouchPreset.VIRTUAL_GAMEPAD
+        val edited = preset.defaultLayout().copy(
+            buttonShifts = mapOf(8 to ButtonShift(.15f, -.07f)),
+            buttonStyles = mapOf(
+                4 to ButtonStyle(1.3f, .7f),
+                8 to ButtonStyle(.75f, .55f),
+                3 to ButtonStyle(1.2f, .9f))
+        )
+        val restored = TouchLayoutCodec.decode(TouchLayoutCodec.encode(edited), preset)!!
+        assertEquals(1.3f, restored.buttonStyles[4]!!.scale, .001f)
+        assertEquals(.55f, restored.buttonStyles[8]!!.opacity, .001f)
+        assertEquals(.15f, restored.buttonShifts[8]!!.x, .001f)
+        assertEquals(.07f, -restored.buttonShifts[8]!!.y, .001f)
+        assertEquals(.60f, ButtonStyle(-100f, 2f).sanitized().scale, .001f)
+        assertEquals(1f, ButtonStyle(-100f, 2f).sanitized().opacity, .001f)
+        val legacy = TouchLayoutCodec.decode("""{"preset":"VIRTUAL_GAMEPAD"}""", preset)!!
+        assertTrue(legacy.buttonStyles.isEmpty())
+    }
+
 }

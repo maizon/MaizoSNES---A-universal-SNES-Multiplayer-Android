@@ -20,31 +20,97 @@ internal object CoverArt {
         "https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/Named_Boxarts/"
     private const val MAX_IMAGE = 2_500_000
 
+    private const val CATALOG_MAX_BYTES = 2_500_000
+    private const val CATALOG_TTL_MS = 7L * 24 * 60 * 60 * 1000
+
     fun load(context: Context, file: File): Bitmap? {
+        if (!file.isFile) return null
         val knownName = runCatching { RomDatabase.lookup(context, file)?.title }.getOrNull()
-        val title = file.nameWithoutExtension
-        val candidates = listOfNotNull(knownName, title,
-            title.substringBefore('(').trim().takeIf { it.length > 4 })
-            .distinct().take(3)
+        val headerTitle = runCatching { SnesRomHeader.inspect(file).title }.getOrNull()
+        val filename = file.nameWithoutExtension
+        val aliases = listOfNotNull(knownName, headerTitle, filename,
+            filename.substringBefore('(').substringBefore('[').takeIf { it.length > 5 })
+            .distinct().filter { it.length in 5..150 }
         val cache = File(context.filesDir, "covers").apply { mkdirs() }
-        for (candidate in candidates) {
-            val key = MessageDigest.getInstance("SHA-256")
-                .digest(candidate.toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
-            val destination = File(cache, "$key.png")
+
+        // Reuse both the old title-keyed cache and the new filename-keyed cache.
+        val keys = listOf(filename) + aliases
+        keys.distinct().forEach { alias ->
+            val destination = File(cache, hash(alias) + ".png")
             if (destination.isFile && destination.length() in 1L..MAX_IMAGE.toLong()) {
-                decodeSmall(destination.readBytes())?.let { return it }
+                val image = runCatching { decodeSmall(destination.readBytes()) }.getOrNull()
+                if (image != null) return image
             }
-            val normalized = candidate.replace(Regex("[&*/:\"<>?\\\\|]"), "_")
-            val url = BASE + Uri.encode(normalized) + ".png"
-            val image = runCatching { fetchPng(url) }.getOrNull() ?: continue
-            val bitmap = decodeSmall(image) ?: continue
+        }
+
+        val catalog = readCatalog(cache)
+        val exactName = CoverTitleMatcher.bestCover(aliases, catalog)
+        val candidates = listOfNotNull(exactName) +
+            CoverTitleMatcher.directCandidates(aliases).map { "$it.png" }
+        for (candidate in candidates.distinct().take(6)) {
+            val safe = candidate.removeSuffix(".png")
+                .replace(Regex("""[&*/:"<>?\\|]"""), "_")
+            val url = BASE + Uri.encode(safe) + ".png"
+            val data = runCatching { fetchPng(url) }.getOrNull() ?: continue
+            val bitmap = decodeSmall(data) ?: continue
             runCatching {
-                File(cache, "$key.part").apply { writeBytes(image) }.renameTo(destination)
+                val destination = File(cache, hash(filename) + ".png")
+                val part = File(cache, hash(filename) + ".part")
+                part.writeBytes(data)
+                if (!part.renameTo(destination)) {
+                    part.delete()
+                }
             }
             return bitmap
         }
         return null
+    }
+
+    private fun hash(text: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+
+    private fun readCatalog(cache: File): List<String> {
+        val index = File(cache, "libretro_snes_boxarts.txt")
+        val now = System.currentTimeMillis()
+        if (index.isFile && index.length() in 1L..CATALOG_MAX_BYTES.toLong() &&
+            now - index.lastModified() < CATALOG_TTL_MS) {
+            return runCatching { index.readLines() }.getOrDefault(emptyList())
+        }
+        val connection = (URL(BASE).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 3000
+            readTimeout = 5000
+            instanceFollowRedirects = false
+            setRequestProperty("User-Agent", "MaizoSNES-CoverArt/1.0")
+        }
+        return try {
+            if (connection.responseCode != 200 ||
+                !connection.contentType.orEmpty().contains("text/html", true)) {
+                if (index.isFile) return index.readLines()
+                return emptyList()
+            }
+            val bytes = connection.inputStream.use { input ->
+                val data = ByteArrayOutputStream()
+                val block = ByteArray(16384)
+                while (true) {
+                    val count = input.read(block)
+                    if (count < 0) break
+                    if (data.size() + count > CATALOG_MAX_BYTES) return emptyList()
+                    data.write(block, 0, count)
+                }
+                data.toByteArray()
+            }
+            val filenames = CoverTitleMatcher.namesFromIndex(bytes.toString(Charsets.UTF_8))
+            if (filenames.size > 100) {
+                runCatching { index.writeText(filenames.joinToString("\n")) }
+            }
+            filenames
+        } catch (_: Exception) {
+            runCatching { if (index.isFile) index.readLines() else emptyList() }
+                .getOrDefault(emptyList())
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun fetchPng(url: String): ByteArray {

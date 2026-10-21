@@ -40,3 +40,10 @@ the app; do not silently remap Start as a workaround.
 ## 21/10/2026 — navegação NeoStation-inspired
 
 O frontend permanece em Jetpack Compose: menu lateral em telas >=720dp, navegação inferior em telas menores e feedback de foco visível nos itens clicáveis. O painel do jogo conserva os mapeamentos de entrada; o botão START continua a atuar como START do SNES; GUIDE/MODE abre o menu quando suportado pelo sistema Android. As provas de acessibilidade e gamepad físico ainda exigem teste em aparelho. Consulte `docs/UI_SMOKE_TEST.md`.
+
+
+## Customização touch adaptativa e persistência por botão
+
+A sobreposição agora utiliza coordenadas relativas para todos os 10 presets. O D-pad e ABXY ficam nas bordas inferiores, e L/R nos cantos superiores; Select/Start ficam próximos da borda inferior sem substituir o input do jogo. No jogo: engrenagem > EDITAR; arrastar os grupos ou alternar BOTÕES para mover cada controle. A configuração é persistida por título via `TouchLayoutCodec` e segue compatível com JSON de versões anteriores.
+
+Para **tamanho e transparência individuais**, abra Ajustes > Controles > Ajustar botões separadamente, escolha D-Pad/Y/X/B/A/L/R/SELECT/START e use as duas barras. O perfil salva `buttonStyles` contendo `scale` (0.60..1.55) e `opacity` (0.25..1.00), e `buttonShifts` para posicionamento. Restaurar este botão não afeta os demais. Teste físico do alcance multitouch e controles antigos ainda necessário.

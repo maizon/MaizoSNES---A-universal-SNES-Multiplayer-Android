@@ -40,8 +40,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
@@ -81,6 +83,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -100,6 +104,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -132,7 +138,8 @@ internal data class TouchLayout(
     val scale: Float = 1f,
     val opacity: Float = 0.62f,
     val preset: TouchPreset = TouchPreset.VIRTUAL_GAMEPAD,
-    val buttonShifts: Map<Int, ButtonShift> = emptyMap()
+    val buttonShifts: Map<Int, ButtonShift> = emptyMap(),
+    val buttonStyles: Map<Int, ButtonStyle> = emptyMap()
 )
 
 internal data class AppSettings(
@@ -374,6 +381,8 @@ internal fun MaizoEmulatorApp(
     onScanRomFolder: () -> Unit,
     onApplyRomPatch: () -> Unit,
     onScanAllDevice: () -> Unit,
+    onReloadCovers: () -> Unit,
+    onCoverNeeded: (String) -> Unit,
     onOpenInstagram: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
@@ -488,9 +497,10 @@ internal fun MaizoEmulatorApp(
         networkDebug, { connectionOverlay = false }, onExportDebug)
 
     // Avoid the status bar overlapping titles, as reported in the device screenshots.
-    BoxWithConstraints(Modifier.fillMaxSize()
+    BoxWithConstraints(Modifier.fillMaxSize().background(Bg)
         .windowInsetsPadding(WindowInsets.statusBars)) {
     val wideLayout = maxWidth >= 720.dp
+    val screenStateHolder = rememberSaveableStateHolder()
     Scaffold(
         containerColor = Bg,
         contentWindowInsets = WindowInsets(0),
@@ -552,14 +562,17 @@ internal fun MaizoEmulatorApp(
                 .background(Brush.verticalGradient(
                     listOf(Bg, Color(0xFF191F2A), Bg)))) {
         when (screen) {
-            AppScreen.LIBRARY -> LibraryScreen(
+            AppScreen.LIBRARY -> screenStateHolder.SaveableStateProvider("library") {
+                LibraryScreen(
                 Modifier.fillMaxSize(), romNames, coverBitmaps,
                 romHeaders, favoriteRoms, recentRoms, onToggleFavorite,
                 onRemoveRom, onApplyPatchToRom,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
                 onScanRomFolder, onApplyRomPatch, onScanAllDevice,
-                onOpenRom, onContinueGame, onRenameRom, onSetScreen
-            )
+                onOpenRom, onContinueGame, onRenameRom, onSetScreen,
+                onReloadCovers, onCoverNeeded
+                )
+            }
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize(), currentRomName, localRomHashPrefix, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
@@ -694,15 +707,19 @@ private fun LibraryScreen(
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
     onRenameRom: (String, String) -> Unit,
-    onSetScreen: (AppScreen) -> Unit
+    onSetScreen: (AppScreen) -> Unit,
+    onReloadCovers: () -> Unit,
+    onCoverNeeded: (String) -> Unit
 ) {
     var selectedRom by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var confirmRemove by remember { mutableStateOf<String?>(null) }
-    var libraryQuery by remember { mutableStateOf("") }
-    var columns by remember { mutableStateOf(2) }
-    var listMode by remember { mutableStateOf(false) }
-    var collectionMode by remember { mutableStateOf("Todos") }
+    var libraryQuery by rememberSaveable { mutableStateOf("") }
+    var columns by rememberSaveable { mutableStateOf(2) }
+    var viewMode by rememberSaveable { mutableStateOf("GRADE") }
+    var sortMode by rememberSaveable { mutableStateOf("Título") }
+    var sortExpanded by remember { mutableStateOf(false) }
+    var collectionMode by rememberSaveable { mutableStateOf("Todos") }
     val featuredRom = currentRomName?.takeIf { it in romNames }
         ?: recentRoms.firstOrNull { it in romNames }
         ?: romNames.firstOrNull()
@@ -710,7 +727,7 @@ private fun LibraryScreen(
         ?: "Sua coleção começa aqui"
     val homeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { homeFocus.requestFocus() }
-    val visibleRoms = remember(romNames, romHeaders, libraryQuery, collectionMode, favoriteRoms, recentRoms) {
+    val visibleRoms = remember(romNames, romHeaders, libraryQuery, collectionMode, favoriteRoms, recentRoms, sortMode) {
         val filtered = romNames.filter { name ->
             val gameTitle = romHeaders[name]?.title ?: name
             (name.contains(libraryQuery.trim(), ignoreCase = true) ||
@@ -718,16 +735,31 @@ private fun LibraryScreen(
                 (collectionMode != "Favoritos" || name in favoriteRoms) &&
                 (collectionMode != "Recentes" || name in recentRoms)
         }
-        if (collectionMode == "Recentes") filtered.sortedBy { recentRoms.indexOf(it) }
-        else filtered.sortedBy { (romHeaders[it]?.title ?: it).lowercase() }
+        when (sortMode) {
+            "Recentes" -> filtered.sortedBy { recentRoms.indexOf(it).let { p ->
+                if (p < 0) Int.MAX_VALUE else p } }
+            "Arquivo" -> filtered.sortedBy { it.lowercase() }
+            else -> filtered.sortedBy { (romHeaders[it]?.title ?: it).lowercase() }
+        }
     }
     BackHandler(enabled = selectedRom != null || renameTarget != null) {
         selectedRom = null
         renameTarget = null
     }
-    Box(modifier.background(Brush.verticalGradient(
+    BoxWithConstraints(modifier.background(Brush.verticalGradient(
         listOf(Color(0xFF15191E), Color(0xFF1A1D2E), Bg)))) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 15.dp, vertical = 8.dp)) {
+        val landscape = maxWidth > maxHeight
+        // One scrollable surface for BOTH controls and games:
+        // the former fixed-height hero previously hid the rest of the collection.
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(if (viewMode == "GRADE") columns else 1),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            item(key = "library_header", span = { GridItemSpan(maxLineSpan) }) {
+                Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(bottom = 11.dp)) {
             Column(Modifier.weight(1f)) {
@@ -737,7 +769,7 @@ private fun LibraryScreen(
             }
             NeoBadge("${romNames.size} JOGOS", highlighted = romNames.isNotEmpty())
         }
-        Box(Modifier.fillMaxWidth().height(284.dp)
+        Box(Modifier.fillMaxWidth().height(if (landscape) 148.dp else 195.dp)
             .clip(RoundedCornerShape(25.dp))
             .background(Brush.linearGradient(
                 listOf(Color(0xFF353963), Color(0xFF203B64),
@@ -827,8 +859,7 @@ private fun LibraryScreen(
                 OutlinedButton(onClick = onApplyRomPatch) { Text("PATCH ROM ATUAL") }
             }
         }
-        if (romNames.isNotEmpty()) {
-            TextField(value = libraryQuery, onValueChange = { libraryQuery = it.take(80) },
+        TextField(value = libraryQuery, onValueChange = { libraryQuery = it.take(80) },
                 singleLine = true, label = { Text("Buscar na coleção") },
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 shape = RoundedCornerShape(22.dp),
@@ -837,7 +868,6 @@ private fun LibraryScreen(
                     unfocusedContainerColor = NeoGlass,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent))
-        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
             .padding(vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("Todos", "Favoritos", "Recentes").forEach { mode ->
@@ -846,70 +876,119 @@ private fun LibraryScreen(
                     Text(if (mode == collectionMode) "● $mode" else mode, fontSize = 11.sp)
                 }
             }
-            listOf(2, 3, 4).forEach { count ->
-                OutlinedButton(onClick = { columns = count; listMode = false },
-                    contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text(if (!listMode && columns == count) "● $count" else "$count", fontSize = 11.sp)
+
+            listOf("GRADE" to "▦ Grade", "LISTA" to "☷ Lista",
+                "FILEIRA" to "↔ Fileira", "COLEÇÃO" to "◫ Coleção").forEach { item ->
+                androidx.compose.material3.FilterChip(selected = viewMode == item.first,
+                    onClick = { viewMode = item.first },
+                    label = { Text(item.second, fontSize = 11.sp) },
+                    modifier = Modifier.padFocusRing())
+            }
+            if (viewMode == "GRADE") listOf(2, 3, 4).forEach { count ->
+                androidx.compose.material3.FilterChip(selected = columns == count,
+                    onClick = { columns = count },
+                    label = { Text("${count}x", fontSize = 11.sp) })
+            }
+            Box {
+                OutlinedButton(onClick = { sortExpanded = true }) {
+                    Text("⇅ $sortMode", fontSize = 10.sp)
                 }
-            }
-            OutlinedButton(onClick = { listMode = true },
-                contentPadding = PaddingValues(horizontal = 8.dp)) {
-                Text(if (listMode) "● Lista" else "Lista", fontSize = 11.sp)
-            }
-        }
-        Text("JOGOS  •  " + visibleRoms.size + " ENCONTRADO(S)   |   A: DETALHES",
-            color = Muted, fontSize = 10.sp, letterSpacing = 0.7.sp)
-        if (visibleRoms.isEmpty()) {
-            Box(Modifier.fillMaxWidth().weight(1f).padding(top = 9.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(NeoGlass)
-                .border(1.dp, NeoOutline.copy(alpha = 0.58f),
-                    RoundedCornerShape(24.dp)),
-                contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(20.dp)) {
-                    Icon(Icons.Default.Gamepad, null, tint = Accent,
-                        modifier = Modifier.size(55.dp))
-                    Text(if (romNames.isEmpty()) "SUA BIBLIOTECA ESTÁ VAZIA"
-                        else "NENHUM RESULTADO", fontSize = 13.sp,
-                        fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                    Text(if (romNames.isEmpty()) "Importe ROMs próprias .sfc, .smc ou .zip."
-                        else "Experimente buscar outro título.",
-                        color = Muted, fontSize = 11.sp)
-                    if (romNames.isEmpty()) Button(onClick = onChooseAddRom,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Accent, contentColor = Bg),
-                        modifier = Modifier.padFocusRing()) {
-                        Text("+ ADICIONAR JOGOS", fontWeight = FontWeight.Black)
+                DropdownMenu(expanded = sortExpanded,
+                    onDismissRequest = { sortExpanded = false }) {
+                    listOf("Título", "Recentes", "Arquivo").forEach { mode ->
+                        DropdownMenuItem(text = { Text(mode) },
+                            onClick = { sortMode = mode; sortExpanded = false })
                     }
                 }
             }
-        } else if (listMode) {
-            LazyColumn(Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(visibleRoms, key = { it }) { name ->
+        }
+        Row(Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("BIBLIOTECA • ${visibleRoms.size} JOGOS", color = Color.White,
+                fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            TextButton(onClick = onReloadCovers) {
+                Text("↻ BUSCAR CAPAS POR NOME", color = Accent, fontSize = 10.sp)
+            }
+        }
+                }
+            }
+            if (visibleRoms.isEmpty()) {
+                item(key = "empty_library", span = { GridItemSpan(maxLineSpan) }) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Gamepad, null, tint = Accent,
+                            modifier = Modifier.size(48.dp))
+                        Text(if (romNames.isEmpty()) "Importe seu primeiro jogo SNES"
+                            else "Nenhum jogo encontrado", color = Muted)
+                        if (romNames.isEmpty()) Button(onClick = onChooseAddRom) {
+                            Text("+ ADICIONAR JOGO")
+                        }
+                    }
+                }
+            } else when (viewMode) {
+                "LISTA" -> gridItems(visibleRoms,
+                    span = { GridItemSpan(maxLineSpan) }, key = { "list_" + it }) { name ->
                     RomCard(name, romHeaders[name]?.title ?: File(name).nameWithoutExtension,
                         currentRomName == name, coverBitmaps[name],
                         { selectedRom = name }, { renameTarget = name },
-                        compact = true, listStyle = true)
+                        compact = true, listStyle = true, onCoverNeeded = onCoverNeeded)
                 }
-            }
-        } else {
-            LazyVerticalGrid(columns = GridCells.Fixed(columns),
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                gridItems(visibleRoms, key = { it }) { name ->
+                "FILEIRA" -> item(key = "game_row",
+                    span = { GridItemSpan(maxLineSpan) }) {
+                    LazyRow(Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        items(visibleRoms, key = { "row_" + it }) { name ->
+                            Box(Modifier.width(175.dp)) {
+                                RomCard(name, romHeaders[name]?.title ?: File(name).nameWithoutExtension,
+                                    currentRomName == name, coverBitmaps[name],
+                                    { selectedRom = name }, { renameTarget = name }, onCoverNeeded = onCoverNeeded)
+                            }
+                        }
+                    }
+                }
+                "COLEÇÃO" -> {
+                    val sections = listOf(
+                        "★ FAVORITOS" to visibleRoms.filter { it in favoriteRoms },
+                        "↺ RECENTES" to recentRoms.filter { it in visibleRoms },
+                        "TODOS OS JOGOS" to visibleRoms
+                    )
+                    sections.forEachIndexed { index, entry ->
+                        if (entry.second.isNotEmpty()) {
+                            item(key = "section_$index",
+                                span = { GridItemSpan(maxLineSpan) }) {
+                                Text(entry.first, color = Mint, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black)
+                            }
+                            item(key = "section_row_$index",
+                                span = { GridItemSpan(maxLineSpan) }) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    items(entry.second.distinct(), key = { "${index}_" + it }) { name ->
+                                        Box(Modifier.width(165.dp)) {
+                                            RomCard(name, romHeaders[name]?.title
+                                                    ?: File(name).nameWithoutExtension,
+                                                currentRomName == name, coverBitmaps[name],
+                                                { selectedRom = name }, { renameTarget = name }, onCoverNeeded = onCoverNeeded)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> gridItems(visibleRoms, key = { "grid_" + it }) { name ->
                     RomCard(name, romHeaders[name]?.title ?: File(name).nameWithoutExtension,
                         currentRomName == name, coverBitmaps[name],
-                        { selectedRom = name }, { renameTarget = name }, compact = columns >= 3)
+                        { selectedRom = name }, { renameTarget = name },
+                        compact = columns >= 3, onCoverNeeded = onCoverNeeded)
                 }
             }
+            item(key = "library_message", span = { GridItemSpan(maxLineSpan) }) {
+                Text(statusMessage, color = Muted, fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
         }
-        Text(statusMessage, color = Muted, fontSize = 11.sp, lineHeight = 15.sp,
-            modifier = Modifier.padding(top = 8.dp, bottom = 3.dp))
-    }
     }
     selectedRom?.let { name ->
         val info = romHeaders[name]
@@ -998,8 +1077,10 @@ private fun RomCard(
     onOpen: () -> Unit,
     onRename: () -> Unit,
     compact: Boolean = false,
-    listStyle: Boolean = false
+    listStyle: Boolean = false,
+    onCoverNeeded: (String) -> Unit = {}
 ) {
+    LaunchedEffect(fileName) { if (cover == null) onCoverNeeded(fileName) }
     Card(
         modifier = Modifier.fillMaxWidth().padFocusRing()
             .border(1.dp, Accent.copy(alpha = 0.24f), RoundedCornerShape(18.dp))
@@ -1201,12 +1282,13 @@ private fun MultiplayerScreen(
             shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.fillMaxWidth().padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("ESCOLHA COMO JOGAR", color = Mint, fontSize = 11.sp,
+                Text("1 • ESCOLHA ONDE JOGAR", color = Mint, fontSize = 12.sp,
                     fontWeight = FontWeight.Bold)
-                Text("Troque sem apagar saves, ROMs, configurações ou seus perfis de rede.",
+                Text("Toque em uma opção. Não altera sua biblioteca nem os saves.",
                     color = Muted, fontSize = 11.sp)
                 NetworkMode.values().filter { choice ->
                     advancedNetwork || choice == NetworkMode.AUTO ||
+                        choice == NetworkMode.LAN_AUTO ||
                         choice == NetworkMode.LOCAL || choice == connectionMode
                 }.forEachIndexed { index, choice ->
                     Card(
@@ -1239,83 +1321,35 @@ private fun MultiplayerScreen(
             }
         }
         if (connectionMode != NetworkMode.LOCAL) {
-            Surface(color = NeoGlass, shape = RoundedCornerShape(17.dp),
+            var showPermissions by remember { mutableStateOf(false) }
+            Surface(color = NeoGlass, shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth().padFocusRing()
-                    .border(1.dp, NeoOutline.copy(alpha = 0.75f),
-                        RoundedCornerShape(17.dp))
-                    .clickable { showNetcodeDetails = !showNetcodeDetails }) {
-                Row(Modifier.fillMaxWidth().padding(15.dp),
+                    .clickable { showPermissions = !showPermissions }) {
+                Row(Modifier.fillMaxWidth().padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("MOTOR  •  " + netcodeMode.label,
-                            fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("GekkoNet, latência, ICE/TURN e segundo plano",
-                            color = Muted, fontSize = 10.sp)
-                    }
-                    Text(if (showNetcodeDetails) "▲ FECHAR" else "▼ AJUSTES",
-                        color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-        if (connectionMode != NetworkMode.LOCAL && showNetcodeDetails) Card(
-            colors = CardDefaults.cardColors(containerColor = NeoGlass),
-            shape = RoundedCornerShape(18.dp)
-        ) {
-            Column(Modifier.fillMaxWidth().padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("MOTOR DE MULTIPLAYER",
-                    color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                NetcodeMode.values().forEach { choice ->
-                    ChoiceRow(choice.label, choice.info, choice == netcodeMode) {
-                        if (!active) onNetcodeModeChanged(choice)
-                    }
-                }
-                if (netcodeMode == NetcodeMode.ROLLBACK) {
-                    Text("Rollback GekkoNet usa UDP em LAN/IP ou " +
-                        "WebRTC DataChannel quando o ICE/STUN/TURN conecta online. " +
-                        "Caso contrário, Lockstep TCP via Railway é preservado.",
-                        fontSize = 11.sp, color = Muted)
-                    Text("RTT, jitter e correções aparecem nas estatísticas; " +
-                        "perda de pacotes não é publicada pela API atual do GekkoNet.",
-                        fontSize = 11.sp, color = Muted)
-                }
-                Row(
-                    Modifier.fillMaxWidth().padFocusRing(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Multiplayer em segundo plano",
-                            color = Mint, fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold)
-                        Text("Ativado por padrão. Mantém CPU/Wi-Fi conectados " +
-                            "ao trocar de app; aumenta o consumo de bateria. " +
-                            "Desligue aqui se preferir pausar a proteção.",
+                        Text("ROMs entre amigos", fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp)
+                        Text("Compartilhar/receber arquivos com autorização",
                             color = Muted, fontSize = 11.sp)
                     }
-                    Switch(
-                        checked = backgroundNetplayEnabled,
-                        onCheckedChange = onBackgroundNetplayChanged)
+                    Text(if (showPermissions) "▲" else "▼",
+                        color = Accent, fontSize = 16.sp)
                 }
-                Text("PERFIL DE LATÊNCIA • FALLBACK LOCKSTEP",
-                    color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text("O Lockstep TCP envia comandos para quadros futuros, evitando um RTT " +
-                    "a cada frame. Buffer menor reage mais rápido, " +
-                    "mas pode engasgar; o host aplica o mesmo buffer aos dois.",
-                    color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
-                NetplayLatencyMode.values().forEach { choice ->
-                    ChoiceRow(choice.label, choice.hint,
-                        netplayLatencyMode == choice) {
-                        if (!active) onNetplayLatencyModeChanged(choice)
-                    }
+            }
+            if (showPermissions) {
+                ToggleSettingRow("Aceitar ROM do anfitrião",
+                    "Você confirma cada oferta antes do download; verificação SHA-256.",
+                    receiveRomAllowed) {
+                    if (!active) onReceiveRomAllowedChanged(it)
                 }
-                if (advancedNetwork) IceServerSettings(
-                    iceServerOverrides, onIceOverridesChanged,
-                    iceTestStatus, onTestIce, !active)
-                if (active) Text("O buffer não pode ser alterado no meio da sessão.",
-                    color = Color(0xFFFFBD85), fontSize = 10.sp)
+                ToggleSettingRow("Oferecer ROM autorizada",
+                    "O anfitrião declara os direitos de redistribuição a cada sala.",
+                    shareRomAllowed) {
+                    if (!active) onShareRomAllowedChanged(it)
+                }
             }
         }
-
         if (connectionMode == NetworkMode.AUTO) Card(
             colors = CardDefaults.cardColors(containerColor = NeoGlass),
             shape = RoundedCornerShape(18.dp)
@@ -1349,8 +1383,8 @@ private fun MultiplayerScreen(
                     Text("JOGO RÁPIDO • ENTRAR OU CRIAR", color = Color(0xFF111827),
                         fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
                 }
-                Text("Jogo rápido procura amigos na LAN e salas online; se não encontrar, " +
-                    "cria automaticamente uma sala para você.",
+                Text("Jogo rápido busca pessoas e salas disponíveis. " +
+                    "Se não encontrar, tenta criar uma sala.",
                     color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1461,19 +1495,21 @@ private fun MultiplayerScreen(
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (connectionMode == NetworkMode.LOCAL || advancedNetwork) Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("DOIS JOGADORES • MESMO CELULAR", fontWeight = FontWeight.Bold)
-                Text("Um controle: touch P1 e gamepad P2. Dois controles: primeiro P1 e segundo P2. Depende do suporte do jogo.",
+                Text("Use touch e controle físico ou conecte dois controles. " +
+                    "O jogo precisa oferecer suporte ao segundo jogador.",
                     color = Muted, fontSize = 12.sp)
                 ToggleSettingRow("Ativar porta 2", "Funciona sem Wi-Fi e sem internet.", localMultiplayer, onLocalMode)
                 ToggleSettingRow(
                     "Autorizar cheats sincronizados no multiplayer",
-                    "Experimental: marque antes de entrar ou criar sala. O anfitrião " +
-                        "seleciona os cheats da biblioteca e os dois aparelhos instalam " +
-                        "exatamente os mesmos códigos antes do primeiro quadro. " +
-                        "Sem autorização, a partida com cheats é recusada. " +
-                        "Não é permitido mudar os códigos durante o jogo.",
+                    "Opcional para partidas em que os dois jogadores concordam. " +
+                        "Os códigos são iguais nos dois aparelhos e não podem mudar " +
+                        "durante a partida.",
                     onlineCheatsOptIn,
                     { if (!active) onOnlineCheatsChanged(it) }
                 )
@@ -1496,7 +1532,8 @@ private fun MultiplayerScreen(
                         Text("BUSCAR", fontSize = 11.sp)
                     }
                 }
-                if (connectionMode == NetworkMode.AUTO && !active) {
+                if ((connectionMode == NetworkMode.AUTO ||
+                        connectionMode == NetworkMode.LAN_AUTO) && !active) {
                     OutlinedButton(onClick = { onHost(55435) },
                         enabled = ready, modifier = Modifier.fillMaxWidth()) {
                         Text("CRIAR SALA LAN SEM INTERNET")
@@ -1697,6 +1734,84 @@ private fun MultiplayerScreen(
                 }
             }
         }
+        if (connectionMode != NetworkMode.LOCAL) {
+            Surface(color = NeoGlass, shape = RoundedCornerShape(17.dp),
+                modifier = Modifier.fillMaxWidth().padFocusRing()
+                    .border(1.dp, NeoOutline.copy(alpha = 0.75f),
+                        RoundedCornerShape(17.dp))
+                    .clickable { showNetcodeDetails = !showNetcodeDetails }) {
+                Row(Modifier.fillMaxWidth().padding(15.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("MOTOR  •  " + netcodeMode.label,
+                            fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("GekkoNet, latência, ICE/TURN e segundo plano",
+                            color = Muted, fontSize = 10.sp)
+                    }
+                    Text(if (showNetcodeDetails) "▲ FECHAR" else "▼ AJUSTES",
+                        color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        if (connectionMode != NetworkMode.LOCAL && showNetcodeDetails) Card(
+            colors = CardDefaults.cardColors(containerColor = NeoGlass),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("MOTOR DE MULTIPLAYER",
+                    color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                NetcodeMode.values().forEach { choice ->
+                    ChoiceRow(choice.label, choice.info, choice == netcodeMode) {
+                        if (!active) onNetcodeModeChanged(choice)
+                    }
+                }
+                if (netcodeMode == NetcodeMode.ROLLBACK) {
+                    Text("Rollback GekkoNet usa UDP em LAN/IP ou " +
+                        "WebRTC DataChannel quando o ICE/STUN/TURN conecta online. " +
+                        "Caso contrário, Lockstep TCP via Railway é preservado.",
+                        fontSize = 11.sp, color = Muted)
+                    Text("RTT, jitter e correções aparecem nas estatísticas; " +
+                        "perda de pacotes não é publicada pela API atual do GekkoNet.",
+                        fontSize = 11.sp, color = Muted)
+                }
+                Row(
+                    Modifier.fillMaxWidth().padFocusRing(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Multiplayer em segundo plano",
+                            color = Mint, fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold)
+                        Text("Ativado por padrão. Mantém CPU/Wi-Fi conectados " +
+                            "ao trocar de app; aumenta o consumo de bateria. " +
+                            "Desligue aqui se preferir pausar a proteção.",
+                            color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = backgroundNetplayEnabled,
+                        onCheckedChange = onBackgroundNetplayChanged)
+                }
+                Text("AJUSTE DE ATRASO (AVANÇADO)",
+                    color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("O Lockstep TCP envia comandos para quadros futuros, evitando um RTT " +
+                    "a cada frame. Buffer menor reage mais rápido, " +
+                    "mas pode engasgar; o host aplica o mesmo buffer aos dois.",
+                    color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
+                NetplayLatencyMode.values().forEach { choice ->
+                    ChoiceRow(choice.label, choice.hint,
+                        netplayLatencyMode == choice) {
+                        if (!active) onNetplayLatencyModeChanged(choice)
+                    }
+                }
+                if (advancedNetwork) IceServerSettings(
+                    iceServerOverrides, onIceOverridesChanged,
+                    iceTestStatus, onTestIce, !active)
+                if (active) Text("O buffer não pode ser alterado no meio da sessão.",
+                    color = Color(0xFFFFBD85), fontSize = 10.sp)
+            }
+        }
+
         Text("MZNP v7: LAN e IP manual continuam disponíveis. " +
             "Transferência entre redes exige TLS autenticado, confirmação do host " +
             "e aceite do cliente. O relay não fornece criptografia ponta a ponta.",
@@ -1877,6 +1992,12 @@ private fun containedSize(maxWidth: Dp, maxHeight: Dp, targetRatio: Float): Pair
     else maxWidth to (maxWidth / targetRatio)
 }
 
+/**
+ * Unified responsive touch layout for EVERY existing preset (including VGP).
+ * SNES mappings are unchanged. All face, shoulder and menu keys can be
+ * dragged individually; D-pad and face cluster can also be dragged as groups.
+ * The old VGP top-right oversized cluster is replaced by bottom-corner pads.
+ */
 @Composable
 private fun TouchOverlay(
     layout: TouchLayout,
@@ -1885,149 +2006,153 @@ private fun TouchOverlay(
     editIndividual: Boolean,
     onLayoutChanged: (TouchLayout) -> Unit
 ) {
-    if (layout.preset == TouchPreset.VIRTUAL_GAMEPAD) {
-        VirtualGamepadSnesOverlay(layout, onInputChanged, editing, editIndividual,
-            onLayoutChanged)
-        return
-    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
         val heightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
-        val liveLayout by rememberUpdatedState(layout)
-        val liveUpdate by rememberUpdatedState(onLayoutChanged)
-        val dpadSize = 51f * layout.scale
-        val actionSize = 49f * layout.scale
-        val yDpad = -(maxHeight * layout.dpadY.coerceIn(0f, 0.65f))
-        val xDpad = maxWidth * layout.dpadX.coerceIn(0f, 0.65f)
-        val yButtons = -(maxHeight * layout.buttonsY.coerceIn(0f, 0.65f))
-        val xButtons = -(maxWidth * layout.buttonsX.coerceIn(0f, 0.65f))
+        val current by rememberUpdatedState(layout)
+        val emit by rememberUpdatedState(onLayoutChanged)
+        val landscape = maxWidth > maxHeight
+        val base = minOf(maxWidth.value, maxHeight.value).coerceAtLeast(240f)
+        fun bitScale(bit: Int): Float = layout.buttonStyles[bit]?.sanitized()?.scale ?: 1f
+        fun bitOpacity(bit: Int): Float =
+            (layout.opacity * (layout.buttonStyles[bit]?.sanitized()?.opacity ?: 1f))
+                .coerceIn(0.15f, 1f)
+        val faceSize = (base * 0.130f * layout.scale).coerceIn(37f, 66f)
+        val dpadSize = (base * 0.128f * layout.scale * bitScale(4)).coerceIn(30f, 94f)
+        val padWidth = (dpadSize * if (layout.preset == TouchPreset.VIRTUAL_GAMEPAD)
+            2.5f else 3.0f).dp
+        val faceWidth = (faceSize * 2.95f *
+            listOf(0, 1, 8, 9).maxOf(::bitScale)).dp
+        val dpadLeft = (maxWidth * layout.dpadX).coerceIn(
+            0.dp, (maxWidth - padWidth - 24.dp).coerceAtLeast(0.dp))
+        val dpadRise = (maxHeight * layout.dpadY).coerceIn(
+            0.dp, (maxHeight - padWidth - 20.dp).coerceAtLeast(0.dp))
+        val faceRight = (maxWidth * layout.buttonsX).coerceIn(
+            0.dp, (maxWidth - faceWidth - 24.dp).coerceAtLeast(0.dp))
+        val faceRise = (maxHeight * layout.buttonsY).coerceIn(
+            0.dp, (maxHeight - faceWidth - 20.dp).coerceAtLeast(0.dp))
 
-        fun positionFor(bit: Int): Modifier {
+        fun bitModifier(bit: Int): Modifier {
             val shift = layout.buttonShifts[bit] ?: ButtonShift()
             val placement = Modifier.offset(
                 x = maxWidth * shift.x.coerceIn(-0.30f, 0.30f),
-                y = maxHeight * shift.y.coerceIn(-0.30f, 0.30f)
-            )
-            val edit = if (editing && editIndividual) Modifier.pointerInput(bit) {
-                detectDragGestures { change, amount ->
+                y = maxHeight * shift.y.coerceIn(-0.30f, 0.30f))
+            val drag = if (editing && editIndividual) Modifier.pointerInput(bit) {
+                detectDragGestures { change, delta ->
                     change.consume()
-                    val current = liveLayout.buttonShifts[bit] ?: ButtonShift()
-                    val updated = ButtonShift(current.x + amount.x / widthPx,
-                        current.y + amount.y / heightPx).sanitized()
-                    liveUpdate(liveLayout.copy(
-                        buttonShifts = liveLayout.buttonShifts + (bit to updated)))
+                    val before = current.buttonShifts[bit] ?: ButtonShift()
+                    val updated = ButtonShift(before.x + delta.x / widthPx,
+                        before.y + delta.y / heightPx).sanitized()
+                    emit(current.copy(buttonShifts =
+                        current.buttonShifts + (bit to updated)))
                 }
             } else Modifier
-            return placement.then(edit)
+            return placement.then(drag)
         }
-        val editDpad = if (editing) Modifier.pointerInput(editing) {
-            detectDragGestures { change, dragAmount ->
+        val moveDpad = if (editing) Modifier.pointerInput(editing) {
+            detectDragGestures { change, delta ->
                 change.consume()
-                liveUpdate(liveLayout.copy(
-                    dpadX = (liveLayout.dpadX + dragAmount.x / widthPx).coerceIn(0f, 0.65f),
-                    dpadY = (liveLayout.dpadY - dragAmount.y / heightPx).coerceIn(0f, 0.65f)
-                ))
+                emit(current.copy(
+                    dpadX = (current.dpadX + delta.x / widthPx).coerceIn(0f, 0.65f),
+                    dpadY = (current.dpadY - delta.y / heightPx).coerceIn(0f, 0.65f)))
             }
         } else Modifier
-        val editButtons = if (editing && !editIndividual) Modifier.pointerInput(editing) {
-            detectDragGestures { change, dragAmount ->
+        val moveFace = if (editing && !editIndividual) Modifier.pointerInput(editing) {
+            detectDragGestures { change, delta ->
                 change.consume()
-                liveUpdate(liveLayout.copy(
-                    buttonsX = (liveLayout.buttonsX - dragAmount.x / widthPx).coerceIn(0f, 0.65f),
-                    buttonsY = (liveLayout.buttonsY - dragAmount.y / heightPx).coerceIn(0f, 0.65f)
-                ))
+                emit(current.copy(
+                    buttonsX = (current.buttonsX - delta.x / widthPx).coerceIn(0f, 0.65f),
+                    buttonsY = (current.buttonsY - delta.y / heightPx).coerceIn(0f, 0.65f)))
             }
         } else Modifier
 
-        Box(
-            modifier = Modifier.align(Alignment.BottomStart).offset(x = xDpad, y = yDpad)
-                .then(editDpad).padding(3.dp)
-        ) {
-            GestureDpad(dpadSize, layout.opacity, onInputChanged, enabled = !editing, skin = layout.preset)
+        Box(Modifier.align(Alignment.BottomStart)
+            .padding(start = 13.dp, bottom = 14.dp)
+            .offset(x = dpadLeft, y = -dpadRise)
+            .then(moveDpad)
+            .then(if (editing) Modifier.border(1.dp,
+                Mint.copy(alpha = 0.75f), RoundedCornerShape(18.dp)) else Modifier)) {
+            GestureDpad(dpadSize, bitOpacity(4), onInputChanged,
+                enabled = !editing, skin = layout.preset)
         }
-        Column(
-            modifier = Modifier.align(Alignment.BottomEnd).offset(x = xButtons, y = yButtons)
-                .then(editButtons).padding(5.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
+
+        Box(Modifier.align(Alignment.BottomEnd)
+            .padding(end = 13.dp, bottom = 14.dp)
+            .offset(x = -faceRight, y = -faceRise)
+            .size(faceWidth).then(moveFace)
+            .then(if (editing && !editIndividual) Modifier.border(1.dp,
+                Mint.copy(alpha = 0.75f), RoundedCornerShape(18.dp)) else Modifier)) {
             if (layout.preset.diamond) {
-                // Modern gamepads arrange SNES X at north, A at east,
-                // B at south, Y at west. Labels are presentation only;
-                // input mapping remains SNES/libretro native.
-                val faceDiameter = (actionSize * 2.95f).dp
-                Box(Modifier.size(faceDiameter)) {
-                    TouchButton(layout.preset.faceLegend(9), 9, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset,
-                        positionModifier = Modifier.align(Alignment.TopCenter).then(positionFor(9)))
-                    TouchButton(layout.preset.faceLegend(1), 1, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset,
-                        positionModifier = Modifier.align(Alignment.CenterStart).then(positionFor(1)))
-                    TouchButton(layout.preset.faceLegend(8), 8, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset,
-                        positionModifier = Modifier.align(Alignment.CenterEnd).then(positionFor(8)))
-                    TouchButton(layout.preset.faceLegend(0), 0, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset,
-                        positionModifier = Modifier.align(Alignment.BottomCenter).then(positionFor(0)))
+                // SNES: X north, Y west, A east, B south.
+                listOf(
+                    Triple(9, Alignment.TopCenter, layout.preset.faceLegend(9)),
+                    Triple(1, Alignment.CenterStart, layout.preset.faceLegend(1)),
+                    Triple(8, Alignment.CenterEnd, layout.preset.faceLegend(8)),
+                    Triple(0, Alignment.BottomCenter, layout.preset.faceLegend(0))
+                ).forEach { (bit, alignment, label) ->
+                    TouchButton(label, bit, faceSize * bitScale(bit), bitOpacity(bit),
+                        onInputChanged, enabled = !editing, skin = layout.preset,
+                        positionModifier = Modifier.align(alignment).then(bitModifier(bit)))
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    TouchButton(layout.preset.faceLegend(1), 1, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset, positionModifier = positionFor(1))
-                    TouchButton(layout.preset.faceLegend(9), 9, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset, positionModifier = positionFor(9))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    TouchButton(layout.preset.faceLegend(0), 0, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset, positionModifier = positionFor(0))
-                    TouchButton(layout.preset.faceLegend(8), 8, actionSize,
-                        layout.opacity, onInputChanged, enabled = !editing,
-                        skin = layout.preset, positionModifier = positionFor(8))
-                }
-            }
-            if (!layout.preset.diamond) {
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    TouchButton(layout.preset.shoulderLegend(10), 10,
-                        actionSize * 0.82f, layout.opacity, onInputChanged,
-                        enabled = !editing, skin = layout.preset,
-                        positionModifier = positionFor(10))
-                    TouchButton(layout.preset.shoulderLegend(11), 11,
-                        actionSize * 0.82f, layout.opacity, onInputChanged,
-                        enabled = !editing, skin = layout.preset,
-                        positionModifier = positionFor(11))
+                Column(Modifier.align(Alignment.Center),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(1, 9).forEach { bit ->
+                            TouchButton(layout.preset.faceLegend(bit), bit,
+                                faceSize * bitScale(bit), bitOpacity(bit),
+                                onInputChanged, enabled = !editing,
+                                skin = layout.preset, positionModifier = bitModifier(bit))
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf(0, 8).forEach { bit ->
+                            TouchButton(layout.preset.faceLegend(bit), bit,
+                                faceSize * bitScale(bit), bitOpacity(bit),
+                                onInputChanged, enabled = !editing,
+                                skin = layout.preset, positionModifier = bitModifier(bit))
+                        }
+                    }
                 }
             }
         }
-        if (layout.preset.diamond) {
-            // Modern pad shoulder triggers are at the top of the device,
-            // well clear of the collapsible menu (44dp upper right).
-            Box(Modifier.align(Alignment.TopStart).padding(start = 17.dp, top = 58.dp)
-                .then(positionFor(10))) {
-                TouchButton(layout.preset.shoulderLegend(10), 10,
-                    34f * layout.scale, layout.opacity, onInputChanged,
-                    isPill = true, enabled = !editing, skin = layout.preset)
-            }
-            Box(Modifier.align(Alignment.TopEnd).padding(end = 17.dp, top = 58.dp)
-                .then(positionFor(11))) {
-                TouchButton(layout.preset.shoulderLegend(11), 11,
-                    34f * layout.scale, layout.opacity, onInputChanged,
+
+        // Shoulder buttons stay at the upper corners, away from game art.
+        val shoulderSize = (base * 0.11f * layout.scale).coerceIn(33f, 53f)
+        listOf(10, 11).forEach { bit ->
+            Box(Modifier.align(if (bit == 10) Alignment.TopStart
+                else Alignment.TopEnd).padding(
+                start = if (bit == 10) 14.dp else 0.dp,
+                end = if (bit == 11) 14.dp else 0.dp, top = 65.dp
+            ).then(bitModifier(bit))) {
+                TouchButton(layout.preset.shoulderLegend(bit), bit,
+                    shoulderSize * bitScale(bit), bitOpacity(bit), onInputChanged,
                     isPill = true, enabled = !editing, skin = layout.preset)
             }
         }
-        Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp),
+        // SELECT/START stay mapped to the game, never to the emulator menu.
+        val menuSize = (base * 0.105f * layout.scale).coerceIn(32f, 48f)
+        Row(Modifier.align(Alignment.BottomCenter)
+            .padding(bottom = if (landscape) 17.dp else (faceWidth + 16.dp)),
             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            TouchButton(layout.preset.menuLegend(2), 2, 34f * layout.scale,
-                layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(2))
-            TouchButton(layout.preset.menuLegend(3), 3, 34f * layout.scale,
-                layout.opacity, onInputChanged, true, !editing, layout.preset, positionFor(3))
+            listOf(2, 3).forEach { bit ->
+                Box(bitModifier(bit)) {
+                    TouchButton(layout.preset.menuLegend(bit), bit,
+                        menuSize * bitScale(bit), bitOpacity(bit),
+                        onInputChanged, isPill = true,
+                        enabled = !editing, skin = layout.preset)
+                }
+            }
+        }
+        if (editing) {
+            Surface(Modifier.align(Alignment.TopCenter).padding(top = 6.dp),
+                shape = RoundedCornerShape(14.dp), color = NeoGlass) {
+                Text(if (editIndividual) "ARRASTE CADA BOTÃO • SALVE NO MENU"
+                    else "ARRASTE O DIRECIONAL E O GRUPO ABXY • SALVE NO MENU",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -2217,21 +2342,41 @@ private fun GestureDpad(
         contentAlignment = Alignment.Center
     ) {
         if (skin == TouchPreset.VIRTUAL_GAMEPAD) {
-            // Compact D-pad with 4 separated direction discs. The outer
-            // gesture handler still supports continuous diagonals.
-            Box(Modifier.fillMaxSize()) {
-                TouchButton("▲", 4, cellSize, opacity, onInputChanged,
-                    enabled = false, skin = skin,
-                    positionModifier = Modifier.align(Alignment.TopCenter))
-                TouchButton("▼", 5, cellSize, opacity, onInputChanged,
-                    enabled = false, skin = skin,
-                    positionModifier = Modifier.align(Alignment.BottomCenter))
-                TouchButton("◀", 6, cellSize, opacity, onInputChanged,
-                    enabled = false, skin = skin,
-                    positionModifier = Modifier.align(Alignment.CenterStart))
-                TouchButton("▶", 7, cellSize, opacity, onInputChanged,
-                    enabled = false, skin = skin,
-                    positionModifier = Modifier.align(Alignment.CenterEnd))
+            // Single modern cross surface. Gesture mask and diagonal movement
+            // remain entirely in the unchanged parent pointer handler above.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.fillMaxSize().padding(2.dp)) {
+                    val cell = size.minDimension / 3f
+                    val rounding = CornerRadius(cell * .25f, cell * .25f)
+                    drawRoundRect(color = Color(0xFF10182D)
+                        .copy(alpha = opacity.coerceIn(.2f, 1f)),
+                        topLeft = Offset(cell, 0f),
+                        size = androidx.compose.ui.geometry.Size(cell, cell * 3f),
+                        cornerRadius = rounding)
+                    drawRoundRect(color = Color(0xFF10182D)
+                        .copy(alpha = opacity.coerceIn(.2f, 1f)),
+                        topLeft = Offset(0f, cell),
+                        size = androidx.compose.ui.geometry.Size(cell * 3f, cell),
+                        cornerRadius = rounding)
+                    drawRoundRect(color = Accent.copy(alpha = opacity * .88f),
+                        topLeft = Offset(cell, 0f),
+                        size = androidx.compose.ui.geometry.Size(cell, cell * 3f),
+                        cornerRadius = rounding,
+                        style = Stroke(width = 1.4.dp.toPx()))
+                    drawRoundRect(color = Accent.copy(alpha = opacity * .88f),
+                        topLeft = Offset(0f, cell),
+                        size = androidx.compose.ui.geometry.Size(cell * 3f, cell),
+                        cornerRadius = rounding,
+                        style = Stroke(width = 1.4.dp.toPx()))
+                }
+                Text("▲", modifier = Modifier.align(Alignment.TopCenter),
+                    color = Color.White.copy(alpha = opacity), fontSize = 15.sp)
+                Text("▼", modifier = Modifier.align(Alignment.BottomCenter),
+                    color = Color.White.copy(alpha = opacity), fontSize = 15.sp)
+                Text("◀", modifier = Modifier.align(Alignment.CenterStart),
+                    color = Color.White.copy(alpha = opacity), fontSize = 15.sp)
+                Text("▶", modifier = Modifier.align(Alignment.CenterEnd),
+                    color = Color.White.copy(alpha = opacity), fontSize = 15.sp)
             }
         } else Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -2317,6 +2462,7 @@ private fun TouchButton(
             else Modifier.size(size.dp))
             .then(positionModifier)
             .clip(shape)
+            .semantics { contentDescription = "Botão $label do SNES" }
             .then(if (enabled) Modifier.pointerInput(bit) {
                 awaitEachGesture {
                     awaitFirstDown()
@@ -2338,17 +2484,19 @@ private fun TouchButton(
                     // Deep graphite backing and colored outline like a
                     // mobile virtual pad, independently drawn as SNES vector art.
                     if (isPill) {
-                        drawRoundRect(color = Color(0xFF111C2D).copy(alpha = alpha * .82f),
-                            cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()))
-                        drawRoundRect(color = faceAccent.copy(alpha = alpha * .97f),
-                            cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()),
-                            style = Stroke(width = 2.2.dp.toPx()))
+                        drawRoundRect(color = Color(0xFF151E36).copy(alpha = alpha * .92f),
+                            cornerRadius = CornerRadius(17.dp.toPx(), 17.dp.toPx()))
+                        drawRoundRect(color = faceAccent.copy(alpha = alpha * .75f),
+                            cornerRadius = CornerRadius(17.dp.toPx(), 17.dp.toPx()),
+                            style = Stroke(width = 1.6.dp.toPx()))
                     } else {
-                        drawCircle(color = Color(0xFF121A2B).copy(alpha = alpha * .83f),
+                        drawCircle(color = Color(0xFF10182F).copy(alpha = alpha * .90f),
                             center = c, radius = radius)
-                        drawCircle(color = faceAccent.copy(alpha = alpha * .98f),
-                            center = c, radius = radius * .94f,
-                            style = Stroke(width = 2.2.dp.toPx()))
+                        drawCircle(color = faceAccent.copy(alpha = alpha * .25f),
+                            center = c, radius = radius * .82f)
+                        drawCircle(color = faceAccent.copy(alpha = alpha * .96f),
+                            center = c, radius = radius * .93f,
+                            style = Stroke(width = 2.5.dp.toPx()))
                     }
                 }
                 TouchPreset.MAIZO -> {
@@ -2499,6 +2647,7 @@ private fun EmulatorSettings(
     onTestIce: () -> Unit
 ) {
     var category by remember { mutableStateOf("Vídeo") }
+    var controlTarget by rememberSaveable { mutableStateOf(4) }
     val firstCategoryFocus = remember { FocusRequester() }
     LaunchedEffect(inGame) { if (!inGame) firstCategoryFocus.requestFocus() }
     var devCode by remember { mutableStateOf("") }
@@ -2515,24 +2664,40 @@ private fun EmulatorSettings(
                 NeoBadge("EM JOGO")
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            categories.forEachIndexed { index, item ->
-                androidx.compose.material3.FilterChip(
-                    selected = item == category,
-                    onClick = { category = item },
-                    modifier = (if (index == 0) Modifier.focusRequester(firstCategoryFocus)
-                        else Modifier).padFocusRing(),
-                    label = { Text(item, fontSize = 12.sp) },
-                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                        containerColor = Panel, labelColor = Muted,
-                        selectedContainerColor = Accent.copy(alpha = 0.35f),
-                        selectedLabelColor = Color.White)
-                )
+        // All eight settings sections are visible at once (no hidden horizontal chips).
+        Column(Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            categories.chunked(4).forEachIndexed { rowIndex, group ->
+                Row(Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    group.forEachIndexed { position, item ->
+                        androidx.compose.material3.FilterChip(
+                            selected = category == item,
+                            onClick = { category = item },
+                            modifier = Modifier.weight(1f)
+                                .then(if (rowIndex == 0 && position == 0)
+                                    Modifier.focusRequester(firstCategoryFocus) else Modifier)
+                                .padFocusRing(),
+                            label = { Text(item, maxLines = 1, fontSize = 10.sp) },
+                            colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                containerColor = Panel, labelColor = Muted,
+                                selectedContainerColor = Accent,
+                                selectedLabelColor = Bg))
+                    }
+                }
             }
         }
+        Text(when (category) {
+            "Vídeo" -> "Qualidade da imagem e desempenho."
+            "Áudio" -> "Volume e atraso do som."
+            "Controles" -> "Escolha o estilo, arraste e ajuste cada botão."
+            "Cheats" -> "Truques opcionais para o jogo atual."
+            "Rede" -> "Multiplayer, LAN, internet e conexão."
+            "Núcleo" -> "Detalhes avançados da emulação."
+            "Estados" -> "Salve e retome suas partidas."
+            else -> "Ferramentas extras para quem conhece o emulador."
+        }, color = Muted, fontSize = 11.sp,
+            modifier = Modifier.padding(top = 5.dp, bottom = 6.dp))
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp, max = if (inGame) 550.dp else 720.dp)
                 .verticalScroll(rememberScrollState()).padding(top = 3.dp),
@@ -2658,11 +2823,9 @@ private fun EmulatorSettings(
                     ToggleSettingRow("Controles na tela", "Exibe os comandos sobrepostos ao vídeo.", settings.touch.enabled) {
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
-                    SettingSectionTitle("Layouts de controle",
-                        "Dez estilos. Padrão VirtualGamePad Mobile: botões superiores coloridos, " +
-                            "D-pad inferior, L/R e Start/Select no topo; também inclui PlayStation, Xbox, Switch, Arcade " +
-                            "e Steam Deck. Botões ABXY mantêm mapeamento do SNES. " +
-                            "A arte do preset VirtualGamePad é recriada, não são arquivos GPL copiados.")
+                    SettingSectionTitle("Escolha o visual do controle",
+                        "Todos os estilos têm botões adaptados à tela. " +
+                            "SNES START sempre funciona dentro do jogo.")
                     TouchPreset.values().forEach { preset ->
                         ChoiceRow(preset.label, preset.hint,
                             settings.touch.preset == preset) { onSelectTouchPreset(preset) }
@@ -2681,16 +2844,54 @@ private fun EmulatorSettings(
                             "Mapeamento: X = Y • Y = X • A = B • B = A do SNES."
                         else "Todos os estilos preservam os bits dos botões originais do SNES.",
                         color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
-                    SettingSectionTitle("Editor de layout",
-                        "No jogo: EDITAR → GRUPOS/BOTÕES. " +
-                            "Arraste o D-pad e os botões individuais. " +
-                            "Perfis modernos usam L/R nos cantos superiores.")
+                    SettingSectionTitle("Personalizar cada botão",
+                        "1. Abra um jogo. 2. Toque na engrenagem e em EDITAR. " +
+                            "3. Arraste o direcional/grupo ABXY. Alterne BOTÕES para " +
+                            "mover cada botão e depois SALVAR. " +
+                            "Use as barras abaixo para tamanho, transparência e posição.")
                     SliderSetting("D-pad: horizontal", settings.touch.dpadX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadX = it))) }, (settings.touch.dpadX * 100).toInt().toString() + "%")
                     SliderSetting("D-pad: subir", settings.touch.dpadY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(dpadY = it))) }, (settings.touch.dpadY * 100).toInt().toString() + "%")
                     SliderSetting("Botões: horizontal", settings.touch.buttonsX, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsX = it))) }, (settings.touch.buttonsX * 100).toInt().toString() + "%")
                     SliderSetting("Botões: subir", settings.touch.buttonsY, 0f..0.65f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(buttonsY = it))) }, (settings.touch.buttonsY * 100).toInt().toString() + "%")
                     SliderSetting("Tamanho", settings.touch.scale, 0.70f..1.45f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(scale = it))) }, (settings.touch.scale * 100).toInt().toString() + "%")
                     SliderSetting("Opacidade", settings.touch.opacity, 0.20f..0.90f, { onSettingsChanged(settings.copy(touch = settings.touch.copy(opacity = it))) }, (settings.touch.opacity * 100).toInt().toString() + "%")
+                    SettingSectionTitle("Ajustar botões separadamente",
+                        "Personalize tamanho e transparência de cada botão. " +
+                        "Para mover um botão, use EDITAR durante o jogo.")
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        listOf(
+                            4 to "D-PAD", 1 to "Y", 9 to "X", 0 to "B",
+                            8 to "A", 10 to "L", 11 to "R",
+                            2 to "SELECT", 3 to "START"
+                        ).forEach { (bit, label) ->
+                            androidx.compose.material3.FilterChip(
+                                selected = controlTarget == bit,
+                                onClick = { controlTarget = bit },
+                                label = { Text(label, fontSize = 10.sp) },
+                                modifier = Modifier.padFocusRing())
+                        }
+                    }
+                    val style = settings.touch.buttonStyles[controlTarget]
+                        ?.sanitized() ?: ButtonStyle()
+                    SliderSetting("Tamanho deste botão", style.scale,
+                        0.60f..1.55f, { value ->
+                            onSettingsChanged(settings.copy(touch = settings.touch.copy(
+                                buttonStyles = settings.touch.buttonStyles +
+                                    (controlTarget to style.copy(scale = value)))))
+                        }, (style.scale * 100).toInt().toString() + "%")
+                    SliderSetting("Opacidade deste botão", style.opacity,
+                        0.25f..1f, { value ->
+                            onSettingsChanged(settings.copy(touch = settings.touch.copy(
+                                buttonStyles = settings.touch.buttonStyles +
+                                    (controlTarget to style.copy(opacity = value)))))
+                        }, (style.opacity * 100).toInt().toString() + "%")
+                    OutlinedButton(onClick = {
+                        onSettingsChanged(settings.copy(touch = settings.touch.copy(
+                            buttonStyles = settings.touch.buttonStyles - controlTarget)))
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("RESTAURAR ESTE BOTÃO")
+                    }
                     OutlinedButton(onClick = {
                         onSettingsChanged(settings.copy(
                             touch = settings.touch.preset.defaultLayout()))

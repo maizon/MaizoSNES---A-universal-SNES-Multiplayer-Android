@@ -71,6 +71,15 @@ internal data class ButtonShift(val x: Float = 0f, val y: Float = 0f) {
     fun sanitized() = copy(x = x.coerceIn(-0.30f, 0.30f), y = y.coerceIn(-0.30f, 0.30f))
 }
 
+/** Extra per-button size/opacity saved alongside the existing drag offsets. */
+internal data class ButtonStyle(val scale: Float = 1f, val opacity: Float = 1f) {
+    fun sanitized(): ButtonStyle = copy(
+        scale = scale.takeIf { it.isFinite() }?.coerceIn(0.60f, 1.55f) ?: 1f,
+        opacity = opacity.takeIf { it.isFinite() }?.coerceIn(0.25f, 1f) ?: 1f)
+}
+
+internal val EDITABLE_TOUCH_BUTTONS = setOf(0, 1, 2, 3, 4, 8, 9, 10, 11)
+
 internal fun TouchPreset.defaultLayout(): TouchLayout = when (this) {
     TouchPreset.VIRTUAL_GAMEPAD -> TouchLayout(preset = this,
         dpadX = 0f, dpadY = 0f, buttonsX = 0f, buttonsY = 0f,
@@ -122,6 +131,16 @@ internal object TouchLayoutCodec {
             }
         }
         root.put("buttons", offsets)
+        val appearances = JSONObject()
+        layout.buttonStyles.forEach { (id, style) ->
+            if (id in EDITABLE_TOUCH_BUTTONS) {
+                val valid = style.sanitized()
+                appearances.put(id.toString(), JSONObject()
+                    .put("scale", valid.scale.toDouble())
+                    .put("opacity", valid.opacity.toDouble()))
+            }
+        }
+        root.put("appearances", appearances)
         return root.toString()
     }
 
@@ -142,6 +161,18 @@ internal object TouchLayoutCodec {
                         v.optDouble("y", 0.0).toFloat()).sanitized()
                 }
             }
+            val appearances = mutableMapOf<Int, ButtonStyle>()
+            obj.optJSONObject("appearances")?.let { styleObject ->
+                val names = styleObject.keys()
+                while (names.hasNext()) {
+                    val id = names.next().toIntOrNull() ?: continue
+                    if (id !in EDITABLE_TOUCH_BUTTONS) continue
+                    val raw = styleObject.optJSONObject(id.toString()) ?: continue
+                    appearances[id] = ButtonStyle(
+                        raw.optDouble("scale", 1.0).toFloat(),
+                        raw.optDouble("opacity", 1.0).toFloat()).sanitized()
+                }
+            }
             val original = expectedPreset.defaultLayout()
             original.copy(
                 enabled = obj.optBoolean("enabled", true),
@@ -151,7 +182,8 @@ internal object TouchLayoutCodec {
                 buttonsY = obj.optDouble("buttonsY", original.buttonsY.toDouble()).toFloat().coerceIn(0f, 0.65f),
                 scale = obj.optDouble("scale", original.scale.toDouble()).toFloat().coerceIn(0.70f, 1.45f),
                 opacity = obj.optDouble("opacity", original.opacity.toDouble()).toFloat().coerceIn(0.20f, 0.90f),
-                buttonShifts = result
+                buttonShifts = result,
+                buttonStyles = appearances
             )
         }.getOrNull()
     }

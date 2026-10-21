@@ -12,7 +12,7 @@ editor. All changes need CI and hardware smoke tests to confirm regression
 safety. The source updates themselves are not proof of on-device success.
 
 Pending: xdelta/VCDIFF, TheGamesDB authorized API, exact supplied icon,
-per-control independent sizing/opacity and full-screen drag constraints,
+full-screen drag constraints and multi-orientation hardware validation,
 hardware gamepad focus validation across all Settings, 30-second clip capture, per-slot
 thumbnail/resume, fast-forward/rewind, haptics, final Material 3 Expressive
 UI, verified real WebRTC NAT traversal, production key secrets, signed
@@ -160,3 +160,10 @@ may remain pinned to an older commit until an independently verified deployment.
 ## 2026-10-20 — continuidade autônoma LAN/ROM/stutter/background (experimental)
 
 Adicionada negociação direta MZNP v7 com até três trocas de porta UDP, barreira bilateral e retorno ao Lockstep pela mesma conexão depois do SHA-256/transporte de ROM autorizado. Testes JVM com driver Gekko falso exercitam tentativas fracassadas e sucesso subsequente, fallback completo e ROM compartilhada antes do rollback. Monitor de save/load, stalls >500ms, Limited Saving quando >8ms, ajuste de delay e apresentação de vídeo 1/2 em RTT sustentado >150ms. Foreground service de segundo plano é controlável e ativada por padrão. Nenhuma das quatro situações de dois celulares deve ser declarada 100% validada sem executar docs/VALIDATION.md no hardware.
+
+
+## UI candidate — 21 October 2026
+
+Em um commit integrado, o frontend adiciona navegação de coleção em scroll único, quatro modos (Grade 2/3/4, Lista, Fileira, Coleção), ordenação e filtros, recuperação opcional de capas pelo título usando índice HTTPS da libretro e cache, controles touch adaptativos com tamanhos/opacidades individuais persistidos, e modo de rede simplificado com painel técnico acessível. Referências visuais NeoStation sem importação de código/assets de terceiros.
+
+**Ainda dependem de validação real:** instalação em dois Androids com permissões de transferência de ROM autorizada, LAN rollback, online Wi-Fi/4G, background, layouts e multitouch em diferentes proporções/notches, cache e reconhecimento das capas. Stable Release exige CI verde, assinatura apropriada e aprovação dos testes físicos; CI não prova estes cenários.

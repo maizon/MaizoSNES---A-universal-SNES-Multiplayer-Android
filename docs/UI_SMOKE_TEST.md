@@ -51,3 +51,23 @@
 - [ ] A orientação de Multiplayer distingue claramente "criar sala exige ROM" de "entrar sem ROM é permitido por TLS".
 
 Estes cenários são de **validação física pendente**; o teste de UI por si só não confirma a transferência de ROM nem o transporte UDP/WebRTC.
+
+
+## Revisão integral de UI/coleção/controles — teste necessário antes da v1.0
+- [ ] Com 2, 20, 200 jogos, rolar **toda** a biblioteca: nenhum cartão some atrás do hero/banner.
+- [ ] Em retrato e paisagem, alternar Grade 2/3/4, Lista, Fileira e Coleção; fileira desliza horizontalmente.
+- [ ] Favoritos e Recentes na Coleção; pesquisar por nome e ordenar Título/Recentes/Arquivo.
+- [ ] Trocar entre as abas e voltar à Biblioteca: layout e modo selecionado continuam.
+- [ ] Exibir capa de ROM identificada pelo nome do header/arquivo mesmo sem correspondência exata de hash.
+- [ ] ROM traduzida/renomeada: catálogo tenta sem tags de região/tradução; não aplica capa de jogo diferente.
+- [ ] Verificar cache de capa offline após primeira sincronização; botão Buscar Capas por Nome.
+- [ ] Com internet desconectada, falhas de capa não bloqueiam o lançamento dos jogos.
+- [ ] Multiplayer: modos Automático / LAN / Offline local com botões de criar/entrar em destaque.
+- [ ] Painel técnico de rollback, opções de atraso e ICE aparece ao expandir; nenhum ajuste foi removido.
+- [ ] Menu ROMs entre amigos mantém opção de receber e oferecer com confirmação explícita.
+- [ ] Paisagem: D-pad inferior esquerdo, ABXY inferior direito, L/R superiores, Start/Select sem cobrir o título.
+- [ ] Editor de grupos move D-Pad e ABXY; editor individual move L/R, A/B/X/Y, SELECT/START; confirmar salvamento por jogo.
+- [ ] Ajustar tamanho/opacidade de um botão e reiniciar app; somente ele muda; restauração do botão funciona.
+- [ ] Testar 10 presets, multitoque com diagonais, START não abre menu.
+- [ ] Testar telas 360dp, 480dp, landscape widescreen, notch e fontes ampliadas.
+- [ ] Confirmar gameplay e transporte LAN/online seguem com FPS e sincronismo da compilação anterior.

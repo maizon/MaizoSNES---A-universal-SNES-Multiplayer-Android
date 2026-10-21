@@ -61,6 +61,9 @@ class MainActivity : ComponentActivity() {
     private var pausedBeforeGameMenu = false
     private val pressedInputs = AtomicInteger(0)
     private val coverBitmaps = androidx.compose.runtime.mutableStateMapOf<String, Bitmap>()
+    private val loadingCovers = ConcurrentHashMap.newKeySet<String>()
+    private val missingCovers = ConcurrentHashMap.newKeySet<String>()
+    private val coverFetchSlots = java.util.concurrent.Semaphore(2)
     private var coverJob: Job? = null
     private var perfJob: Job? = null
     private val performanceText = androidx.compose.runtime.mutableStateOf("Aguardando métricas…")
@@ -332,6 +335,11 @@ class MainActivity : ComponentActivity() {
                     onScanRomFolder = { scanRomTreeLauncher.launch(null) },
                     onApplyRomPatch = { patchRomLauncher.launch(arrayOf("*/*")) },
                     onScanAllDevice = ::requestGlobalRomScan,
+                    onReloadCovers = {
+                        missingCovers.clear()
+                        refreshCovers()
+                    },
+                    onCoverNeeded = ::requestVisibleCover,
                     onOpenInstagram = {
                         val uri = Uri.parse("https://www.instagram.com/maicon_nasciment0/")
                         runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
@@ -360,6 +368,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun requestVisibleCover(name: String) {
+        if (!appSettings.value.automaticCovers ||
+            name !in romFiles.value || name in coverBitmaps ||
+            name in missingCovers || !loadingCovers.add(name)) return
+        lifecycleScope.launch {
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    coverFetchSlots.acquire()
+                    try { runCatching {
+                        CoverArt.load(this@MainActivity, File(romDirectory, name))
+                    }.getOrNull() }
+                    finally { coverFetchSlots.release() }
+                }
+                if (bitmap != null && name in romFiles.value) {
+                    coverBitmaps[name] = bitmap
+                    // Bound decoded bitmaps on ARMv7; images remain disk cached.
+                    if (coverBitmaps.size > 96) {
+                        coverBitmaps.keys.firstOrNull { it != name }?.let(coverBitmaps::remove)
+                    }
+                } else missingCovers.add(name)
+            } finally { loadingCovers.remove(name) }
+        }
+    }
+
     private fun refreshCovers() {
         if (!appSettings.value.automaticCovers) {
             coverJob?.cancel()
@@ -367,19 +399,21 @@ class MainActivity : ComponentActivity() {
             return
         }
         coverJob?.cancel()
-        val names = romFiles.value.take(48)
+        val names = romFiles.value.take(16) // eagerly warm; remaining tiles load on demand
         coverJob = lifecycleScope.launch {
             for (name in names) {
                 if (!isActive || !appSettings.value.automaticCovers) break
-                if (coverBitmaps.containsKey(name)) continue
-                val file = File(romDirectory, name)
-                if (!file.isFile) continue
-                val bitmap = withContext(Dispatchers.IO) {
-                    runCatching { CoverArt.load(this@MainActivity, file) }.getOrNull()
-                }
-                if (bitmap != null && name in romFiles.value) {
-                    coverBitmaps[name] = bitmap
-                }
+                if (coverBitmaps.containsKey(name) ||
+                    name in missingCovers || !loadingCovers.add(name)) continue
+                try {
+                    val file = File(romDirectory, name)
+                    if (!file.isFile) continue
+                    val bitmap = withContext(Dispatchers.IO) {
+                        runCatching { CoverArt.load(this@MainActivity, file) }.getOrNull()
+                    }
+                    if (bitmap != null && name in romFiles.value) coverBitmaps[name] = bitmap
+                    else missingCovers.add(name)
+                } finally { loadingCovers.remove(name) }
             }
         }
     }
