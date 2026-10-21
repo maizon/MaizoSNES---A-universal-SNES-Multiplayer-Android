@@ -41,3 +41,13 @@
 - [ ] Configurações: todas as oito categorias continuam acessíveis, sem cartões altos desnecessários; sem regressão em filtros/save state.
 - [ ] Multiplayer: seção Motor expande/recolhe, UDP/WebRTC e fallback seguem funcionais; atalho de status/log preservado.
 - [ ] Ajustar fontes maiores, 360dp de largura, landscape e tablet >=720dp sem sobreposição.
+
+## Convidado sem ROM — regressão de habilitação da UI
+- [ ] Com ROM ausente, "Jogo rápido" habilita quando existir uma sala TLS/WSS elegível e a opção de receber ROM estiver ativa.
+- [ ] Com ROM ausente e nenhuma sala TLS/WSS elegível, "Jogo rápido" permanece desabilitado (não criar sala vazia).
+- [ ] Uma sala com cheats só é elegível quando o usuário autorizou cheats sincronizados.
+- [ ] Selecionar sala TLS sem ROM mostra consentimento do host e do convidado, transfere ROM homebrew autorizada, verifica SHA-256 e inicia jogo.
+- [ ] Com ROM local, "Jogo rápido" ainda pode criar sala quando nenhuma sala compatível existir.
+- [ ] A orientação de Multiplayer distingue claramente "criar sala exige ROM" de "entrar sem ROM é permitido por TLS".
+
+Estes cenários são de **validação física pendente**; o teste de UI por si só não confirma a transferência de ROM nem o transporte UDP/WebRTC.

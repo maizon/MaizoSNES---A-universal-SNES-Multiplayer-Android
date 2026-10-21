@@ -1187,11 +1187,14 @@ private fun MultiplayerScreen(
                     highlighted = active)
             }
         }
-        if (!ready) Surface(color = Color(0xFF31283D), shape = RoundedCornerShape(14.dp)) {
-            Text("① Antes de conectar, escolha e abra um jogo na Biblioteca. " +
-                "② Volte aqui para criar ou entrar em uma sala.",
+        if (!ready) Surface(color = NeoGlass, shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.border(1.dp, NeoOutline.copy(alpha = 0.65f),
+                RoundedCornerShape(14.dp))) {
+            Text("SEM ROM: para criar uma sala, importe e abra um jogo. " +
+                "Para entrar como convidado, escolha uma sala TLS e aceite a " +
+                "oferta autorizada da ROM (ative Receber ROM se necessário).",
                 modifier = Modifier.fillMaxWidth().padding(13.dp),
-                color = Color(0xFFFFDEAB), fontSize = 12.sp, lineHeight = 18.sp)
+                color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
         }
 
         Card(colors = CardDefaults.cardColors(containerColor = Panel),
@@ -1330,11 +1333,17 @@ private fun MultiplayerScreen(
                             fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                Text("Seu lobby. Escolha uma sala ou crie a sua sem digitar IP. " +
-                    "As permissões de ROM continuam disponíveis.", color = Muted,
-                    fontSize = 12.sp, lineHeight = 17.sp)
+                Text("Encontre salas sem digitar IP. Para criar uma sala, abra " +
+                    "uma ROM; para entrar sem ROM, use uma sala TLS com oferta autorizada.",
+                    color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
                 Button(onClick = onQuickMatch,
-                    enabled = ready && !active,
+                    // quickMatch() already supports joining an existing TLS/WSS
+                    // room without a local ROM. Do not disable that path in UI.
+                    enabled = !active && (ready || (receiveRomAllowed &&
+                        autoRooms.any { room ->
+                            (room.tls || room.wss) &&
+                                (!room.cheats || onlineCheatsOptIn)
+                        })),
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Mint)) {
                     Text("JOGO RÁPIDO • ENTRAR OU CRIAR", color = Color(0xFF111827),
