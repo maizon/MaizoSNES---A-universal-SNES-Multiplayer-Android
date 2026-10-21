@@ -64,7 +64,8 @@ internal class NetplaySession(
     private val applyHostCoreOptions: (Map<String, String>) -> Boolean = { false },
     // Test seam: two loopback peers can exercise native-bind retries and
     // bilateral fallback without loading a commercial ROM or native libraries.
-    private val directDriver: DirectRollbackDriver = NativeDirectRollbackDriver
+    private val directDriver: DirectRollbackDriver = NativeDirectRollbackDriver,
+    private val ownerName: String = ""
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
@@ -148,7 +149,9 @@ internal class NetplaySession(
                 "%02x".format(it)
             }
             announcement = LanDiscovery.announce(port, rom.nameWithoutExtension,
-                romHash, allowOnlineCheats && hostCheatCodes.isNotEmpty())
+                romHash, allowOnlineCheats && hostCheatCodes.isNotEmpty(),
+                ownerName = ownerName,
+                netcode = if (netcodeMode == NetcodeMode.ROLLBACK) "Rollback" else "Lockstep")
             onStatus("Sala disponível na rede local (TCP $port). Aguardando P2…")
             listener.accept().use { connection ->
                 announcement?.close()
@@ -182,8 +185,16 @@ internal class NetplaySession(
      * server; no inbound ports on either phone, so NAT/CGNAT works. The relay
      * sends READY before the MZNP v6 handshake, including core option sync.
      */
+    private fun encodeOptionalOwner(raw: String): String {
+        val name = PlayerIdentity.sanitize(raw)
+        if (name.isBlank()) return ""
+        return " " + android.util.Base64.encodeToString(
+            name.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP or
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING)
+    }
+
     fun hostViaRelay(serverHost: String, relayPort: Int, roomId: String,
-        title: String, relayTls: Boolean = false) = launch {
+        title: String, relayTls: Boolean = false, ownerName: String = "") = launch {
         require(rom?.isFile == true) { "O anfitrião precisa abrir uma ROM." }
         val safeTitle = android.util.Base64.encodeToString(
             title.take(75).toByteArray(Charsets.UTF_8),
@@ -192,8 +203,9 @@ internal class NetplaySession(
         val fingerprint = romDigest(rom).take(8)
             .joinToString("") { "%02x".format(it) }
         val cheats = if (allowOnlineCheats && hostCheatCodes.isNotEmpty()) "1" else "0"
+        val namePart = encodeOptionalOwner(ownerName)
         relayConnect(serverHost, relayPort,
-            "HOST $roomId $safeTitle $fingerprint $cheats", true, roomId, relayTls)
+            "HOST $roomId $safeTitle $fingerprint $cheats$namePart", true, roomId, relayTls)
     }
 
     fun joinViaRelay(serverHost: String, relayPort: Int, roomId: String,
@@ -204,7 +216,8 @@ internal class NetplaySession(
         relayConnect(serverHost, relayPort, "JOIN $roomId", false, roomId, relayTls)
     }
 
-    fun hostViaWebSocket(endpoint: String, roomId: String, title: String) = launch {
+    fun hostViaWebSocket(endpoint: String, roomId: String, title: String,
+        ownerName: String = "") = launch {
         require(rom?.isFile == true) { "Host precisa de ROM." }
         val titleCode = android.util.Base64.encodeToString(
             title.take(75).toByteArray(Charsets.UTF_8),
@@ -212,7 +225,8 @@ internal class NetplaySession(
                 android.util.Base64.NO_PADDING)
         val fp = romDigest(rom).take(8).joinToString("") { "%02x".format(it) }
         val cheats = if (allowOnlineCheats && hostCheatCodes.isNotEmpty()) "1" else "0"
-        webSocketConnect(endpoint, roomId, "HOST $roomId $titleCode $fp $cheats", true)
+        webSocketConnect(endpoint, roomId,
+            "HOST $roomId $titleCode $fp $cheats" + encodeOptionalOwner(ownerName), true)
     }
 
     fun joinViaWebSocket(endpoint: String, roomId: String) = launch {
@@ -461,6 +475,7 @@ internal class NetplaySession(
                 return false
             }
             var rtcSessionStarted = false
+            var averageTickMs = 0.0
             try {
                 val callbacks = object : RollbackCallbacks {
                     override fun save(): ByteArray =
@@ -514,7 +529,8 @@ internal class NetplaySession(
                                 onStatus("GekkoNet: atraso ajustado automaticamente para " +
                                     it + " quadros.")
                         }
-                        val stride = presentation.offer(stats[0].toDouble())
+                        val stride = presentation.offer(stats[0].toDouble(),
+                            averageTickMs, period / 1e6)
                         NativeBridge.nativeSetNetplayPresentationStride(stride)
                         onMetrics(NetworkMetrics(
                             frame = stats[3].toLong(), peerWaitMs = 0.0,
@@ -526,10 +542,15 @@ internal class NetplaySession(
                             rollback = true, webRtc = true, iceState = port.iceState,
                             turnUsed = port.turnUsed, natType = port.natType,
                             saveLoadMs = elapsedMs, maxFrameStallMs = worstTick / 1e6,
-                            presentationStride = stride, limitedSaving = limitedSaving))
+                            presentationStride = stride, limitedSaving = limitedSaving,
+                            droppedPackets = port.droppedIncoming,
+                            blockedSends = port.congestedSends))
                         worstTick = 0L
                     }
                     val tickNs = System.nanoTime() - tickStart
+                    val measuredMs = tickNs / 1e6
+                    averageTickMs = if (averageTickMs == 0.0) measuredMs
+                        else averageTickMs * 0.92 + measuredMs * 0.08
                     worstTick = maxOf(worstTick, tickNs)
                     if (tickNs > 500_000_000L) {
                         stallCount++
@@ -679,6 +700,7 @@ internal class NetplaySession(
                         var lastMetric = 0L
                         var deadline = System.nanoTime()
                         var peakTickNs = 0L
+                        var averageTickMs = 0.0
                         var stalls = 0L
                         while (!closed.get()) {
                             val beforeTick = System.nanoTime()
@@ -687,6 +709,9 @@ internal class NetplaySession(
                             if (event < 0) error("Gekko UDP desconectado: $event")
                             val now = System.nanoTime()
                             val elapsed = now - beforeTick
+                            val tickMs = elapsed / 1e6
+                            averageTickMs = if (averageTickMs == 0.0) tickMs
+                                else averageTickMs * 0.92 + tickMs * 0.08
                             peakTickNs = maxOf(peakTickNs, elapsed)
                             if (elapsed > 500_000_000L) {
                                 stalls++
@@ -699,7 +724,8 @@ internal class NetplaySession(
                                     stats[0].toDouble(), stats[1] / 10.0)?.let {
                                     directDriver.setLocalDelay(it)
                                 }
-                                val stride = presentation.offer(stats[0].toDouble())
+                                val stride = presentation.offer(stats[0].toDouble(),
+                                    averageTickMs, period / 1e6)
                                 directDriver.setPresentationStride(stride)
                                 onMetrics(NetworkMetrics(stats[3].toLong(),
                                     0.0, 0.0, 0.0, stalls, controller.delay,

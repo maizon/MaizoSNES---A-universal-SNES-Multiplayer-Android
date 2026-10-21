@@ -42,6 +42,11 @@ import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("maizosnes", MODE_PRIVATE) }
+    private val playerProfile = androidx.compose.runtime.mutableStateOf(PlayerProfile())
+    private val playerAvatar = androidx.compose.runtime.mutableStateOf<Bitmap?>(null)
+    private val recentRooms = androidx.compose.runtime.mutableStateOf<List<RecentRoom>>(emptyList())
+    private val showWelcomeProfile = androidx.compose.runtime.mutableStateOf(false)
+    private val showEditProfile = androidx.compose.runtime.mutableStateOf(false)
     private val romDirectory by lazy { File(filesDir, "roms").apply { mkdirs() } }
     private val stateDirectory by lazy { File(filesDir, "states").apply { mkdirs() } }
 
@@ -101,7 +106,7 @@ class MainActivity : ComponentActivity() {
     private val keepMultiplayerInBackground = androidx.compose.runtime.mutableStateOf(true)
     private val shareConsentVisible = androidx.compose.runtime.mutableStateOf(false)
     private data class PendingHost(val port: Int, val roomId: String?, val relayHost: String?,
-        val relayTls: Boolean, val wssEndpoint: String?)
+        val relayTls: Boolean, val wssEndpoint: String?, val profileNames: Boolean)
     private var pendingHost: PendingHost? = null
     private var hostApproved = false
     private var hostAnswered = false
@@ -175,6 +180,28 @@ class MainActivity : ComponentActivity() {
             if (granted) scanAllSharedStorage()
             else statusMessage.value = "Permissão negada. Use busca por pasta."
         }
+    private val profilePhotoLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) lifecycleScope.launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    runCatching { ProfileAvatarStore.save(applicationContext, uri) }.getOrNull()
+                }
+                if (bitmap != null) playerAvatar.value = bitmap
+                else statusMessage.value = "Foto inválida ou muito grande. Escolha outra imagem."
+            }
+        }
+    private fun savePlayerName(candidate: String) {
+        val clean = PlayerIdentity.sanitize(candidate).ifBlank { playerProfile.value.name }
+        playerProfile.value = playerProfile.value.copy(name = clean)
+        prefs.edit().putString("player_name", clean).putBoolean("player_onboarded", true).apply()
+        showWelcomeProfile.value = false
+        showEditProfile.value = false
+    }
+    private fun finishPlayerOnboarding() {
+        prefs.edit().putBoolean("player_onboarded", true).apply()
+        showWelcomeProfile.value = false
+        showEditProfile.value = false
+    }
     private val customCoverLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             val name = pendingCustomCoverName
@@ -197,7 +224,17 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.rgb(9, 13, 24)
         romDirectory.mkdirs()
         stateDirectory.mkdirs()
+        val savedId = prefs.getString("player_local_id", "").orEmpty()
+        val localId = savedId.ifBlank { java.util.UUID.randomUUID().toString() }
+        if (savedId.isBlank()) prefs.edit().putString("player_local_id", localId).apply()
+        val previouslyNamed = prefs.getString("player_name", "").orEmpty()
+        val name = PlayerIdentity.sanitize(previouslyNamed).ifBlank { PlayerIdentity.defaultName() }
+        playerProfile.value = PlayerProfile(name, localId)
+        playerAvatar.value = ProfileAvatarStore.load(this)
+        showWelcomeProfile.value = !prefs.getBoolean("player_onboarded", false)
+        if (previouslyNamed.isBlank()) prefs.edit().putString("player_name", name).apply()
         favoriteRoms.value = prefs.getStringSet("library_favorites", emptySet())?.toSet() ?: emptySet()
+        recentRooms.value = RecentRoomCodec.decode(prefs.getString("recent_online_rooms", "[]"))
         recentRoms.value = runCatching {
             val arr = org.json.JSONArray(prefs.getString("library_recent", "[]"))
             (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }
@@ -273,6 +310,11 @@ class MainActivity : ComponentActivity() {
                     coreOptions = coreSettings.toMap(),
                     performanceText = performanceText.value,
                     networkDebug = networkDebug.value,
+                    playerProfile = playerProfile.value,
+                    playerAvatar = playerAvatar.value,
+                    onEditPlayerProfile = { showEditProfile.value = true },
+                    recentRooms = recentRooms.value,
+                    onRejoinRecentRoom = { id, url -> startRelayRoom(id, url) },
                     onSelectTouchPreset = ::selectTouchPreset,
                     connectionMode = connectionMode.value,
                     onConnectionModeChanged = ::changeConnectionMode,
@@ -385,6 +427,21 @@ class MainActivity : ComponentActivity() {
                     onGpuReady = ::updateGpuReady,
                     onExportDebug = ::shareNetworkDiagnostics
                 )
+                if (showWelcomeProfile.value || showEditProfile.value) {
+                    PlayerProfileDialog(
+                        profile = playerProfile.value,
+                        avatar = playerAvatar.value,
+                        welcome = showWelcomeProfile.value,
+                        onPhoto = { profilePhotoLauncher.launch(arrayOf("image/*")) },
+                        onDeletePhoto = {
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                ProfileAvatarStore.delete(applicationContext)
+                                withContext(Dispatchers.Main) { playerAvatar.value = null }
+                            }
+                        },
+                        onSave = ::savePlayerName,
+                        onSkip = ::finishPlayerOnboarding)
+                }
             }
         }
     }
@@ -1485,12 +1542,22 @@ class MainActivity : ComponentActivity() {
                     autoNetworkStatus.value = lanStatus.value
                     return@launch
                 }
+                if (joinRoomId != null) {
+                    val visited = listing.rooms.first { it.id == roomId }
+                    val history = RecentRoomCodec.withVisited(recentRooms.value,
+                        RecentRoom(roomId, visited.game, visited.ownerName, serverEndpoint,
+                            System.currentTimeMillis()))
+                    recentRooms.value = history
+                    prefs.edit().putString("recent_online_rooms",
+                        RecentRoomCodec.encode(history)).apply()
+                }
                 startNetplay(
                     host = if (joinRoomId == null) null else listing.serverHost,
                     port = listing.relayPort,
                     relayRoomId = roomId,
                     relayServerHost = listing.serverHost,
                     relayTls = listing.tls,
+                    profileNames = listing.profileNames,
                     wssEndpoint = if (listing.wss && (joinRoomId == null ||
                         listing.rooms.firstOrNull { it.id == roomId }?.wss == true))
                         serverEndpoint else null
@@ -2169,17 +2236,18 @@ class MainActivity : ComponentActivity() {
         hostApproved = authorized
         // Declining sharing still starts the multiplayer room without ROM transfer.
         if (request != null) startNetplay(null, request.port, request.roomId, request.relayHost,
-                request.relayTls, request.wssEndpoint)
+                request.relayTls, request.wssEndpoint, request.profileNames)
     }
 
     private fun startNetplay(host: String?, port: Int,
         relayRoomId: String? = null, relayServerHost: String? = null,
-        relayTls: Boolean = false, wssEndpoint: String? = null) {
+        relayTls: Boolean = false, wssEndpoint: String? = null,
+        profileNames: Boolean = false) {
         if (netplaySession != null) return
         // Per-session rights check; includes public-relay rooms, not only LAN.
         if (host == null && shareRomAllowed.value && !hostAnswered) {
             pendingHost = PendingHost(port, relayRoomId, relayServerHost,
-                relayTls, wssEndpoint)
+                relayTls, wssEndpoint, profileNames)
             shareConsentVisible.value = true
             return
         }
@@ -2257,6 +2325,7 @@ class MainActivity : ComponentActivity() {
             webrtcContext = applicationContext,
             customIceServers = iceServerOverrides.value,
             latencyMode = netplayLatencyMode.value,
+            ownerName = playerProfile.value.name,
             onMetrics = { metrics ->
                 runOnUiThread {
                     if (netplaySession === session) {
@@ -2291,6 +2360,10 @@ class MainActivity : ComponentActivity() {
                                 metrics.maxFrameStallMs),
                             presentationStride = metrics.presentationStride,
                             limitedSaving = metrics.limitedSaving,
+                            packetLoss = if (metrics.webRtc)
+                                "Recepção local descartada: ${metrics.droppedPackets}" +
+                                    " • envio congestionado: ${metrics.blockedSends}"
+                                else old.packetLoss,
                             state = "Partida em andamento")
                         lastRollbackCounter = total
                         lanStatus.value = if (metrics.rollback)
@@ -2392,11 +2465,13 @@ class MainActivity : ComponentActivity() {
         autoNetworkStatus.value = lanStatus.value
         if (relayRoomId != null && wssEndpoint != null) {
             if (host == null) session.hostViaWebSocket(wssEndpoint, relayRoomId,
-                current?.nameWithoutExtension ?: "SNES")
+                current?.nameWithoutExtension ?: "SNES",
+                ownerName = if (profileNames) playerProfile.value.name else "")
             else session.joinViaWebSocket(wssEndpoint, relayRoomId)
         } else if (relayRoomId != null && relayServerHost != null) {
             if (host == null) session.hostViaRelay(relayServerHost, port, relayRoomId,
-                current?.nameWithoutExtension ?: "SNES", relayTls = relayTls)
+                current?.nameWithoutExtension ?: "SNES", relayTls = relayTls,
+                ownerName = if (profileNames) playerProfile.value.name else "")
             else session.joinViaRelay(relayServerHost, port, relayRoomId, relayTls = relayTls)
         } else if (host == null) session.host(port) else session.join(host, port)
     }

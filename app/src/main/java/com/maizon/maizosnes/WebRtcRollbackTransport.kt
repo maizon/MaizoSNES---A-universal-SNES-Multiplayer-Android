@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * WebRTC data-only channel with the existing Railway WSS relay as SDP/ICE
@@ -27,6 +28,10 @@ internal class WebRtcRollbackTransport private constructor(
     private val connected: CountDownLatch
 ) : AutoCloseable {
     private val disposed = AtomicBoolean(false)
+    private val queueDrops = AtomicLong(0)
+    private val blockedSends = AtomicLong(0)
+    val droppedIncoming: Long get() = queueDrops.get()
+    val congestedSends: Long get() = blockedSends.get()
     @Volatile private var channel: DataChannel? = null
     @Volatile var iceState: String = "new"
         private set
@@ -65,7 +70,10 @@ internal class WebRtcRollbackTransport private constructor(
     fun send(packet: ByteArray): Boolean {
         val dc = channel ?: return false
         if (disposed.get() || dc.state() != DataChannel.State.OPEN ||
-            dc.bufferedAmount() > 512 * 1024L || packet.size > 16384) return false
+            dc.bufferedAmount() > 512 * 1024L || packet.size > 16384) {
+            blockedSends.incrementAndGet()
+            return false
+        }
         return dc.send(DataChannel.Buffer(ByteBuffer.wrap(packet), true))
     }
     fun takePacket(): ByteArray? = incoming.poll()
@@ -84,7 +92,7 @@ internal class WebRtcRollbackTransport private constructor(
                 val bytes = ByteArray(size)
                 message.data.get(bytes)
                 // Bounded packet queue: a stalled peer cannot exhaust memory.
-                incoming.offer(bytes)
+                if (!incoming.offer(bytes)) queueDrops.incrementAndGet()
             }
         })
         if (dc.state() == DataChannel.State.OPEN) connected.countDown()

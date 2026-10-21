@@ -16,6 +16,28 @@ class LanDiscoveryProtocolTest {
         assertTrue(room.cheats)
     }
 
+    @Test fun modernOfferExposesNameWithoutChangingOldFormat() {
+        val room = LanDiscovery.parseOffer(
+            "MZOFFER3|55435|Mario Kart|0123456789abcdef|0|4d61697a6f6e|R",
+            "192.168.1.9")
+        assertNotNull(room)
+        assertEquals("Maizon", room!!.ownerName)
+        assertEquals("Rollback disponível", room.netcode)
+        assertFalse(room.cheats)
+        val old = LanDiscovery.parseOffer(
+            "MZOFFER2|55435|Mario Kart|0123456789abcdef|1", "192.168.1.9")!!
+        assertEquals("", old.ownerName)
+        assertTrue(old.cheats)
+    }
+
+    @Test fun invalidOwnerMetadataIsIgnoredWithoutDiscardingGame() {
+        val room = LanDiscovery.parseOffer(
+            "MZOFFER3|55435|Homebrew|0123456789abcdef|0|!!!!|L", "192.168.1.9")
+        assertNotNull(room)
+        assertEquals("", room!!.ownerName)
+        assertEquals("Lockstep", room.netcode)
+    }
+
     @Test fun legacyTwoFieldOfferKeepsCompatibility() {
         val room = LanDiscovery.parseOffer("MZOFFER2|55435|Homebrew", "192.168.1.3")
         assertNotNull(room)

@@ -344,3 +344,82 @@ Até **três tentativas**: cada par troca a porta candidata pelo mesmo TCP, conf
 **Desempenho:** o benchmark de save+load ocorre antes de iniciar a sessão. Acima de 8 ms, o Gekko ativa `limited_saving` para reduzir frequência de snapshots. A versão pinned upstream não garante a detecção nativa de desync nesse modo e, por isso, `desync_detection` é desligada enquanto `limited_saving` está ativa. O overlay apresenta Limited Saving ON/OFF e a medição de save/load; não afirmar proteção de desync que não foi executada. O Gekko inclui ajuste conservador de input delay após janelas de jitter/rollbacks excessivos. Se o RTT ficar acima de 150ms por três amostras consecutivas, só a **apresentação de vídeo** cai para 1/2; `retro_run()`, áudio, entradas, save states e checksums continuam normalmente. Volta a apresentar todos os quadros após cinco amostras abaixo de 110ms. Picos de processamento de Gekko e quadros com >500 ms são registrados no overlay/diagnóstico.
 
 **Limites:** nenhuma métrica isolada comprova causalidade das travadas. Capture o overlay antes/depois da oscilação para distinguir rede (RTT/jitter) de serialização/CPU. Recuperação de desync completa por troca de estado assinado não está pronta; não seria seguro simplesmente carregar save state em um único peer. Um pacote perdido por dezenas de segundos ou mudança de rede pode terminar a sessão. Ver docs/BACKGROUND.md e docs/DEVICE_TESTING.md.
+
+
+## Multiplayer Premium Ultimate — revisão de 21/10/2026
+
+**Ponto de partida:** commit `05c3aa98`; alterações de interface, perfil e
+diagnóstico são incrementais e mantêm o protocolo de jogo MZNP6/MZNP7,
+transferência bilateral de ROM, SHA-256, sincronização de estado, controle TCP,
+Gekko UDP, WebRTC e fallback inalterados.
+
+### Identidade e salas (sem banco de dados ou imagens no Railway)
+
+- Primeira abertura: diálogo opcional para escolher apelido (até 32 caracteres)
+  e imagem da galeria. Ao pular, um nome `Jogador0000` é gerado e persistido.
+- Foto privada: recorte 96x96, WebP <=64 KiB, armazenada **somente** em
+  `filesDir/profile/avatar.webp`. A tela permite remover ou trocar a foto.
+  A lista de salas usa nome e iniciais; **foto remota P2P ainda não é enviada**
+  nesta revisão até testes de hardware/privacidade, portanto não há avatar
+  no Railway, nem por TCP relay, WSS ou TURN.
+- Nome opcional de host: descoberta antiga `MZSCAN2/MZOFFER2` continua
+  inalterada. Novos peers enviam também `MZSCAN3` e recebem nome e modo em
+  `MZOFFER3` (nome hexadecimal codificado, limitado); clientes anteriores
+  continuam usando o contrato antigo sem ver o apelido.
+- Servidores atualizados anunciam `profileNames: true` em `/api/rooms`.
+  Somente quando esse campo está presente o app envia uma mensagem HOST com
+  sexto campo opcional (apelido codificado). Hosts sem esse sinal continuam
+  enviando rigorosamente o handshake HOST antigo (3/5 campos).
+  O servidor aceita ambos os formatos e sanitiza novamente o apelido.
+- Registros `ownerName` são temporários na lista de salas (não persistidos
+  em banco pelo relay). Histórico local de salas visitadas guarda
+  nome/jogo/endpoint/código para tentar reentrar **se a sala ainda existir**.
+  Não há identidade autenticada nem convites garantidos.
+- Busca/filtro de ROM compatível e ordenação visual usam lista já baixada:
+  **nenhuma pesquisa nova ao digitar** e nenhum endpoint adicional.
+  Tempo "resposta HTTP" é latência de consulta de diretório, não ping do
+  anfitrião; modo efetivo só é conhecido quando a partida inicia.
+
+### Desempenho e comunicação
+
+- **Rollback GekkoNet segue padrão**, com mesmos parâmetros nativos,
+  negociação MZNP v7 e fallback TCP. Nenhum ajuste em ROM, estado, módulo JNI,
+  ritmo de áudio, Surface ou kernel Snes9x.
+- A política de apresentação **não reduz FPS visível apenas por RTT alto**:
+  exige amostras repetidas de custo local elevado do tick de rede/emulação.
+  Não altera `retro_run`, comandos de gamepad, renderizador nem simulação.
+- Diagnóstico registra congestionamento de envio e descarte **na fila local**
+  do WebRTC; isso **não é medição de perda de pacotes da rede**.
+  HUD leve na partida exibe qualidade estimada por RTT/jitter.
+- Chat rápido foi **adiado**: pares antigos tratam qualquer DataChannel novo
+  como canal principal Gekko, então criar `maizo-chat` sem negociação explícita
+  de capacidades poderia interromper rollback. O canal de jogo permanece
+  intocado nesta revisão, inclusive com APKs antigos.
+- KeepAlive foreground/Wi-Fi existentes permanecem intactos. O novo código
+  **não garante** sobrevivência a morte do processo, troca de rede ou
+  retomada após desconexão real.
+
+### Ordem de implantação Railway
+
+1. **Publicar servidor atualizado primeiro** (arquivos
+   `server/relay.js`, `server/wss-relay.js`). Confirmar `profileNames:true`
+   na API e rodar os testes de integração do servidor. Clientes antigos
+   continuam aceitos.
+2. Publicar APK Android atualizado. Quando o servidor anterior não anuncia
+   `profileNames`, o APK automaticamente envia o formato HOST antigo.
+3. Não assumir que atualizar GitHub significa implantar Railway. Verificar
+   explicitamente o commit implantado e as rotas reais antes de anunciar
+   o nickname público como disponível.
+
+### Deliberadamente fora da versão padrão
+
+Chat rápido entre versões sem negociação, pausa cooperativa, reentrada após
+queda/desync, troca dinâmica do buffer
+lockstep, compartilhamento remoto de fotos, alteração de versão do wire-format
+MZNP e atualização de ROM durante o jogo **não foram ativados**.
+Eles exigem controle bilateral de estado e/ou testes com dois celulares.
+São menos importantes que não interromper ROM autorizada, LAN UDP, WSS,
+WebRTC, sincronização e fallback TCP.
+
+CI valida código e protocolos por testes JVM/Node e o APK de duas ABIs,
+**não comprova desempenho ou conectividade em dois Android físicos**.

@@ -59,11 +59,13 @@ function createRelayServer({
       relayTls: encrypted,
       ...(advertisedHost ? { relayHost: advertisedHost } : {}),
       websocketRelay: true,
+      profileNames: true,
       rooms: [
         ...[...rooms.values()].filter(r => !r.host.destroyed),
         ...[...wsRooms.values()].filter(r => !r.peer.socket.destroyed && r.game !== "GekkoSignaling")
       ].map(r => ({
         id: r.id, game: r.game, createdAt: r.createdAt,
+        ownerName: r.ownerName || "", netcode: r.netcode || "",
         romHash: r.romHash, cheats: r.cheats,
         websocketRelay: Boolean(r.peer)
       }))
@@ -94,7 +96,7 @@ function createRelayServer({
         socket.end("ERR INVALID\n"); return;
       }
       if (parts[0] === "HOST") {
-        if (rooms.size >= maxRooms || ![3, 5].includes(parts.length) || rooms.has(id)) {
+        if (rooms.size >= maxRooms || ![3, 5, 6].includes(parts.length) || rooms.has(id)) {
           socket.end("ERR FULL_OR_DUPLICATE\n"); return;
         }
         let title;
@@ -103,14 +105,18 @@ function createRelayServer({
             .replace(/[\r\n\x00-\x1f]/g, "").slice(0, 75);
         } catch (_) { title = "SNES"; }
         if (!title) title = "SNES";
-        const romHash = parts.length === 5 ? parts[3] : "";
-        const cheats = parts.length === 5 && parts[4] === "1";
+        const romHash = parts.length >= 5 ? parts[3] : "";
+        const cheats = parts.length >= 5 && parts[4] === "1";
+        const ownerName = parts.length === 6 ? Buffer.from(parts[5], "base64url")
+          .toString("utf8").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
+          .replace(/\s+/g, " ").trim().slice(0, 32) : "";
         if ((romHash && !/^[a-f0-9]{16}$/.test(romHash)) ||
-            (parts.length === 5 && !["0", "1"].includes(parts[4]))) {
+            (parts.length >= 5 && !["0", "1"].includes(parts[4])) ||
+            (parts.length === 6 && !/^[A-Za-z0-9_-]{1,180}$/.test(parts[5]))) {
           socket.end("ERR INVALID_META\n"); return;
         }
         ownedId = id;
-        rooms.set(id, { id, game: title, romHash, cheats,
+        rooms.set(id, { id, game: title, romHash, cheats, ownerName,
           createdAt: Date.now(), host: socket });
         socket.pause();
         return;

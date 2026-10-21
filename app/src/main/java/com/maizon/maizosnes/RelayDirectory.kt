@@ -15,12 +15,14 @@ internal data class InternetRoom(
     val romHash: String = "",
     val cheats: Boolean = false,
     val tls: Boolean = false,
-    val wss: Boolean = false
+    val wss: Boolean = false,
+    val ownerName: String = "",
+    val netcode: String = ""
 )
 internal data class RelayListing(
     val serverHost: String, val relayPort: Int,
     val rooms: List<InternetRoom>, val tls: Boolean = false,
-    val wss: Boolean = false
+    val wss: Boolean = false, val profileNames: Boolean = false
 )
 
 internal object RelayDirectory {
@@ -112,9 +114,12 @@ internal object RelayDirectory {
                 item.optLong("createdAt"),
                 romHash.takeIf { it.matches(Regex("[a-f0-9]{16}")) } ?: "",
                 item.optBoolean("cheats", false), relayTls,
-                wss && item.optBoolean("websocketRelay", false)))
+                wss && item.optBoolean("websocketRelay", false),
+                PlayerIdentity.sanitize(item.optString("ownerName", "")),
+                item.optString("netcode", "").take(16)))
         }
         val relayHost = validateRelayHost(parsed.host, json.optString("relayHost", ""))
-        return RelayListing(relayHost, port, rooms, relayTls, wss)
+        return RelayListing(relayHost, port, rooms, relayTls, wss,
+            json.optBoolean("profileNames", false))
     }
 }

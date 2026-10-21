@@ -29,7 +29,9 @@ internal data class AutoRoom(
     val romHash: String = "",
     val cheats: Boolean = false,
     val tls: Boolean = false,
-    val wss: Boolean = false
+    val wss: Boolean = false,
+    val ownerName: String = "",
+    val netcode: String = ""
 )
 internal data class AutoServerStatus(
     val relay: PublicRelay,
@@ -197,7 +199,8 @@ internal object OnlineRegistry {
                         .coerceIn(1L, 120000L)
                     val rooms = listing.rooms.map { room ->
                         AutoRoom(room.id, room.game, server.name, server.region,
-                            server.endpoint, elapsed, room.romHash, room.cheats, room.tls, room.wss)
+                            server.endpoint, elapsed, room.romHash, room.cheats, room.tls, room.wss,
+                            room.ownerName, room.netcode)
                     }
                     RelayScanAttempt(AutoServerStatus(server, elapsed, rooms.size),
                         rooms, null)

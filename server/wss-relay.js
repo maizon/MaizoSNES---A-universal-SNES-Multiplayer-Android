@@ -82,7 +82,7 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
         const id = parts[1];
         if (!ID.test(id || "")) { socket.destroy(); return; }
         if (parts[0] === "HOST") {
-          if ((parts.length !== 5 && parts.length !== 3) ||
+          if (![3, 5, 6].includes(parts.length) ||
               rooms.size >= maxRooms || rooms.has(id)) {
             send(peer, Buffer.from("ERR FULL_OR_DUPLICATE\n"));
             socket.destroySoon?.();
@@ -92,16 +92,20 @@ function attachWssRelay(directory, rooms, maxRooms = 100) {
           try { title = Buffer.from(parts[2], "base64url").toString("utf8")
             .replace(/[\r\n\x00-\x1f]/g, "").slice(0, 75); }
           catch (_) { title = "SNES"; }
-          const hash = parts.length === 5 ? parts[3] : "";
-          const cheats = parts.length === 5 && parts[4] === "1";
+          const hash = parts.length >= 5 ? parts[3] : "";
+          const cheats = parts.length >= 5 && parts[4] === "1";
+          const ownerName = parts.length === 6 ? Buffer.from(parts[5], "base64url")
+            .toString("utf8").replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
+            .replace(/\s+/g, " ").trim().slice(0, 32) : "";
           if ((hash && !/^[a-f0-9]{16}$/.test(hash)) ||
-              (parts.length === 5 && !["0", "1"].includes(parts[4]))) {
+              (parts.length >= 5 && !["0", "1"].includes(parts[4])) ||
+              (parts.length === 6 && !/^[A-Za-z0-9_-]{1,180}$/.test(parts[5]))) {
             socket.destroy(); return;
           }
           peer.started = true;
           peer.roomId = id;
           rooms.set(id, { id, game: title || "SNES", romHash: hash,
-            cheats, createdAt: Date.now(), peer });
+            cheats, ownerName, createdAt: Date.now(), peer });
           return;
         }
         if (parts[0] === "JOIN" && parts.length === 2) {

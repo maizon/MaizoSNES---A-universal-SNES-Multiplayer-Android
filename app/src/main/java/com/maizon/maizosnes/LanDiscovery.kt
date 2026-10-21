@@ -15,7 +15,9 @@ internal data class LanRoom(
     val port: Int,
     val game: String,
     val romHash: String = "",
-    val cheats: Boolean = false
+    val cheats: Boolean = false,
+    val ownerName: String = "",
+    val netcode: String = ""
 )
 
 /**
@@ -26,7 +28,9 @@ internal data class LanRoom(
 internal object LanDiscovery {
     private const val UDP_PORT = 55436
     private const val PROBE = "MZSCAN2"
+    private const val PROBE_V3 = "MZSCAN3"
     private const val OFFER = "MZOFFER2|"
+    private const val OFFER_V3 = "MZOFFER3|"
     private const val MAX_PACKET = 512
 
     internal class Announcement(private val socket: DatagramSocket) : Closeable {
@@ -37,7 +41,8 @@ internal object LanDiscovery {
     }
 
     fun announce(tcpPort: Int, gameName: String,
-        romHash: String = "", cheats: Boolean = false): Announcement? {
+        romHash: String = "", cheats: Boolean = false,
+        ownerName: String = "", netcode: String = "Rollback"): Announcement? {
         if (tcpPort !in 1024..65535) return null
         val socket = try {
             DatagramSocket(UDP_PORT).apply {
@@ -59,9 +64,18 @@ internal object LanDiscovery {
                     try {
                         socket.receive(packet)
                         val message = String(packet.data, packet.offset, packet.length, Charsets.US_ASCII)
-                        if (message != PROBE || !packet.address.isSiteLocalAddress) continue
-                        val response = "$OFFER$tcpPort|$display|$safeHash|" +
+                        if (message != PROBE && message != PROBE_V3 ||
+                            !packet.address.isSiteLocalAddress) continue
+                        val legacy = "$OFFER$tcpPort|$display|$safeHash|" +
                             (if (cheats) "1" else "0")
+                        val encodedName = PlayerIdentity.sanitize(ownerName)
+                            .toByteArray(Charsets.UTF_8).joinToString("") {
+                                (it.toInt() and 255).toString(16).padStart(2, '0')
+                            }
+                        val response = if (message == PROBE) legacy else
+                            "$OFFER_V3$tcpPort|$display|$safeHash|" +
+                            (if (cheats) "1" else "0") + "|$encodedName|" +
+                            (if (netcode == "Lockstep") "L" else "R")
                         val encoded = response.toByteArray(Charsets.UTF_8)
                         socket.send(DatagramPacket(encoded, encoded.size, packet.address, packet.port))
                     } catch (_: SocketTimeoutException) {
@@ -80,16 +94,30 @@ internal object LanDiscovery {
     }
 
     internal fun parseOffer(message: String, address: String): LanRoom? {
-        if (!message.startsWith(OFFER)) return null
-        val fields = message.removePrefix(OFFER).split('|', limit = 4)
-        if (fields.size !in 2..4) return null
+        val modern = message.startsWith(OFFER_V3)
+        if (!modern && !message.startsWith(OFFER)) return null
+        val fields = message.removePrefix(if (modern) OFFER_V3 else OFFER)
+            .split('|', limit = if (modern) 6 else 4)
+        if (fields.size !in 2..(if (modern) 6 else 4)) return null
         val port = fields[0].toIntOrNull() ?: return null
         if (port !in 1024..65535) return null
         val game = fields[1].take(76).trim()
         if (game.isBlank()) return null
         val hash = fields.getOrNull(2).orEmpty().lowercase()
             .takeIf { it.matches(Regex("[a-f0-9]{16}")) } ?: ""
-        return LanRoom(address, port, game, hash, fields.getOrNull(3) == "1")
+        val owner = if (modern) runCatching {
+            val hex = fields.getOrNull(4).orEmpty()
+            require(hex.length <= 256 && hex.length % 2 == 0 &&
+                hex.all { it in '0'..'9' || it in 'a'..'f' })
+            val bytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+            PlayerIdentity.sanitize(String(bytes, Charsets.UTF_8))
+        }.getOrDefault("") else ""
+        val mode = if (modern) when (fields.getOrNull(5)) {
+            "R" -> "Rollback disponível"
+            "L" -> "Lockstep"
+            else -> ""
+        } else ""
+        return LanRoom(address, port, game, hash, fields.getOrNull(3) == "1", owner, mode)
     }
 
     fun scan(timeoutMillis: Long = 1750): List<LanRoom> {
@@ -113,6 +141,7 @@ internal object LanDiscovery {
             socket.broadcast = true
             socket.soTimeout = 220
             val request = PROBE.toByteArray(Charsets.US_ASCII)
+        val modernRequest = PROBE_V3.toByteArray(Charsets.US_ASCII)
             val deadline = System.currentTimeMillis() + timeoutMillis.coerceIn(250, 5000)
             var nextSend = 0L
             while (System.currentTimeMillis() < deadline) {
@@ -121,6 +150,7 @@ internal object LanDiscovery {
                     for (address in destinations) {
                         runCatching {
                             socket.send(DatagramPacket(request, request.size, address, UDP_PORT))
+                            socket.send(DatagramPacket(modernRequest, modernRequest.size, address, UDP_PORT))
                         }
                     }
                     nextSend = now + 650
@@ -132,7 +162,10 @@ internal object LanDiscovery {
                     val message = String(response.data, response.offset, response.length, Charsets.UTF_8)
                     val room = parseOffer(message, response.address.hostAddress ?: continue)
                         ?: continue
-                    rooms["${room.host}:${room.port}"] = room
+                    val key = "${room.host}:${room.port}"
+                    val prior = rooms[key]
+                    if (prior == null || room.ownerName.isNotBlank() || prior.ownerName.isBlank())
+                        rooms[key] = room
                 } catch (_: SocketTimeoutException) {
                     // Listen until deadline.
                 }

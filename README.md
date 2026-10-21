@@ -1,5 +1,26 @@
 # MaizoSNES — Super Nintendo Android / LAN + Online
 
+## Multiplayer Premium Ultimate — experiência e desempenho (21/10/2026)
+
+- Perfil de boas-vindas na primeira abertura, apelido e foto circular **locais**
+  (galeria opcional, pular permitido). Nenhuma imagem armazenada no Railway.
+- Host identificado pelo nome em salas online **quando o servidor atualizado
+  anuncia suporte**. Descoberta LAN conserva o protocolo antigo e acrescenta
+  anúncio opcional compatível para clientes novos.
+- Busca por jogo/anfitrião/região, filtro de ROM e ordenação, salas visitadas
+  guardadas apenas no aparelho; status e sinal de rede durante a partida.
+- GekkoNet permanece padrão. Política de apresentação usa carga local de tick,
+  não RTT isolado. Diagnóstico WebRTC mostra filas locais e congestionamento.
+- Chat rápido foi adiado para exigir negociação bilateral de capacidade;
+  clientes antigos não devem confundir um segundo DataChannel com o Gekko.
+- Recursos experimentais perigosos (pausa síncrona, reconexão após desync,
+  avatares remotos) permanecem desativados/não implementados nesta atualização.
+- O servidor Railway existente só precisa de metadados opcionais: **nenhum
+  upload de foto, banco de perfis, armazenamento ou tráfego de avatar**.
+- Compilação automatizada **não substitui** validação física LAN, Internet e
+  fallback. Consulte `docs/NETPLAY.md` e `docs/VALIDATION.md`.
+
+
 ## Interface biblioteca-first e painel in-game corrigido — 21/10/2026
 
 **Esta atualização dá prioridade absoluta aos jogos.** A Biblioteca mostra a coleção imediatamente, sem banner gigante de jogo acima dos cartões. O título, arte ampliada, região, detalhes e botão **JOGAR** aparecem **somente ao selecionar um jogo**. Uma barra fixa **ACIMA** da coleção reúne os ícones: **+ (Importar ROM/ZIP, Pasta, Procurar ROMs, Buscar capas)**, **lupa (pesquisa)**, **filtro (Todos/Favoritos/Recentes)**, **visualização (Grade 2–5 colunas, Lista, Fileira, Coleção)** e **ordenar (Título, Recentes, Arquivo)**. Os menus são expansíveis e não empurram a biblioteca para baixo; o conteúdo continua rolando independentemente. Ícones possuem descrições de acessibilidade e navegação por controle.

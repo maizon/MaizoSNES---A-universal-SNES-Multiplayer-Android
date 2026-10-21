@@ -323,6 +323,11 @@ internal fun MaizoEmulatorApp(
     coreOptions: Map<String, String>,
     performanceText: String,
     networkDebug: NetworkDebugState,
+    playerProfile: PlayerProfile,
+    playerAvatar: Bitmap?,
+    onEditPlayerProfile: () -> Unit,
+    recentRooms: List<RecentRoom>,
+    onRejoinRecentRoom: (String, String) -> Unit,
     onSelectTouchPreset: (TouchPreset) -> Unit,
     connectionMode: NetworkMode,
     onConnectionModeChanged: (NetworkMode) -> Unit,
@@ -458,6 +463,8 @@ internal fun MaizoEmulatorApp(
             paused = paused,
             settings = settings,
             performanceText = performanceText,
+            networkDebug = networkDebug,
+            multiplayerActive = multiplayerActive,
             editingControls = editingControls,
             onEditControls = { editingControls = !editingControls },
             onSettingsChanged = onSettingsChanged,
@@ -655,11 +662,19 @@ internal fun MaizoEmulatorApp(
                 onShareRomAllowedChanged, onReceiveRomAllowedChanged,
                 onHostMultiplayer, onJoinMultiplayer, onStopMultiplayer,
                 onLocalMultiplayerChanged,
+                playerProfile, playerAvatar, onEditPlayerProfile,
+                recentRooms, onRejoinRecentRoom,
                 onDebug = { connectionOverlay = true }
             )
             AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(horizontal = 19.dp, vertical = 16.dp)) {
                 NeoPageHeader("SISTEMA  /  MAIZOSNES",
                     "Configurações", "Controle seu jogo do seu jeito.")
+                OutlinedButton(onClick = onEditPlayerProfile,
+                    modifier = Modifier.fillMaxWidth().padFocusRing()) {
+                    PlayerAvatar(playerProfile.name, playerProfile.localId, playerAvatar, size = 32)
+                    Spacer(Modifier.size(10.dp))
+                    Text("EDITAR PERFIL • " + playerProfile.name, fontSize = 12.sp)
+                }
                 Row(Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { connectionOverlay = true },
@@ -1312,9 +1327,31 @@ private fun MultiplayerScreen(
     onJoin: (String, Int) -> Unit,
     onStop: () -> Unit,
     onLocalMode: (Boolean) -> Unit,
+    playerProfile: PlayerProfile,
+    playerAvatar: Bitmap?,
+    onEditPlayerProfile: () -> Unit,
+    recentRooms: List<RecentRoom>,
+    onRejoinRecentRoom: (String, String) -> Unit,
     onDebug: () -> Unit
 ) {
     var advancedNetwork by remember { mutableStateOf(false) }
+    var roomSearch by rememberSaveable { mutableStateOf("") }
+    var compatibleOnly by rememberSaveable { mutableStateOf(false) }
+    var fastestFirst by rememberSaveable { mutableStateOf(true) }
+    val visibleAutoRooms = autoRooms.filter { room ->
+        val searchable = room.game + " " + room.ownerName + " " + room.region
+        searchable.contains(roomSearch.trim(), ignoreCase = true) &&
+            (!compatibleOnly || localRomHashPrefix.isNotBlank() &&
+                room.romHash == localRomHashPrefix)
+    }.let { list -> if (fastestFirst) list.sortedBy { it.latencyMs } else list.sortedBy { it.game.lowercase() } }
+    val visibleRelayRooms = relayRooms.filter { room ->
+        (room.game + " " + room.ownerName).contains(roomSearch.trim(), ignoreCase = true) &&
+            (!compatibleOnly || localRomHashPrefix.isNotBlank() && room.romHash == localRomHashPrefix)
+    }
+    val visibleLanRooms = lanRooms.filter { room ->
+        (room.game + " " + room.ownerName).contains(roomSearch.trim(), ignoreCase = true) &&
+            (!compatibleOnly || localRomHashPrefix.isNotBlank() && room.romHash == localRomHashPrefix)
+    }
     var showNetcodeDetails by remember { mutableStateOf(false) }
     var remoteHost by remember(connectionMode) { mutableStateOf(savedConnectionHost) }
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
@@ -1332,6 +1369,60 @@ private fun MultiplayerScreen(
         NeoPageHeader("SOCIAL  /  MULTIPLAYER",
             "Multiplayer",
             "Seus amigos e jogos, na mesma tela.")
+        Surface(color = Panel, shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().clickable { onEditPlayerProfile() }) {
+            Row(Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PlayerAvatar(playerProfile.name, playerProfile.localId, playerAvatar, size = 48)
+                Column(Modifier.weight(1f)) {
+                    Text(playerProfile.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Seu perfil • visível nas salas criadas", color = Muted, fontSize = 11.sp)
+                }
+                Text("EDITAR ›", color = Mint, fontSize = 11.sp)
+            }
+        }
+        if (!active && recentRooms.isNotEmpty() &&
+            (connectionMode == NetworkMode.AUTO || connectionMode == NetworkMode.RELAY)) {
+            Surface(color = Panel, shape = RoundedCornerShape(14.dp)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("SALAS VISITADAS", color = Mint, fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold)
+                    recentRooms.take(3).forEach { room ->
+                        Row(Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(room.game, fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp, maxLines = 1)
+                                Text(room.ownerName.ifBlank { "Anfitrião desconhecido" },
+                                    color = Muted, fontSize = 10.sp)
+                            }
+                            TextButton(onClick = {
+                                onRejoinRecentRoom(room.id, room.endpoint)
+                            }) { Text("VERIFICAR / ENTRAR", fontSize = 10.sp) }
+                        }
+                    }
+                }
+            }
+        }
+        if (connectionMode != NetworkMode.LOCAL) {
+            TextField(value = roomSearch, onValueChange = { roomSearch = it.take(48) },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text("Pesquisar salas por jogo, anfitrião ou região") })
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { compatibleOnly = !compatibleOnly }) {
+                    Text(if (compatibleOnly) "✓ ROM compatível" else "Todas as ROMs",
+                        fontSize = 11.sp, color = Mint)
+                }
+                TextButton(onClick = { fastestFirst = !fastestFirst }) {
+                    Text(if (fastestFirst) "Menor resposta" else "Por jogo",
+                        fontSize = 11.sp, color = Mint)
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End) {
             TextButton(onClick = onDebug, modifier = Modifier.padFocusRing()) {
@@ -1534,11 +1625,11 @@ private fun MultiplayerScreen(
                         }
                     }
                 }
-                if (autoRooms.isEmpty()) {
-                    Text("Nenhuma sala online disponível neste momento.",
+                if (visibleAutoRooms.isEmpty()) {
+                    Text("Nenhuma sala online encontrada com os filtros atuais.",
                         color = Muted, fontSize = 12.sp)
                 } else {
-                    autoRooms.forEach { room ->
+                    visibleAutoRooms.forEach { room ->
                         val hashCompatible = ready && (room.romHash.isBlank() ||
                             room.romHash == localRomHashPrefix)
                         val cheatsAllowed = !room.cheats || onlineCheatsOptIn
@@ -1557,6 +1648,8 @@ private fun MultiplayerScreen(
                                 Column(Modifier.weight(1f)) {
                                     Text(room.game, fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold)
+                                    Text("👤 " + room.ownerName.ifBlank { "Anfitrião não informado" } +
+                                        " • 1/2 • Aguardando", color = Mint, fontSize = 11.sp)
                                     Text(room.serverName + " • " + room.region +
                                         " • resposta HTTP " + room.latencyMs + " ms",
                                         color = Muted, fontSize = 10.sp)
@@ -1630,10 +1723,10 @@ private fun MultiplayerScreen(
                         Text("CRIAR SALA LAN SEM INTERNET")
                     }
                 }
-                if (lanRooms.isEmpty()) {
+                if (visibleLanRooms.isEmpty()) {
                     Text("A busca começa automaticamente. Se o Wi-Fi bloquear descoberta, use IP/porta abaixo.",
                         color = Muted, fontSize = 11.sp)
-                } else lanRooms.forEach { room ->
+                } else visibleLanRooms.forEach { room ->
                     val hashCompatible = ready && (room.romHash.isBlank() ||
                         room.romHash == localRomHashPrefix)
                     val cheatsAllowed = !room.cheats || onlineCheatsOptIn
@@ -1653,6 +1746,9 @@ private fun MultiplayerScreen(
                             verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("👤 " + room.ownerName.ifBlank { "Anfitrião não informado" } +
+                                    " • " + room.netcode.ifBlank { "Modo ao conectar" },
+                                    color = Mint, fontSize = 10.sp)
                                 if (connectionMode == NetworkMode.AUTO)
                                     Text("Conexão local • Wi-Fi / LAN", color = Muted, fontSize = 11.sp)
                                 else Text("${room.host}:${room.port}", color = Muted, fontSize = 11.sp)
@@ -1705,12 +1801,12 @@ private fun MultiplayerScreen(
                         Text("CRIAR SALA", fontSize = 11.sp)
                     }
                 }
-                Text("${relayRooms.size} sala(s) encontrada(s)", color = Mint, fontSize = 12.sp)
-                if (relayRooms.isEmpty()) {
+                Text("${visibleRelayRooms.size} sala(s) encontrada(s)", color = Mint, fontSize = 12.sp)
+                if (visibleRelayRooms.isEmpty()) {
                     Text("Sem salas listadas. Abra uma ROM e crie a primeira sala.",
                         color = Muted, fontSize = 12.sp)
                 }
-                relayRooms.forEach { room ->
+                visibleRelayRooms.forEach { room ->
                     val hashCompatible = room.romHash.isBlank() ||
                         localRomHashPrefix.isBlank() || room.romHash == localRomHashPrefix
                     val cheatsAllowed = !room.cheats || onlineCheatsOptIn
@@ -1728,6 +1824,8 @@ private fun MultiplayerScreen(
                             verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("👤 " + room.ownerName.ifBlank { "Anfitrião não informado" } +
+                                    " • 1/2 • Aguardando", color = Mint, fontSize = 10.sp)
                                 Text("Sala " + room.id, color = Muted, fontSize = 10.sp)
                                 Text(
                                     when {
@@ -1916,6 +2014,8 @@ private fun GameScreen(
     paused: Boolean,
     settings: AppSettings,
     performanceText: String,
+    networkDebug: NetworkDebugState,
+    multiplayerActive: Boolean,
     editingControls: Boolean,
     onEditControls: () -> Unit,
     onSettingsChanged: (AppSettings) -> Unit,
@@ -2000,6 +2100,23 @@ private fun GameScreen(
                     else "ARRASTE OS GRUPOS DE CONTROLE • SALVAR",
                     modifier = Modifier.padding(12.dp), color = Mint,
                     fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (multiplayerActive && !editingControls) {
+            val latency = networkDebug.rttAvg
+            val unstable = (latency != null && latency > 180) ||
+                (networkDebug.jitterMs ?: 0.0) > 35
+            val fair = (latency != null && latency > 90) ||
+                (networkDebug.jitterMs ?: 0.0) > 18
+            val signalColor = if (unstable) Color(0xFFFF776D)
+                else if (fair) Color(0xFFFFCA6E) else Mint
+            Surface(modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
+                color = Color(0xD91B2333), shape = RoundedCornerShape(14.dp)) {
+                Text("●  " + (latency?.let {
+                    String.format(java.util.Locale.US, "%.0f ms", it)
+                } ?: "Conectando") + (if (unstable) " • REDE INSTÁVEL" else ""),
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    color = signalColor, fontSize = 10.sp)
             }
         }
         if (settings.performanceHud && !editingControls) {

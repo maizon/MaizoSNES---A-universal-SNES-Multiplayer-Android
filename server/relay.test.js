@@ -196,13 +196,15 @@ test("HTTPS-domain WebSocket pair publishes a selectable room and streams bytes 
   try {
     const host = await openWebSocket();
     const title = Buffer.from("Homebrew").toString("base64url");
-    send(host, "HOST abcdef000099 " + title + " 0123456789abcdef 0\n");
+    send(host, "HOST abcdef000099 " + title + " 0123456789abcdef 0 " +
+      Buffer.from("Maizon").toString("base64url") + "\n");
     await new Promise(resolve => setTimeout(resolve, 60));
     const list = await (await fetch("http://127.0.0.1:" +
       ports.httpPort + "/api/rooms")).json();
     assert.equal(list.websocketRelay, true);
     assert.equal(list.rooms.length, 1);
     assert.equal(list.rooms[0].websocketRelay, true);
+    assert.equal(list.rooms[0].ownerName, "Maizon");
     const guest = await openWebSocket();
     const hostReady = receive(host), guestReady = receive(guest);
     send(guest, "JOIN abcdef000099\n");
@@ -219,6 +221,27 @@ test("HTTPS-domain WebSocket pair publishes a selectable room and streams bytes 
     assert.equal(after.rooms.length, 0);
   } finally {
     active.forEach(s => s.destroy());
+    await relay.close();
+  }
+});
+
+test("optional host nickname is server-sanitized, advertised, and legacy peers stay compatible", async () => {
+  const relay = createRelayServer({ httpPort: 0, relayPort: 0, bind: "127.0.0.1" });
+  const ports = await relay.start();
+  let host;
+  try {
+    host = await connect(ports.relayPort);
+    const nick = Buffer.from("  Maizon\n   Nascimento  ").toString("base64url");
+    host.write("HOST aabbcc112233 " + Buffer.from("Homebrew").toString("base64url") +
+      " 0123456789abcdef 0 " + nick + "\n");
+    await new Promise(resolve => setTimeout(resolve, 60));
+    const data = await (await fetch("http://127.0.0.1:" + ports.httpPort + "/api/rooms")).json();
+    assert.equal(data.profileNames, true);
+    assert.equal(data.rooms[0].ownerName, "Maizon Nascimento");
+    assert.equal(data.rooms[0].game, "Homebrew");
+    assert.equal(data.rooms[0].romHash, "0123456789abcdef");
+  } finally {
+    host?.destroy();
     await relay.close();
   }
 });

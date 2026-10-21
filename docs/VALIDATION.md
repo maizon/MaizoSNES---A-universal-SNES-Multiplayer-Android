@@ -133,3 +133,33 @@ inesperada e overlay correspondente ao transporte realmente utilizado.
 - [ ] **ARMv7 e ARM64:** repetir em arquiteturas diferentes; confirmar nenhuma ROM/BIOS incluída no APK.
 
 **Automatizado ≠ validado em aparelho:** CI executa testes JVM de protocolo e builds para dois ABIs. LAN unicast UDP, Wi-Fi lock, WebRTC via CGNAT e ROM instalada por SAF exigem teste físico.
+
+## Multiplayer Premium Ultimate — verificação física obrigatória
+
+- [ ] Ao instalar do zero, aparece boas-vindas; pular persiste nome aleatório;
+  editar perfil, trocar e remover imagem funciona em ARMv7 e ARM64.
+- [ ] Foto 96x96 é local; servidor /api/rooms nunca retorna foto ou bytes
+  WebP; avatar na lista pública usa iniciais.
+- [ ] No LAN, cliente antigo vê MZOFFER2 e ingressa; cliente novo descobre
+  MZOFFER3 e mostra nome e modo. Compartilhamento bilateral de ROM
+  autorizada, SHA-256 e fallback não regridem.
+- [ ] Servidor Railway antigo (sem profileNames) ainda aceita HOST antigo.
+  Servidor novo aceita hosts/clientes antigos e HOST com ownerName opcional.
+- [ ] WSS+WiFi/4G: sala aparece, nome do dono é listado, cliente com ROM
+  própria / sem ROM autorizado entra; teste 10 min com Gekko.
+- [ ] Confirmar que nenhum segundo DataChannel é criado com clientes antigos.
+  Chat rápido permanece fora desta atualização por compatibilidade.
+- [ ] LAN de dois Android diferentes com RTT >150ms artificial:
+  medir FPS renderizado vs FPS emulado, carga CPU e tempo por tick.
+  Alta latência isolada NÃO deve causar stride 2.
+- [ ] Celular ARMv7 fraco: repetir 15 minutos, verificar temperatura,
+  atrasos, áudio, tela de pausa do SO, background 30 s e retorno sem desync.
+- [ ] Ligar economia de bateria / trocar para WhatsApp / voltar após 30 s:
+  comparar comportamento do foreground service. Não prometer
+  sobrevivência a morte de processo Android.
+- [ ] Usar filtros/ordenação e histórico de salas sem impedir entrar em
+  uma sala ainda disponível. Sala expirada informa indisponibilidade.
+- [ ] Confirmar build universal contém ambas lib/arm64-v8a e lib/armeabi-v7a.
+
+**Limites:** CI não testa WebRTC físico, P2P/STUN/TURN nem multicast LAN.
+A versão anterior permanece ponto de rollback até validação de hardware.

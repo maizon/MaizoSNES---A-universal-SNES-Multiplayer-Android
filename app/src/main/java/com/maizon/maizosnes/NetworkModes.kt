@@ -41,7 +41,9 @@ internal data class NetworkMetrics(
     val saveLoadMs: Double = 0.0,
     val maxFrameStallMs: Double = 0.0,
     val presentationStride: Int = 1,
-    val limitedSaving: Boolean = false
+    val limitedSaving: Boolean = false,
+    val droppedPackets: Long = 0L,
+    val blockedSends: Long = 0L
 )
 
 /** Runtime truth for the settings/in-game connection diagnostics. */
