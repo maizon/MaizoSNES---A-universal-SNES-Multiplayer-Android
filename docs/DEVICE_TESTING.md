@@ -9,7 +9,7 @@
 
 ## Partida online (Rollback quando possível)
 
-1. Abra a ROM em A e selecione Multiplayer → Rollback (Recomendado) → Criar sala online.
+1. Abra a ROM em A e entre em **Multiplayer**. Para selecionar Rollback, expanda **MOTOR → AJUSTES** e escolha **Rollback (Recomendado)**; em seguida crie uma sala online. As configurações avançadas são recolhidas por padrão para dar prioridade às salas.
 2. Se a ROM for redistribuível, confirme a autorização por sessão. O cliente só receberá bytes depois de aceitar a oferta.
 3. No B, selecione Multiplayer → Atualizar salas → Sala de A. Caso não possua a ROM, aceite a oferta autorizada e aguarde o progresso 0–100%, hash SHA-256 e estado inicial.
 4. Verifique os estados ICE. No menu durante o jogo (GUIDE/PS/Xbox central, não Start SNES), abra STATUS DE CONEXÃO / DEBUG.
@@ -19,12 +19,12 @@
 ## LAN / IP manual
 
 1. Conecte os dois ao mesmo Wi-Fi; crie sala LAN no A, descubra ou digite IP:porta no B.
-2. Confirme **Rollback + UDP direto** no overlay. O host usa UDP porta TCP+1.
+2. Confirme **Rollback + UDP direto** no overlay. O MZNP v7 negocia **portas UDP dinâmicas/efêmeras** após sincronizar ROM autorizada e estado inicial por TCP; não presuma TCP+1 nem a porta de descoberta 55436.
 3. Simule indisponibilidade UDP (bloqueio no roteador) e confirme retorno para Lockstep TCP antes do primeiro frame.
 
 ## Diagnóstico e relatório de bug
 
-1. Abra STATUS DE CONEXÃO / DEBUG na aba Multiplayer, Ajustes ou no menu do jogo.
+1. Abra **STATUS / LOGS** na aba Multiplayer, **DIAGNÓSTICO DE REDE** em Ajustes ou o diagnóstico no menu do jogo.
 2. Toque COMPARTILHAR DIAGNÓSTICO para enviar motor, transporte, estado ICE, RTT, jitter, correções, delay e desyncs via Android Sharesheet.
 3. Faça uma captura de tela do overlay e relate: dois modelos, Android, ROM homebrew, passos, data/hora, resultado esperado e observado.
 4. Opcional em computador ADB: `adb logcat -v time -s MaizoSNES:D AndroidRuntime:E *:S > maizosnes.log`.
