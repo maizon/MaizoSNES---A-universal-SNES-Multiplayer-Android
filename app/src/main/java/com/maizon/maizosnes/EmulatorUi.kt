@@ -1162,8 +1162,8 @@ private fun MultiplayerScreen(
                         colors = CardDefaults.cardColors(containerColor = PanelRaised),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
-                            enabled = !active && (ready || receiveRomAllowed) &&
-                                hashCompatible && cheatsAllowed
+                            enabled = !active && cheatsAllowed &&
+                                (hashCompatible || receiveRomAllowed)
                         ) {
                             remoteHost = room.host
                             portText = room.port.toString()
@@ -1178,12 +1178,14 @@ private fun MultiplayerScreen(
                                     Text("Conexão local • Wi-Fi / LAN", color = Muted, fontSize = 11.sp)
                                 else Text("${room.host}:${room.port}", color = Muted, fontSize = 11.sp)
                                 Text(when {
-                                    !hashCompatible -> "ROM/MOD DIFERENTE"
+                                    !hashCompatible && receiveRomAllowed ->
+                                        "ROM DIFERENTE — entre para solicitar transferência autorizada"
+                                    !hashCompatible -> "ROM/MOD DIFERENTE — habilite receber ROM"
                                     !cheatsAllowed -> "CHEATS — autorize nas configurações"
                                     room.cheats -> "CHEATS SINCRONIZADOS"
                                     room.romHash.isNotBlank() -> "ROM COMPATÍVEL POR SHA-256"
                                     else -> "Compatibilidade conferida ao entrar"
-                                }, color = if (hashCompatible && cheatsAllowed) Mint
+                                }, color = if ((hashCompatible || receiveRomAllowed) && cheatsAllowed) Mint
                                     else Color(0xFFFFBD85), fontSize = 10.sp)
                             }
                             Text("ENTRAR ›", color = Mint, fontSize = 11.sp,
