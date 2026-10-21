@@ -35,3 +35,8 @@ gamepad reconnect, portrait/landscape and local two-player mapping.
 Controller Home/Guide consumption varies by Android firmware. If the
 system handles Guide as Home, it may be impossible to capture from
 the app; do not silently remap Start as a workaround.
+
+
+## 21/10/2026 — navegação NeoStation-inspired
+
+O frontend permanece em Jetpack Compose: menu lateral em telas >=720dp, navegação inferior em telas menores e feedback de foco visível nos itens clicáveis. O painel do jogo conserva os mapeamentos de entrada; o botão START continua a atuar como START do SNES; GUIDE/MODE abre o menu quando suportado pelo sistema Android. As provas de acessibilidade e gamepad físico ainda exigem teste em aparelho. Consulte `docs/UI_SMOKE_TEST.md`.

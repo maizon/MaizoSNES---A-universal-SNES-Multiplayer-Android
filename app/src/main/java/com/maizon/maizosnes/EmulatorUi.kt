@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -150,12 +151,16 @@ internal data class AppSettings(
 
 // NeoStation-inspired presentation, independently implemented in Compose.
 // No Flutter code or GPLv3 assets are copied into the Snes9x-based application.
-private val Bg = Color(0xFF0A101A)
-private val Panel = Color(0xFF131E2B)
-private val PanelRaised = Color(0xFF203044)
-private val Accent = Color(0xFF70B8FF)
-private val Mint = Color(0xFF6DE4C1)
-private val Muted = Color(0xFFB8C9DA)
+// Original Jetpack Compose artwork. NeoStation is a GPLv3 design reference,
+// not a source of copied Dart code, proprietary artwork or branding.
+private val Bg = Color(0xFF15191E)
+private val Panel = Color(0xFF1D232A)
+private val PanelRaised = Color(0xFF29323D)
+private val Accent = Color(0xFF817BFF)
+private val Mint = Color(0xFF00D3BB)
+private val Muted = Color(0xFFB2C2CE)
+private val NeoPink = Color(0xFFF43098)
+private val NeoOutline = Color(0xFF414B56)
 
 /** Visible directional-controller focus, without affecting touch/click actions. */
 private fun Modifier.padFocusRing(): Modifier = composed {
@@ -192,13 +197,44 @@ private fun Modifier.dialogGamepadKeys(onBack: () -> Unit): Modifier = composed 
     }
 }
 
+/** Shared page chrome for Library, Multiplayer, Settings and Credits.
+ * Rebuilt in Compose so our native emulation, controllers and network callbacks remain untouched.
+ */
+@Composable
+private fun NeoPageHeader(eyebrow: String, title: String, caption: String) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(eyebrow.uppercase(), color = Mint, fontSize = 10.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 1.7.sp)
+        Text(title, color = Color.White, fontSize = 27.sp,
+            fontWeight = FontWeight.ExtraBold, lineHeight = 31.sp)
+        Text(caption, color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+    }
+}
+
+@Composable
+private fun NeoBadge(label: String, highlighted: Boolean = true) {
+    Surface(
+        shape = RoundedCornerShape(40.dp),
+        color = if (highlighted) Color(0xFF17463F) else PanelRaised,
+        modifier = Modifier.border(
+            1.dp, if (highlighted) Mint.copy(alpha = 0.24f) else NeoOutline,
+            RoundedCornerShape(40.dp))
+    ) {
+        Text(label, modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            color = if (highlighted) Mint else Muted)
+    }
+}
+
 @Composable
 internal fun MaizoTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
-            primary = Accent, secondary = Mint, background = Bg, surface = Panel,
-            surfaceVariant = PanelRaised, onSurfaceVariant = Muted,
-            onPrimary = Bg, onBackground = Color.White, onSurface = Color.White
+            primary = Accent, secondary = NeoPink, tertiary = Mint,
+            background = Bg, surface = Panel, surfaceVariant = PanelRaised,
+            outline = NeoOutline, onSurfaceVariant = Muted,
+            onPrimary = Color.White, onBackground = Color.White, onSurface = Color.White
         ),
         content = content
     )
@@ -370,13 +406,15 @@ internal fun MaizoEmulatorApp(
                 Surface(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp)
                         .dialogGamepadKeys { onGameMenuChanged(false) },
-                    shape = RoundedCornerShape(26.dp), color = Bg, tonalElevation = 12.dp
+                    shape = RoundedCornerShape(25.dp), color = Panel, tonalElevation = 12.dp
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("MENU DO EMULADOR", color = Mint, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                                Text("MAIZOSNES  /  PAINEL DO JOGO", color = Mint, fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                                 Text(currentRomName ?: "Jogo", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                Text("Estados • Vídeo • Áudio • Controles • Rede", color = Muted, fontSize = 10.sp)
                             }
                             TextButton(onClick = { onGameMenuChanged(false) },
                                 modifier = Modifier.focusRequester(menuFocus)) { Text("FECHAR") }
@@ -412,7 +450,7 @@ internal fun MaizoEmulatorApp(
         contentWindowInsets = WindowInsets(0),
         bottomBar = {
             if (!wideLayout) {
-            NavigationBar(containerColor = Color(0xFF101624), modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
+            NavigationBar(containerColor = Panel, modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
                 NavigationBarItem(screen == AppScreen.LIBRARY, { onSetScreen(AppScreen.LIBRARY) }, icon = { Icon(Icons.Default.Gamepad, null) }, label = { Text("Biblioteca") }, modifier = Modifier.padFocusRing())
                 NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("Online") }, modifier = Modifier.padFocusRing())
                 NavigationBarItem(screen == AppScreen.SETTINGS, { onSetScreen(AppScreen.SETTINGS) }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Ajustes") }, modifier = Modifier.padFocusRing())
@@ -424,13 +462,24 @@ internal fun MaizoEmulatorApp(
         Row(Modifier.fillMaxSize().padding(padding)) {
             if (wideLayout) {
                 Column(
-                    Modifier.width(220.dp).fillMaxSize()
-                        .background(Panel).padding(14.dp),
+                    Modifier.width(232.dp).fillMaxHeight()
+                        .background(Brush.verticalGradient(listOf(Panel, Bg)))
+                        .border(1.dp, NeoOutline.copy(alpha = 0.30f))
+                        .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("MAIZOSNES", color = Mint, fontSize = 19.sp,
-                        fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                    Text("SNES • GAME LIBRARY", color = Muted, fontSize = 10.sp)
+                    Box(Modifier.size(47.dp).clip(RoundedCornerShape(15.dp))
+                        .background(Brush.linearGradient(listOf(Accent, NeoPink))),
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Gamepad, "MaizoSNES", tint = Color.White,
+                            modifier = Modifier.size(26.dp))
+                    }
+                    Text("MAIZOSNES", color = Color.White, fontSize = 21.sp,
+                        fontWeight = FontWeight.Black, letterSpacing = 1.1.sp)
+                    Text("YOUR SUPER NINTENDO UNIVERSE", color = Muted, fontSize = 10.sp)
+                    Spacer(Modifier.height(13.dp))
+                    Text("NAVEGAR", color = Mint, fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp, letterSpacing = 1.8.sp)
                     listOf(
                         Triple(AppScreen.LIBRARY, "▦", "Biblioteca"),
                         Triple(AppScreen.MULTIPLAYER, "◉", "Multiplayer"),
@@ -441,13 +490,13 @@ internal fun MaizoEmulatorApp(
                         Surface(
                             modifier = Modifier.fillMaxWidth().padFocusRing()
                                 .clickable { onSetScreen(destination) },
-                            color = if (selected) PanelRaised else Panel,
+                            color = if (selected) Accent.copy(alpha = 0.25f) else Color.Transparent,
                             shape = RoundedCornerShape(14.dp)
                         ) {
                             Row(Modifier.padding(14.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Text(symbol, color = if (selected) Mint else Muted,
-                                    fontSize = 19.sp)
+                                    fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                                 Spacer(Modifier.width(12.dp))
                                 Text(label, color = if (selected) Color.White else Muted,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
@@ -455,13 +504,18 @@ internal fun MaizoEmulatorApp(
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("Maicon Nascimento", color = Muted, fontSize = 11.sp)
+                    NeoBadge("SNES  •  Snes9x 1.63", highlighted = false)
+                    Spacer(Modifier.height(5.dp))
+                    Text("BY MAICON NASCIMENTO", color = Muted, fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold)
                 }
             }
-            Box(Modifier.weight(1f).fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxSize()
+                .background(Brush.verticalGradient(
+                    listOf(Bg, Color(0xFF191F2A), Bg)))) {
         when (screen) {
             AppScreen.LIBRARY -> LibraryScreen(
-                Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
+                Modifier.fillMaxSize(), romNames, coverBitmaps,
                 romHeaders, favoriteRoms, recentRoms, onToggleFavorite,
                 onRemoveRom, onApplyPatchToRom,
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
@@ -469,7 +523,7 @@ internal fun MaizoEmulatorApp(
                 onOpenRom, onContinueGame, onRenameRom, onSetScreen
             )
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
-                Modifier.fillMaxSize().padding(padding), currentRomName, localRomHashPrefix, multiplayerReady,
+                Modifier.fillMaxSize(), currentRomName, localRomHashPrefix, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
                 connectionMode, onConnectionModeChanged,
                 netplayLatencyMode, onNetplayLatencyModeChanged,
@@ -490,10 +544,10 @@ internal fun MaizoEmulatorApp(
                 onLocalMultiplayerChanged,
                 onDebug = { connectionOverlay = true }
             )
-            AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text("AJUSTES", color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                Text("Configure o emulador", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold,
-                    modifier = Modifier.padding(bottom = 8.dp))
+            AppScreen.SETTINGS -> Column(Modifier.fillMaxSize().padding(horizontal = 19.dp, vertical = 16.dp)) {
+                NeoPageHeader("SISTEMA  /  PREFERÊNCIAS",
+                    "Personalize sua experiência",
+                    "Tudo o que você precisa para imagem, som, controles e estados de jogo.")
                 OutlinedButton(onClick = { connectionOverlay = true },
                     modifier = Modifier.fillMaxWidth().padFocusRing()) {
                     Text("STATUS DE CONEXÃO / DEBUG")
@@ -503,7 +557,7 @@ internal fun MaizoEmulatorApp(
                     devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged,
                     iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce)
             }
-            AppScreen.CREDITS -> CreditsScreen(Modifier.fillMaxSize().padding(padding), onOpenInstagram)
+            AppScreen.CREDITS -> CreditsScreen(Modifier.fillMaxSize(), onOpenInstagram)
             AppScreen.GAME -> Unit
         }
             }
@@ -517,40 +571,63 @@ private fun CreditsScreen(modifier: Modifier, onOpenInstagram: () -> Unit) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { firstFocus.requestFocus() }
     Column(
-        modifier = modifier.verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        modifier = modifier.verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(17.dp)
     ) {
-        Text("CRÉDITOS", color = Mint, fontSize = 12.sp, letterSpacing = 2.sp)
-        Text("MaizoSNES", fontSize = 32.sp, fontWeight = FontWeight.Black)
-        Card(colors = CardDefaults.cardColors(containerColor = Panel),
-            shape = RoundedCornerShape(18.dp)) {
-            Column(Modifier.fillMaxWidth().padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("MAICON NASCIMENTO", fontWeight = FontWeight.Black,
-                    fontSize = 21.sp, color = Mint)
-                Text("Criador e responsável pelo projeto MaizoSNES.",
-                    color = Color.White, fontSize = 13.sp)
+        NeoPageHeader("SOBRE  /  CRÉDITOS", "Feito para jogar juntos",
+            "Uma experiência SNES para Android, criada por entusiastas e construída sobre software aberto.")
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .background(Brush.linearGradient(
+                        listOf(Color(0xFF302A58), Color(0xFF202F37), Panel)))
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp)
+            ) {
+                NeoBadge("CRIADOR DO PROJETO")
+                Text("Maicon Nascimento", fontSize = 27.sp,
+                    fontWeight = FontWeight.Black, color = Color.White)
+                Text("MaizoSNES • Desenvolvimento, integração Android e experiência multiplayer.",
+                    color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
                 Button(onClick = onOpenInstagram,
-                    modifier = Modifier.focusRequester(firstFocus),
+                    modifier = Modifier.focusRequester(firstFocus).padFocusRing(),
                     colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
-                    Text("INSTAGRAM • @maicon_nasciment0")
+                    Text("INSTAGRAM  /  @maicon_nasciment0")
                 }
             }
         }
-        SettingSectionTitle("Tecnologias e agradecimentos",
-            "Reconhecimento aos projetos de código aberto e referências de interface.")
-        Text("Snes9x 1.63 — núcleo de emulação SNES (licença não comercial).\n" +
-            "Libretro — interfaces, cheats, identificação e thumbnails.\n" +
-            "PPSSPP (hrydgard) — referência de ergonomia dos controles.\n" +
-            "CTR Native Android (igawa6) — referência de controles.\n" +
-            "VirtualGamePad-Mobile (kitswas) — referência de proporção e disposição; arte original.\n" +
-            "ARMSX1 (ARMSX2) — referência de interface.\n" +
-            "Daijishou (TapiocaFox) — referência de navegação da biblioteca.\n" +
-            "Android Open Source Project e Jetpack Compose — plataforma e interface.",
-            color = Muted, fontSize = 13.sp, lineHeight = 22.sp)
-        Text("Créditos e licenças de terceiros: THIRD_PARTY_NOTICES.md e LICENSES/ " +
-            "no repositório. Os projetos citados não endossam o MaizoSNES.",
-            color = Muted, fontSize = 11.sp)
+        SettingSectionTitle("O que torna o MaizoSNES especial",
+            "Emulação nativa, biblioteca integrada e sessões multiplayer LAN/online.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()) {
+            Box(Modifier.weight(1f)) { NeoBadge("SNES 1.63") }
+            Box(Modifier.weight(1f)) { NeoBadge("ANDROID") }
+            Box(Modifier.weight(1f)) { NeoBadge("NETPLAY") }
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingSectionTitle("Tecnologias e agradecimentos",
+                    "Cada projeto mantém seus próprios autores e respectivas licenças.")
+                Text("Snes9x 1.63 • núcleo de emulação SNES e licença não comercial.\n" +
+                    "Libretro • interfaces e bancos de dados de apoio.\n" +
+                    "GekkoNet • rollback multiplayer.\n" +
+                    "Jetpack Compose / Android Open Source Project • interface e sistema.\n" +
+                    "NeoStation • referência de UX e organização de biblioteca, sem cópia de código Flutter ou recursos GPLv3.\n" +
+                    "PPSSPP, CTR Native Android, VirtualGamePad-Mobile, ARMSX1 e Daijishou • referências históricas de UX.",
+                    color = Muted, fontSize = 12.sp, lineHeight = 21.sp)
+            }
+        }
+        Text("Este aplicativo não inclui jogos, BIOS ou conteúdo proprietário. " +
+            "Créditos e termos completos: THIRD_PARTY_NOTICES.md e LICENSES/ no GitHub. " +
+            "Os projetos mencionados não endossam o MaizoSNES.",
+            color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
     }
 }
 
@@ -584,6 +661,11 @@ private fun LibraryScreen(
     var columns by remember { mutableStateOf(2) }
     var listMode by remember { mutableStateOf(false) }
     var collectionMode by remember { mutableStateOf("Todos") }
+    val featuredRom = currentRomName?.takeIf { it in romNames }
+        ?: recentRoms.firstOrNull { it in romNames }
+        ?: romNames.firstOrNull()
+    val featuredTitle = featuredRom?.let { romHeaders[it]?.title ?: File(it).nameWithoutExtension }
+        ?: "Sua coleção começa aqui"
     val homeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { homeFocus.requestFocus() }
     val visibleRoms = remember(romNames, romHeaders, libraryQuery, collectionMode, favoriteRoms, recentRoms) {
@@ -601,9 +683,9 @@ private fun LibraryScreen(
         selectedRom = null
         renameTarget = null
     }
-    Column(modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+    Column(modifier.padding(horizontal = 18.dp, vertical = 13.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            modifier = Modifier.fillMaxWidth().padding(bottom = 11.dp)) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(15.dp))
                 .background(Brush.linearGradient(listOf(Accent, Color(0xFF4540A1)))),
                 contentAlignment = Alignment.Center) {
@@ -611,12 +693,64 @@ private fun LibraryScreen(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("MAIZO", color = Mint, fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-                Text("SNES", fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text("BIBLIOTECA  /  SUPER NINTENDO", color = Mint, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+                Text("Seus jogos", fontSize = 26.sp, fontWeight = FontWeight.Black)
             }
-            Text("Snes9x 1.63", color = Mint, fontSize = 10.sp)
+            NeoBadge("${romNames.size} JOGOS", highlighted = romNames.isNotEmpty())
         }
+        Box(
+            modifier = Modifier.fillMaxWidth().height(159.dp)
+                .clip(RoundedCornerShape(23.dp))
+                .background(Brush.linearGradient(
+                    listOf(Color(0xFF343061), Color(0xFF252B46), Color(0xFF17443D))))
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(23.dp))
+        ) {
+            Row(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("EM DESTAQUE  •  SNES", color = Mint, fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+                    Text(featuredTitle, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold,
+                        maxLines = 2, lineHeight = 23.sp)
+                    Text(if (featuredRom == null) "Importe uma ROM própria para começar."
+                        else if (hasLoadedRom && currentRomName == featuredRom)
+                            "Seu jogo está pronto para continuar."
+                        else "Selecione e jogue agora.",
+                        color = Muted, fontSize = 10.sp, maxLines = 2)
+                    Button(onClick = {
+                        if (featuredRom != null) {
+                            if (hasLoadedRom && currentRomName == featuredRom) onContinueGame()
+                            else onOpenRom(featuredRom)
+                        } else onChooseAddRom()
+                    }, modifier = Modifier.padFocusRing(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Mint),
+                        contentPadding = PaddingValues(horizontal = 17.dp, vertical = 4.dp)) {
+                        Text(if (featuredRom == null) "+ ADICIONAR JOGO" else
+                            if (hasLoadedRom && currentRomName == featuredRom) "▶ CONTINUAR"
+                            else "▶ JOGAR", color = Bg, fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.width(108.dp).height(130.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Brush.verticalGradient(
+                        listOf(Color(0xFF4A417C), Color(0xFF19272F)))),
+                    contentAlignment = Alignment.Center) {
+                    val cover = featuredRom?.let { coverBitmaps[it] }
+                    if (cover != null) Image(cover.asImageBitmap(),
+                        "Capa de $featuredTitle",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit)
+                    else Icon(Icons.Default.Gamepad, "SNES",
+                        tint = Color.White.copy(alpha = 0.68f),
+                        modifier = Modifier.size(53.dp))
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             Button(onClick = onChooseAddRom,
@@ -659,7 +793,7 @@ private fun LibraryScreen(
                 Text(if (listMode) "● Lista" else "Lista", fontSize = 11.sp)
             }
         }
-        Text(visibleRoms.size.toString() + " jogo(s) • A: abrir • B: voltar • L1/R1: abas",
+        Text(visibleRoms.size.toString() + " jogo(s) na coleção • A: detalhes • B: voltar • L1/R1: abas",
             color = Muted, fontSize = 11.sp)
         if (visibleRoms.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -672,7 +806,8 @@ private fun LibraryScreen(
                 items(visibleRoms, key = { it }) { name ->
                     RomCard(name, romHeaders[name]?.title ?: File(name).nameWithoutExtension,
                         currentRomName == name, coverBitmaps[name],
-                        { selectedRom = name }, { renameTarget = name }, compact = true)
+                        { selectedRom = name }, { renameTarget = name },
+                        compact = true, listStyle = true)
                 }
             }
         } else {
@@ -709,7 +844,12 @@ private fun LibraryScreen(
                     }
                     Text(info?.title ?: File(name).nameWithoutExtension,
                         fontWeight = FontWeight.Bold, fontSize = 21.sp)
-                    Text("Região: " + (info?.region ?: "desconhecida"), color = Muted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        NeoBadge("SUPER NINTENDO")
+                        NeoBadge("REGIÃO: " + (info?.region ?: "DESCONHECIDA"),
+                            highlighted = false)
+                    }
                     info?.warning?.let { Text(it, color = Color(0xFFFFBD85), fontSize = 12.sp) }
                     Button(onClick = { selectedRom = null; onOpenRom(name) },
                         modifier = Modifier.fillMaxWidth().focusRequester(detailFocus)) { Text("▶ JOGAR") }
@@ -771,63 +911,90 @@ private fun RomCard(
     cover: Bitmap?,
     onOpen: () -> Unit,
     onRename: () -> Unit,
-    compact: Boolean = false
+    compact: Boolean = false,
+    listStyle: Boolean = false
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padFocusRing().clickable(onClick = onOpen),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Panel)
     ) {
-        Column {
-            Box(
-                Modifier.fillMaxWidth().height(if (compact) 102.dp else 150.dp)
-                    .background(Brush.linearGradient(
-                        listOf(Color(0xFF35305F), Color(0xFF141C30), Color(0xFF0A2D36))
-                    )),
-                contentAlignment = Alignment.Center
+        if (listStyle) {
+            Row(
+                Modifier.fillMaxWidth().padding(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(13.dp)
             ) {
-                if (cover != null) {
-                    Image(
-                        bitmap = cover.asImageBitmap(),
-                        contentDescription = "Capa de " + displayTitle,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-                } else {
-                    Icon(Icons.Default.Gamepad, null, tint = Accent,
-                        modifier = Modifier.size(48.dp))
+                Box(Modifier.width(66.dp).height(78.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Brush.linearGradient(
+                        listOf(Color(0xFF40365F), Color(0xFF194238)))),
+                    contentAlignment = Alignment.Center) {
+                    if (cover != null) Image(cover.asImageBitmap(),
+                        "Capa de $displayTitle", modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit)
+                    else Icon(Icons.Default.Gamepad, "Jogo SNES", tint = Accent)
                 }
-                Surface(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(7.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xC5101523)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(displayTitle, color = Color.White,
+                        fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                        maxLines = 2, lineHeight = 18.sp)
+                    Text(if (current) "● EM MEMÓRIA" else "SUPER NINTENDO",
+                        color = if (current) Mint else Muted, fontSize = 10.sp)
+                    Text("A  •  DETALHES", color = Muted, fontSize = 9.sp)
+                }
+                TextButton(onClick = onRename) { Text("EDITAR", fontSize = 10.sp) }
+                Text("›", color = Mint, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+            }
+        } else {
+            Column {
+                Box(
+                    Modifier.fillMaxWidth().height(if (compact) 116.dp else 174.dp)
+                        .background(Brush.linearGradient(
+                            listOf(Color(0xFF40365F), Color(0xFF1E3444),
+                                Color(0xFF144339)))),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(if (current) "EM MEMÓRIA" else "SNES",
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                        color = if (current) Mint else Color.White,
-                        fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    if (cover != null) {
+                        Image(cover.asImageBitmap(), "Capa de $displayTitle",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit)
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Gamepad, "SNES", tint = Accent,
+                                modifier = Modifier.size(if (compact) 40.dp else 55.dp))
+                            Text("SUPER NINTENDO", color = Muted, fontSize = 8.sp,
+                                letterSpacing = 1.1.sp)
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(7.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xE51D232A)
+                    ) {
+                        Text(if (current) "● ATIVO" else "SNES",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            color = if (current) Mint else Color.White,
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Column(Modifier.fillMaxWidth().padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(displayTitle, fontSize = if (compact) 11.sp else 14.sp,
+                        color = Color.White, fontWeight = FontWeight.Bold,
+                        maxLines = 2, lineHeight = 17.sp)
+                    Row(Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("A  •  ABRIR", color = Mint, fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp)
+                        if (!compact) TextButton(onClick = onRename,
+                            contentPadding = PaddingValues(0.dp)) {
+                            Text("EDITAR", color = Muted, fontSize = 10.sp)
+                        }
+                    }
                 }
             }
-            Text(displayTitle,
-                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp),
-                fontSize = if (compact) 11.sp else 13.sp, fontWeight = FontWeight.Bold,
-                maxLines = 2, lineHeight = 16.sp)
-            // In 3/4-column launcher mode the entire card is a gamepad/touch
-            // focus target. Avoid oversized buttons overflowing narrow cards.
-            if (!compact) Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = onRename, contentPadding = PaddingValues(4.dp),
-                    modifier = Modifier.weight(1f)) { Text("EDITAR", fontSize = 10.sp) }
-                Button(onClick = onOpen,
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 5.dp)) {
-                    Text("ABRIR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-            } else Text("A • DETALHES",
-                color = Mint, fontSize = 9.sp, maxLines = 1,
-                modifier = Modifier.padding(start = 8.dp, bottom = 7.dp))
         }
     }
 }
@@ -905,13 +1072,30 @@ private fun MultiplayerScreen(
             modifier = Modifier.fillMaxWidth().padFocusRing()) {
             Text("STATUS DE CONEXÃO / DEBUG")
         }
-        Text("MULTIPLAYER • MAIZOSNES", color = Mint, fontSize = 11.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.7.sp)
-        Text("Jogue junto, de qualquer lugar.", fontSize = 24.sp,
-            lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold)
-        Text("Crie uma sala, convide alguém e joguem a mesma ROM. " +
-            "Online, Wi-Fi local ou dois controles no mesmo aparelho.",
-            color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+        NeoPageHeader("SOCIAL  /  MULTIPLAYER",
+            "Jogue com seus amigos",
+            "Conecte dois aparelhos pela internet ou pelo Wi-Fi local. " +
+            "O modo escolhido preserva os saves e suas configurações.")
+        Card(colors = CardDefaults.cardColors(containerColor = Panel),
+            shape = RoundedCornerShape(20.dp)) {
+            Row(Modifier.fillMaxWidth().padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp))
+                    .background(Brush.linearGradient(listOf(Accent, NeoPink))),
+                    contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Groups, "Multiplayer", tint = Color.White)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(if (active) "Sessão em andamento" else "Pronto para conectar",
+                        fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(romName ?: "Selecione um jogo na Biblioteca",
+                        color = Muted, fontSize = 11.sp, maxLines = 2)
+                }
+                NeoBadge(if (active) "● CONECTADO" else "○ AGUARDANDO",
+                    highlighted = active)
+            }
+        }
         if (!ready) Surface(color = Color(0xFF31283D), shape = RoundedCornerShape(14.dp)) {
             Text("① Antes de conectar, escolha e abra um jogo na Biblioteca. " +
                 "② Volte aqui para criar ou entrar em uma sala.",
@@ -923,7 +1107,7 @@ private fun MultiplayerScreen(
             shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.fillMaxWidth().padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("MODO DE CONEXÃO", color = Mint, fontSize = 11.sp,
+                Text("ESCOLHA COMO JOGAR", color = Mint, fontSize = 11.sp,
                     fontWeight = FontWeight.Bold)
                 Text("Troque sem apagar saves, ROMs, configurações ou seus perfis de rede.",
                     color = Muted, fontSize = 11.sp)
@@ -940,7 +1124,7 @@ private fun MultiplayerScreen(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (choice == connectionMode)
-                                Color(0xFF2B2851) else PanelRaised)
+                                Accent.copy(alpha = 0.28f) else PanelRaised)
                     ) {
                         Row(Modifier.fillMaxWidth().padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically) {
@@ -999,7 +1183,7 @@ private fun MultiplayerScreen(
                         checked = backgroundNetplayEnabled,
                         onCheckedChange = onBackgroundNetplayChanged)
                 }
-                Text("PERFIL DE LATÊNCIA • LOCKSTEP MZNP v6",
+                Text("PERFIL DE LATÊNCIA • FALLBACK LOCKSTEP",
                     color = Mint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Text("O Lockstep TCP envia comandos para quadros futuros, evitando um RTT " +
                     "a cada frame. Buffer menor reage mais rápido, " +
@@ -1434,7 +1618,7 @@ private fun GameScreen(
                             .padding(top = 9.dp, end = 12.dp))
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color(0x503B4563))
+                    .background(Color(0xC21D232A))
                     .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
                     .clickable { toolbarExpanded = true },
                 contentAlignment = Alignment.Center
@@ -1447,7 +1631,7 @@ private fun GameScreen(
             Row(
                 modifier = Modifier.align(Alignment.TopCenter).padding(8.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xB51A2030))
+                    .background(Color(0xE51D232A))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1483,7 +1667,7 @@ private fun GameScreen(
         if (editingControls) {
             Surface(
                 modifier = Modifier.align(Alignment.Center).padding(top = 45.dp),
-                color = Color(0xC91A2030), shape = RoundedCornerShape(16.dp)
+                color = Panel.copy(alpha = 0.93f), shape = RoundedCornerShape(16.dp)
             ) {
                 Text(if (editIndividual)
                     "ARRASTE OS BOTÕES INDIVIDUALMENTE • SALVAR"
@@ -1505,10 +1689,11 @@ private fun GameScreen(
         if (paused && !editingControls) {
             Surface(
                 modifier = Modifier.align(Alignment.Center).clickable(onClick = onPause),
-                color = Color(0xC91A2030), shape = RoundedCornerShape(20.dp)
+                color = Panel.copy(alpha = 0.93f), shape = RoundedCornerShape(20.dp)
             ) {
                 Column(Modifier.padding(horizontal = 25.dp, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("JOGO PAUSADO", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                    Text("Ⅱ  PAUSADO", color = Mint,
+                        fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                     Text("Toque para retomar", color = Muted, fontSize = 12.sp)
                 }
             }
@@ -2202,10 +2387,18 @@ private fun EmulatorSettings(
     var cheatFilter by remember { mutableStateOf("") }
     val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Rede", "Núcleo", "Estados", "DEV")
     Column(Modifier.fillMaxWidth()) {
-        Text("CENTRAL DE AJUSTES",
-            color = Mint, fontWeight = FontWeight.Bold, fontSize = 11.sp,
-            letterSpacing = 1.5.sp,
-            modifier = Modifier.padding(bottom = 8.dp))
+        Row(Modifier.fillMaxWidth().padding(bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("BIBLIOTECA DE OPÇÕES", color = Mint,
+                    fontWeight = FontWeight.Bold, fontSize = 10.sp,
+                    letterSpacing = 1.5.sp)
+                Text(if (inGame) "Ajustes durante o jogo" else "Central de configurações",
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+            NeoBadge(if (inGame) "EM JOGO" else "8 SEÇÕES",
+                highlighted = inGame)
+        }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2216,7 +2409,11 @@ private fun EmulatorSettings(
                     onClick = { category = item },
                     modifier = (if (index == 0) Modifier.focusRequester(firstCategoryFocus)
                         else Modifier).padFocusRing(),
-                    label = { Text(item, fontSize = 12.sp) }
+                    label = { Text(item, fontSize = 12.sp) },
+                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                        containerColor = Panel, labelColor = Muted,
+                        selectedContainerColor = Accent.copy(alpha = 0.35f),
+                        selectedLabelColor = Color.White)
                 )
             }
         }
@@ -2587,7 +2784,8 @@ private fun EmulatorSettings(
 private fun ChoiceRow(title: String, description: String, selected: Boolean, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padFocusRing().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = if (selected) Color(0xFF252447) else Panel),
+        colors = CardDefaults.cardColors(containerColor =
+            if (selected) Accent.copy(alpha = 0.20f) else Panel),
         shape = RoundedCornerShape(14.dp)
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2670,8 +2868,9 @@ private fun SliderSetting(label: String, value: Float, range: ClosedFloatingPoin
 @Composable
 private fun SettingSectionTitle(title: String, subtitle: String) {
     Column(Modifier.padding(top = 5.dp, bottom = 2.dp)) {
-        Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(subtitle, color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+        Text(title, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold,
+            color = Color.White)
+        Text(subtitle, color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
     }
 }
 

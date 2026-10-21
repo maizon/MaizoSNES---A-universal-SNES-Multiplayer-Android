@@ -1,25 +1,37 @@
-# MaizoSNES UI — NeoStation-inspired adaptation
+# Adaptação visual MaizoSNES • referência NeoStation Frontend
 
-Reference: NeoStation by Miguel Soto / contributors, https://github.com/misobadev/neostation-frontend (GPL-3.0-or-later). The user supplied a ZIP snapshot for study.
+Referência estudada: [misobadev/neostation-frontend](https://github.com/misobadev/neostation-frontend), incluindo o arquivo ZIP fornecido pelo usuário em 21/10/2026. O NeoStation é um frontend Flutter de vários sistemas; o MaizoSNES é um emulador SNES Android nativo, com multiplayer próprio.
 
-## Licensing boundary
+## Escopo desta integração em um commit
 
-NeoStation is a Flutter application released under GPLv3; MaizoSNES uses Android Jetpack Compose and a Snes9x core with separate noncommercial terms. **Do not copy NeoStation's Dart source, assets, fonts, screenshots or branding into MaizoSNES** without completing a compatibility and redistribution review. The present implementation draws on general UI design concepts only; it is independently written Kotlin Compose. Attribution to NeoStation is for design inspiration, not endorsement or a claim of code reuse.
+| Área | Experiência visual no MaizoSNES |
+| --- | --- |
+| Identidade visual | Novo tema escuro com superfícies neutras, violeta, rosa e acentos verde-água, inspirado no esquema dark do NeoStation. |
+| Navegação | Barra inferior nos celulares e sidebar permanente em telas de largura >=720dp, com ícones, foco visual e identidade MaizoSNES. |
+| Biblioteca | Cabeçalho e contagem, jogo em destaque com capa do cache ou placeholder, Jogar/Continuar, importar, buscar, filtros Todos/Favoritos/Recentes. |
+| Jogos | Grade 2/3/4 colunas com capas, cartões redesenhados, lista horizontal real, indicador de jogo ativo e painel de detalhes com região e ações preservadas. |
+| Multiplayer | Cabeçalho e painel de estado remodelados, seleção de modalidade mais visível; permanecem criar/entrar/refresh de salas LAN e online, ICE, debug e consentimentos. |
+| Ajustes | Página com cabeçalho e categorias temáticas, chips selecionados e cartões; nenhuma opção do Snes9x, controles ou save states foi removida. |
+| Jogo | Barra sobreposta e painel de pausa/edição remodelados, sem alterar SurfaceView, mapeamentos de botões, START ou sincronização. |
+| Créditos | Cartão do criador Maicon Nascimento, Instagram e agradecimentos detalhados. |
+| Status | Mensagens de conexão, debug e prompts de ROM mantidos para evitar esconder erros reais. |
 
-## Implemented first step
+## Exatamente o que não foi portado
 
-- New dark navy/blue/teal presentation palette.
-- Wide layouts (720dp+) use a persistent, controller-focusable left sidebar with Library, Multiplayer, Settings, Credits and author credit.
-- Narrow layouts retain bottom navigation and all existing screens and callbacks.
-- Gameplay rendering, ROM import, LAN/online sessions, authorized transfer, and native core are untouched.
+O objetivo aqui é **adaptação visual e funcional à arquitetura do MaizoSNES**, não transplante literal de cada tela e recurso de outro aplicativo. NeoStation possui funcionalidades externas ao escopo SNES (emuladores de outros sistemas, RetroAchievements completo, RomM, sistemas de scraping, músicas, coleções inteligentes, etc.). Elas não foram incorporadas nem anunciadas como implementadas.
 
-## Full migration still pending
+**Nenhum código Dart, arquivos de imagem, fontes, logotipos nem outros recursos de NeoStation foram incorporados.** As formas, cores e componentes acima foram implementados independentemente em Jetpack Compose. NeoStation é GPLv3; Snes9x possui condições próprias não comerciais. Antes de copiar qualquer arquivo de terceiros é necessária análise de licenças. Uso das ideias de UI não implica endosso do projeto original.
 
-- Responsive hero/library with cover grid, recent games, favorites, details, search and sort parity.
-- Controller-focusable game detail panels, responsive navigation transitions, richer settings and cover placeholders.
-- Tablet/TV layouts and accessibility verification (TalkBack, large fonts, contrast).
-- Dedicated UI instrumentation/screenshot tests and two-device manual regression test.
+## Política de regressão
 
-## Release gate
+Esta rodada é exclusiva de UI: não alterar `native-lib.cpp`, `NetplaySession.kt`, `LanDiscovery.kt`, WebRTC, Railway, SHA-256, SAF ou autorização bilateral de ROM. O menu do controle GUIDE/MODE continua disponível; START permanece START dentro do SNES.
 
-Do not label this a completed NeoStation UI port until all screens have been adapted and CI/device verification is complete. No Flutter runtime was added.
+## Gate real de aprovação
+
+1. GitHub Actions verde: build Gradle, testes unitários Android/servidor, lib nativa ARMv7/ARM64 e APK.
+2. Navegar com toque e gamepad nas quatro abas e no diálogo de jogo; importar ROM; buscar; escolher grade/lista.
+3. Entrar no jogo, testar barra e menu, pausar, save/load state, vídeo/áudio e touch, sem reatribuir START.
+4. Dois dispositivos: LAN e online previamente aprovados; testar novamente criar/entrar/receber ROM com permissão e jogar sem regressão.
+5. Verificar telas pequenas, 720dp+, paisagem e fontes grandes. Resultado físico depende de logs e testes do usuário, não do CI.
+
+Não publicar como "v1.0 definitiva validada" somente pelo CI.

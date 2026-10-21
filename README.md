@@ -1,4 +1,21 @@
-# MaizoSNES — Android SNES multiplayer
+# MaizoSNES — Super Nintendo Android / LAN + Online
+
+## Nova interface unificada — NeoStation-inspired (Jetpack Compose)
+
+A biblioteca de jogos, a navegação para celular/tablet/TV, os cartões com capas, a busca, o painel de detalhes, os ajustes, os créditos, o multiplayer e o menu sobreposto no jogo agora compartilham uma identidade visual consistente, com inspiração **de design** no [NeoStation Frontend](https://github.com/misobadev/neostation-frontend). O MaizoSNES continua **inteiramente Android nativo em Kotlin/Compose**, sem trazer Flutter nem recursos gráficos GPLv3 de terceiros.
+
+- **Biblioteca:** destaque do jogo aberto/recente, acesso a Jogar/Continuar, capas com placeholder, coleções Todos/Favoritos/Recentes, pesquisa, grade 2/3/4, lista horizontal, painel de jogo, renomear e patch.
+- **Navegação:** barra inferior em celulares e menu lateral nas telas a partir de 720 dp; gamepad com foco visual preservado.
+- **Multiplayer:** nova apresentação de status e modos, com todas as ações LAN, online, transferência autorizada e debug originais.
+- **Ajustes:** categorias e cartões temáticos para vídeo, áudio, controles, rede, estados, cheats, núcleo e desenvolvedor.
+- **Gameplay:** UI de pausa, menu e edição de controles tematizada; **START continua sendo o botão START do SNES**, não abre o menu.
+- **Créditos:** Maicon Nascimento, autores das tecnologias e aviso de licenças.
+- **Segurança:** sem ROM/BIOS incluída, sem novos serviços pagos; sem mudanças nos transportes nativos, core, shaders ou protocolo de rede nesta atualização.
+
+**Validação:** esta é uma mudança visual; o GitHub Actions deve concluir com sucesso e a interface deve ser testada em aparelho antes de etiquetar v1.0 estável. O resultado em aparelhos físicos não é inferido a partir do CI. Consulte [adaptação visual](docs/UI_NEOSTATION_ADAPTATION.md) e [roteiro de smoke test de UI](docs/UI_SMOKE_TEST.md).
+
+---
+
 
 **Estado da branch `work/android-foundation`: candidato à versão 1.0, ainda sem release final publicada.** O usuário confirmou em teste físico que gameplay LAN e online e os recursos usados funcionaram bem; identificou uma falha específica: salas LAN com ROM diferente não permitiam solicitar a transferência autorizada. A interface de salas foi ajustada para permitir entrar quando **Aceitar ROM** está habilitado. Isso não dispensa consentimento explícito do host e cliente, nem a verificação SHA-256 antes da partida. A correção precisa de novo teste físico em dois aparelhos antes da etiqueta 1.0.
 
