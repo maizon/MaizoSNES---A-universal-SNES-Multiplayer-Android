@@ -10,7 +10,7 @@ idêntico, ROM homebrew redistribuível. Não usar ROM de terceiros sem direitos
 2. Abra **STATUS DE CONEXÃO / DEBUG** na aba Multiplayer, em Ajustes e pelo
    menu do jogo (botão PS/Xbox central; START deve ir para o jogo).
 3. Verifique motor real e transporte, não apenas preferência selecionada.
-   Salas Railway HTTPS/WSS devem mostrar **Lockstep (MZNP TCP)**, jamais WebRTC.
+   Salas Railway HTTPS/WSS podem negociar **Rollback (GekkoNet) + WebRTC DataChannel** quando o canal estiver realmente conectado; em caso de falha, devem mostrar **Lockstep (MZNP TCP) via WSS**. Não confundir preferência de rollback com transporte ativo.
 4. Observe RTT min/média/máx, jitter, rollbacks/s, input delay e desyncs.
    Perda N/D é comportamento esperado: Gekko não publica esse dado.
 
@@ -18,10 +18,11 @@ idêntico, ROM homebrew redistribuível. Não usar ROM de terceiros sem direitos
 
 - [ ] Dois Android no mesmo Wi-Fi: abrir ROM idêntica, criar/descobrir sala LAN;
   confirmar rollback Gekko/UDP e conexão P1/P2; jogar 10 minutos.
-- [ ] Modo manual IP:porta: host TCP 55435, UDP 55436 liberado; rollback
+- [ ] Modo manual IP:porta: host TCP 55435 e portas UDP negociadas (possivelmente efêmeras) liberadas; rollback
   aparece no overlay. Testar bloqueio UDP -> fallback automático Lockstep.
-- [ ] Duas redes diferentes com Railway: sala HTTPS/WSS, status Lockstep,
-  partida de 10 minutos, sem afirmar rollback WebRTC.
+- [ ] Duas redes diferentes com Railway: sala HTTPS/WSS, conferir modo real
+  WebRTC DataChannel quando conectado ou Lockstep TCP no fallback;
+  partida de 10 minutos, sem afirmar rollback WebRTC sem evidência.
 - [ ] Cliente sem ROM: entrar na mesma sala, oferta de ROM homebrew, aprovar
   host e cliente; progresso de 0% a 100%; calcular SHA-256 no destino.
 - [ ] Rejeitar oferta no cliente: nenhum byte de ROM é salvo; a sala fecha
