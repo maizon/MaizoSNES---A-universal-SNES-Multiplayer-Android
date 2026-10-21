@@ -148,12 +148,14 @@ internal data class AppSettings(
     val audioBufferMs: Int = 40
 )
 
-private val Bg = Color(0xFF090D19)
-private val Panel = Color(0xFF171E2E)
-private val PanelRaised = Color(0xFF242D40)
-private val Accent = Color(0xFFAA96FF)
-private val Mint = Color(0xFF72E8C7)
-private val Muted = Color(0xFFBAC5D7)
+// NeoStation-inspired presentation, independently implemented in Compose.
+// No Flutter code or GPLv3 assets are copied into the Snes9x-based application.
+private val Bg = Color(0xFF0A101A)
+private val Panel = Color(0xFF131E2B)
+private val PanelRaised = Color(0xFF203044)
+private val Accent = Color(0xFF70B8FF)
+private val Mint = Color(0xFF6DE4C1)
+private val Muted = Color(0xFFB8C9DA)
 
 /** Visible directional-controller focus, without affecting touch/click actions. */
 private fun Modifier.padFocusRing(): Modifier = composed {
@@ -403,18 +405,60 @@ internal fun MaizoEmulatorApp(
     if (connectionOverlay) NetplayDebugDialog(
         networkDebug, { connectionOverlay = false }, onExportDebug)
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val wideLayout = maxWidth >= 720.dp
     Scaffold(
         containerColor = Bg,
         contentWindowInsets = WindowInsets(0),
         bottomBar = {
+            if (!wideLayout) {
             NavigationBar(containerColor = Color(0xFF101624), modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
                 NavigationBarItem(screen == AppScreen.LIBRARY, { onSetScreen(AppScreen.LIBRARY) }, icon = { Icon(Icons.Default.Gamepad, null) }, label = { Text("Biblioteca") }, modifier = Modifier.padFocusRing())
                 NavigationBarItem(screen == AppScreen.MULTIPLAYER, { onSetScreen(AppScreen.MULTIPLAYER) }, icon = { Icon(Icons.Default.Groups, null) }, label = { Text("Online") }, modifier = Modifier.padFocusRing())
                 NavigationBarItem(screen == AppScreen.SETTINGS, { onSetScreen(AppScreen.SETTINGS) }, icon = { Icon(Icons.Default.Tune, null) }, label = { Text("Ajustes") }, modifier = Modifier.padFocusRing())
                 NavigationBarItem(screen == AppScreen.CREDITS, { onSetScreen(AppScreen.CREDITS) }, icon = { Icon(Icons.Default.Info, null) }, label = { Text("Créditos") }, modifier = Modifier.padFocusRing())
             }
+            }
         }
     ) { padding ->
+        Row(Modifier.fillMaxSize().padding(padding)) {
+            if (wideLayout) {
+                Column(
+                    Modifier.width(220.dp).fillMaxSize()
+                        .background(Panel).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("MAIZOSNES", color = Mint, fontSize = 19.sp,
+                        fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                    Text("SNES • GAME LIBRARY", color = Muted, fontSize = 10.sp)
+                    listOf(
+                        Triple(AppScreen.LIBRARY, "▦", "Biblioteca"),
+                        Triple(AppScreen.MULTIPLAYER, "◉", "Multiplayer"),
+                        Triple(AppScreen.SETTINGS, "⚙", "Configurações"),
+                        Triple(AppScreen.CREDITS, "ⓘ", "Créditos")
+                    ).forEach { (destination, symbol, label) ->
+                        val selected = screen == destination
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padFocusRing()
+                                .clickable { onSetScreen(destination) },
+                            color = if (selected) PanelRaised else Panel,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Row(Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(symbol, color = if (selected) Mint else Muted,
+                                    fontSize = 19.sp)
+                                Spacer(Modifier.width(12.dp))
+                                Text(label, color = if (selected) Color.White else Muted,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text("Maicon Nascimento", color = Muted, fontSize = 11.sp)
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxSize()) {
         when (screen) {
             AppScreen.LIBRARY -> LibraryScreen(
                 Modifier.fillMaxSize().padding(padding), romNames, coverBitmaps,
@@ -462,6 +506,9 @@ internal fun MaizoEmulatorApp(
             AppScreen.CREDITS -> CreditsScreen(Modifier.fillMaxSize().padding(padding), onOpenInstagram)
             AppScreen.GAME -> Unit
         }
+            }
+        }
+    }
     }
 }
 
