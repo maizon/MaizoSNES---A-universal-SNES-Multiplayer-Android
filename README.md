@@ -1,10 +1,26 @@
 # MaizoSNES — Super Nintendo Android / LAN + Online
 
+## Interface biblioteca-first e painel in-game corrigido — 21/10/2026
+
+**Esta atualização dá prioridade absoluta aos jogos.** A Biblioteca mostra a coleção imediatamente, sem banner gigante de jogo acima dos cartões. O título, arte ampliada, região, detalhes e botão **JOGAR** aparecem **somente ao selecionar um jogo**. Uma barra fixa **ACIMA** da coleção reúne os ícones: **+ (Importar ROM/ZIP, Pasta, Procurar ROMs, Buscar capas)**, **lupa (pesquisa)**, **filtro (Todos/Favoritos/Recentes)**, **visualização (Grade 2–5 colunas, Lista, Fileira, Coleção)** e **ordenar (Título, Recentes, Arquivo)**. Os menus são expansíveis e não empurram a biblioteca para baixo; o conteúdo continua rolando independentemente. Ícones possuem descrições de acessibilidade e navegação por controle.
+
+**Menu durante o jogo:** o problema relatado nas capturas era a janela com altura inadequada: os chips de Vídeo/Áudio/Controles podiam mudar a categoria, mas o conteúdo ficava recortado fora do espaço visível. A janela passa a ocupar altura proporcional à tela e reserva uma área **com altura real e rolagem própria** para as opções. Cada troca de categoria reposiciona a rolagem no topo; títulos longos são abreviados visualmente (sem renomear o arquivo). O botão GUIDE/MODE e o botão de engrenagem abrem o menu; **START permanece o botão do SNES**.
+
+**Novos recursos úteis que não alteram o backend:**
+- **Capas locais PNG/JPEG:** em Detalhes do jogo, escolher uma imagem da galeria ou restaurar a automática; conversão/redimensionamento para PNG privado e limite de 2,5 MiB. Capas personalizadas não são baixadas nem embutidas no APK.
+- **Quick Resume offline opcional:** ao sair intencionalmente de uma partida offline, uma cópia automática separada dos três slots é salva. Em Detalhes, use **Retomar última partida**; pode desativar em Configurações > Estados. **Nunca** grava nem restaura durante sessões online/LAN.
+- **Perfis de touch por orientação:** personalizações retrato e landscape separadas, com compatibilidade com ajustes antigos; troca de orientação não reinicia o núcleo nem altera transporte multiplayer.
+- Biblioteca responsiva e capas previamente carregadas continuam funcionando; todos os modos de coleção e os dez presets de controle foram preservados.
+
+**Limite de validação:** GitHub Actions avalia compilação e testes unitários, não prova que o menu, capas, quick resume, orientação ou redes funcionem corretamente em dois celulares. APK de CI é `app-debug` e não deve ser anunciado como versão 1.0 final de produção sem testes físicos e assinatura. Consulte [roteiro do teste visual](docs/UI_SMOKE_TEST.md).
+
+---
+
 ## Experiência de biblioteca, capas e controles — candidato final (21/10/2026)
 
-A biblioteca agora usa **rolagem vertical única**: nenhum jogo fica inacessível abaixo do destaque. Selecione um dos quatro modos, sempre disponíveis na mesma tela: **▦ Grade (2/3/4 colunas), ☷ Lista, ↔ Fileira horizontal e ◫ Coleção** (Favoritos, Recentes e Todos). Use busca por título, filtro e ordenação por título/recência/arquivo. As escolhas sobrevivem à troca entre telas. Na paisagem o banner de destaque é compacto para deixar mais jogos visíveis.
+A biblioteca usa **rolagem vertical única**: os jogos aparecem imediatamente, sem banner permanente; o destaque grande é aberto nos detalhes do título escolhido. Selecione um dos quatro modos, sempre disponíveis na mesma tela: **▦ Grade (2/3/4 colunas), ☷ Lista, ↔ Fileira horizontal e ◫ Coleção** (Favoritos, Recentes e Todos). Use busca por título, filtro e ordenação por título/recência/arquivo. As escolhas sobrevivem à troca entre telas. Na paisagem as capas se reorganizam automaticamente em mais colunas, mantendo o foco na coleção.
 
-**Capas opcionais:** o libretro Named_Boxarts é consultado em HTTPS quando o usuário habilita Capas automáticas. A busca tenta identificar o jogo por catálogo ROM e por nome do header SNES, nome de arquivo sem tags/idioma e **título normalizado no índice de capas** (incluindo jogos com subtítulo/região). As imagens são verificadas como PNG e guardadas no armazenamento privado do app; **nenhuma capa, ROM ou BIOS está embutida no APK**. Ações ↻ BUSCAR CAPAS POR NOME e cache local permitem repetir a busca. O catálogo é atualizado no máximo semanalmente. Correspondência não é garantida para ROMs muito renomeadas/homebrew ou servidor offline. Consulte [capas](docs/COVER_ART.md).
+**Capas opcionais:** o libretro Named_Boxarts é consultado em HTTPS quando o usuário habilita Capas automáticas. A busca tenta identificar o jogo por catálogo ROM e por nome do header SNES, nome de arquivo sem tags/idioma e **título normalizado no índice de capas** (incluindo jogos com subtítulo/região). As imagens são verificadas como PNG e guardadas no armazenamento privado do app; **nenhuma capa, ROM ou BIOS está embutida no APK**. No menu **+** há a opção Buscar capas por título; o cache local permite repetir a busca. O catálogo é atualizado no máximo semanalmente. Correspondência não é garantida para ROMs muito renomeadas/homebrew ou servidor offline. Consulte [capas](docs/COVER_ART.md).
 
 **Multiplayer para iniciantes:** modos Automático, LAN e Offline local estão visíveis; listas de salas e botões para entrar/criar aparecem antes dos ajustes técnicos. Configurações de rollback, latência e ICE continuam na mesma aba em painel expansível. Compartilhar/aceitar ROM requer consentimento e permanece acessível. O transporte UDP/Gekko, WebRTC e TCP não foi alterado.
 

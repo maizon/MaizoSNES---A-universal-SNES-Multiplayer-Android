@@ -167,3 +167,10 @@ Adicionada negociação direta MZNP v7 com até três trocas de porta UDP, barre
 Em um commit integrado, o frontend adiciona navegação de coleção em scroll único, quatro modos (Grade 2/3/4, Lista, Fileira, Coleção), ordenação e filtros, recuperação opcional de capas pelo título usando índice HTTPS da libretro e cache, controles touch adaptativos com tamanhos/opacidades individuais persistidos, e modo de rede simplificado com painel técnico acessível. Referências visuais NeoStation sem importação de código/assets de terceiros.
 
 **Ainda dependem de validação real:** instalação em dois Androids com permissões de transferência de ROM autorizada, LAN rollback, online Wi-Fi/4G, background, layouts e multitouch em diferentes proporções/notches, cache e reconhecimento das capas. Stable Release exige CI verde, assinatura apropriada e aprovação dos testes físicos; CI não prova estes cenários.
+
+
+## 2026-10-21 — biblioteca-first, menu full-height, capas locais e retomada offline
+
+Implementação de UI em um commit: remover banner gigante persistente da biblioteca, mover todos os comandos para a barra de ícones superior, incluir menu **+** de ROM, expandir modal de jogo com arte, manter Grade/Lista/Fileira/Coleção e corrigir categorias do menu durante gameplay com painel de rolagem mensurável. Separar configurações touch por orientação; permitir imagem de capa pessoal sem acesso a mídia protegida de terceiros; implementar Quick Resume apenas offline/opt-in, separado dos slots manuais. Tudo sem alterar a implementação de Gekko UDP, Relay TLS/WSS, WebRTC, MZNP v7, autorização bilateral ou Snes9x.
+
+**Ainda não implementados nesta rodada:** fast-forward/rewind, V-Sync adicional, RetroAchievements, clip capture, motor de metadados externo que exija API key/licença, e screenshots de save state. Esses itens não podem ser prometidos como finalizados. A validação da UI in-game, perfis retrato/landscape, capa local e Quick Resume continua pendente de testes reais. O CI verde é condição necessária, mas não suficiente, para uma Release oficial assinada.

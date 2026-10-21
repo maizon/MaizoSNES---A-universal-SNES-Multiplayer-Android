@@ -23,10 +23,16 @@ internal object CoverArt {
     private const val CATALOG_MAX_BYTES = 2_500_000
     private const val CATALOG_TTL_MS = 7L * 24 * 60 * 60 * 1000
 
-    fun load(context: Context, file: File): Bitmap? {
+    /** User-owned local images are always preferred over optional remote boxart. */
+    fun load(context: Context, file: File, allowNetwork: Boolean = true): Bitmap? {
         if (!file.isFile) return null
+        val preferred = customFile(context, file)
+        if (preferred.isFile && preferred.length() in 1L..MAX_IMAGE.toLong()) {
+            runCatching { decodeSmall(preferred.readBytes()) }.getOrNull()?.let { return it }
+        }
         val knownName = runCatching { RomDatabase.lookup(context, file)?.title }.getOrNull()
         val headerTitle = runCatching { SnesRomHeader.inspect(file).title }.getOrNull()
+        if (!allowNetwork) return null
         val filename = file.nameWithoutExtension
         val aliases = listOfNotNull(knownName, headerTitle, filename,
             filename.substringBefore('(').substringBefore('[').takeIf { it.length > 5 })
@@ -64,6 +70,47 @@ internal object CoverArt {
             return bitmap
         }
         return null
+    }
+
+    private fun customFile(context: Context, rom: File): File =
+        File(File(context.filesDir, "covers").apply { mkdirs() },
+            "custom_" + hash(rom.nameWithoutExtension) + ".png")
+
+    /**
+     * Copy a selected image (PNG or JPEG) to the app's private cache.
+     * Never redistribute the user's image or include it in the APK.
+     */
+    fun saveCustom(context: Context, rom: File, original: ByteArray): Bitmap? {
+        if (original.size !in 16..MAX_IMAGE) return null
+        val probe = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(original, 0, original.size, probe)
+        if (probe.outWidth !in 16..8192 || probe.outHeight !in 16..8192) return null
+        var sample = 1
+        while (probe.outWidth / sample > 450 ||
+            probe.outHeight / sample > 600) sample *= 2
+        val bitmap = BitmapFactory.decodeByteArray(original, 0, original.size,
+            BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        val result = ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.PNG, 88, result)) return null
+        val bytes = result.toByteArray()
+        if (bytes.size > MAX_IMAGE || decodeSmall(bytes) == null) return null
+        val target = customFile(context, rom)
+        val temp = File(target.parentFile, target.name + ".tmp")
+        return try {
+            temp.writeBytes(bytes)
+            if (!temp.renameTo(target)) {
+                temp.delete()
+                null
+            } else decodeSmall(bytes)
+        } finally { if (temp.exists()) temp.delete() }
+    }
+
+    fun resetCustom(context: Context, rom: File): Boolean =
+        customFile(context, rom).let { !it.exists() || it.delete() }
+
+    fun moveCustom(context: Context, before: File, after: File) {
+        val prior = customFile(context, before)
+        if (prior.exists()) runCatching { prior.renameTo(customFile(context, after)) }
     }
 
     private fun hash(text: String): String = MessageDigest.getInstance("SHA-256")

@@ -51,3 +51,10 @@ A referência NeoStation para composição de biblioteca inclui as capturas em `
 A implementação tem agora modos Grade 2/3/4, Lista vertical, Fileira horizontal e Coleção com seções Favoritos/Recentes/Todos, com rolagem única que inclui o banner em vez de prender a coleção a um espaço residual. Capas por título de SNES/arquivo normalizado podem ser carregadas opcionalmente do índice público libretro e mantidas em cache; não são recursos gráficos NeoStation nem jogos empacotados.
 
 A tela de redes prioriza salas antes de detalhes técnicos, mantém edição de consentimento e acesso aos perfis de rede. O editor de controles foi unificado para todos os layouts e salva escala/opacidade por botão. Ainda é **adaptação em Kotlin** de princípios visuais, não execução do frontend Flutter original.
+
+
+## Biblioteca sem hero permanente — revisão de 21/10/2026
+
+A última revisão passa de launcher com banner obrigatório para galeria **cover-first**: coleção imediatamente visível, toolbar superior compacta (ícones +, lupa, filtro, visualização, ordenação) e painel com arte grande somente após selecionar o jogo. O usuário continua com os quatro modos de exibição, filtro e busca sem uma faixa de controles ocupando espaço entre os cartões. Não copiar layouts, artes, logos nem código Flutter GPLv3 do NeoStation; a adaptação segue independente em Compose, com imagens de jogos apenas quando fornecidas/selecionadas pelo usuário ou obtidas sob suas regras de distribuição.
+
+O menu in-game é corrigido no layout Compose usando altura real e rolagem própria por categoria. Qualquer opção de núcleo ou rede que já existia continua na interface, sem ser apagada. A aparência pode ser refinada, mas não deve impedir acesso aos botões e o teste físico deve confirmar.

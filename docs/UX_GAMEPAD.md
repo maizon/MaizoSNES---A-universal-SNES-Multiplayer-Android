@@ -47,3 +47,10 @@ O frontend permanece em Jetpack Compose: menu lateral em telas >=720dp, navegaç
 A sobreposição agora utiliza coordenadas relativas para todos os 10 presets. O D-pad e ABXY ficam nas bordas inferiores, e L/R nos cantos superiores; Select/Start ficam próximos da borda inferior sem substituir o input do jogo. No jogo: engrenagem > EDITAR; arrastar os grupos ou alternar BOTÕES para mover cada controle. A configuração é persistida por título via `TouchLayoutCodec` e segue compatível com JSON de versões anteriores.
 
 Para **tamanho e transparência individuais**, abra Ajustes > Controles > Ajustar botões separadamente, escolha D-Pad/Y/X/B/A/L/R/SELECT/START e use as duas barras. O perfil salva `buttonStyles` contendo `scale` (0.60..1.55) e `opacity` (0.25..1.00), e `buttonShifts` para posicionamento. Restaurar este botão não afeta os demais. Teste físico do alcance multitouch e controles antigos ainda necessário.
+
+
+## Menu do jogo após atualização de 21/10
+
+O diálogo in-game agora ocupa aproximadamente 92% da altura disponível no landscape (94% retrato), com título do arquivo truncado visualmente, área de categorias fixa e **painel interno com rolagem própria**. Cada troca entre Vídeo/Áudio/Controles/Rede/Estados/Cheats/Núcleo/DEV reposiciona a lista no começo; o conteúdo não deve permanecer fora da tela. A seleção por toque e gamepad continua no mesmo elemento Material3 Compose; GUIDE/MODE abre o painel quando recebido pelo Android; START nunca abre o menu.
+
+Perfis de touch editados durante gameplay são guardados por orientação e por jogo, preservando os presets anteriores e o editor por arrasto existente.

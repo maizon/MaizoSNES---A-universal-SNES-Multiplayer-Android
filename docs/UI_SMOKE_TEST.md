@@ -71,3 +71,22 @@ Estes cenários são de **validação física pendente**; o teste de UI por si s
 - [ ] Testar 10 presets, multitoque com diagonais, START não abre menu.
 - [ ] Testar telas 360dp, 480dp, landscape widescreen, notch e fontes ampliadas.
 - [ ] Confirmar gameplay e transporte LAN/online seguem com FPS e sincronismo da compilação anterior.
+
+
+## Validação do layout sem banner e do menu de jogo (candidato 21/10)
+- [ ] Abrir Biblioteca no landscape com 1, 20 e 200 títulos: coleção começa no topo, sem banner grande anterior aos jogos.
+- [ ] Tocar um cartão de ROM: painel de detalhes com arte grande e JOGAR aparece; voltar preserva busca, filtro, visualização e posição.
+- [ ] Na barra **acima** da coleção, abrir **+** e testar Importar ROM/ZIP, Pasta, Procurar ROMs, Buscar capas; nenhum botão perdido.
+- [ ] Tocar lupa abre/fecha pesquisa sem esconder cartões; limpar filtros por ícone; filtros favoritos e recentes corretos.
+- [ ] Tocar ícone Visualização e trocar Grade 2/3/4/5/Automática, Lista, Fileira, Coleção; ícone Ordenar preserva Título/Recentes/Arquivo.
+- [ ] Menu do jogo aberto em landscape: tocar **Vídeo** mostra proporção, filtros e demais opções, com rolagem funcionando.
+- [ ] Tocar **Áudio, Controles, Rede, Estados, Cheats, Núcleo, DEV**: a lista abaixo altera imediatamente e volta ao topo.
+- [ ] Com nome de ROM longo, cabeçalho usa reticências em vez de impedir visualizar configurações.
+- [ ] Em retrato e landscape, janela ocupa área suficiente e oferece rolagem sem transbordar; controle físico e toque funcionam.
+- [ ] Escolher PNG/JPEG da galeria para capa, fechar e reabrir app: imagem permanece; Restaurar capa automática funciona.
+- [ ] ROM traduzida com capa por nome mantém fundo/arte e não altera hash multiplayer.
+- [ ] Configurar d-pad e ABXY no landscape; girar para retrato, editar posições diferentes; girar de volta preserva landscape.
+- [ ] No jogo **offline**, sair para Biblioteca; em Detalhes aparece Retomar última partida e o estado é restaurado.
+- [ ] **Netplay**: sem save state automático nem restauração individual; verificações SHA-256/consentimento preservadas.
+- [ ] Alternar a opção Quick Resume em Estados e confirmar que desativar impede novos autosaves.
+- [ ] Com Wi-Fi e 4G: salas online, LAN e fallback TCP funcionam como na build anterior, sem regressões.

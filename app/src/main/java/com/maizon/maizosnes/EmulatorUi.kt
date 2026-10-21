@@ -52,6 +52,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
@@ -64,6 +71,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -108,11 +116,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.io.File
 import kotlin.math.floor
 import kotlin.math.min
@@ -383,6 +393,12 @@ internal fun MaizoEmulatorApp(
     onScanAllDevice: () -> Unit,
     onReloadCovers: () -> Unit,
     onCoverNeeded: (String) -> Unit,
+    onPickCustomCover: (String) -> Unit,
+    onResetCustomCover: (String) -> Unit,
+    hasQuickResume: (String) -> Boolean,
+    onQuickResume: (String) -> Unit,
+    quickResumeEnabled: Boolean,
+    onQuickResumeEnabledChanged: (Boolean) -> Unit,
     onOpenInstagram: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
@@ -455,35 +471,79 @@ internal fun MaizoEmulatorApp(
         if (gameMenuOpen) {
             val menuFocus = remember { androidx.compose.ui.focus.FocusRequester() }
             LaunchedEffect(gameMenuOpen) { menuFocus.requestFocus() }
-            Dialog(onDismissRequest = { onGameMenuChanged(false) }) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 690.dp)
-                        .dialogGamepadKeys { onGameMenuChanged(false) },
-                    shape = RoundedCornerShape(25.dp), color = Panel, tonalElevation = 12.dp
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("MAIZOSNES  /  PAINEL DO JOGO", color = Mint, fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                                Text(currentRomName ?: "Jogo", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                                Text("Estados • Vídeo • Áudio • Controles • Rede", color = Muted, fontSize = 10.sp)
+            Dialog(
+                onDismissRequest = { onGameMenuChanged(false) },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val wideDialog = maxWidth > maxHeight
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth(if (wideDialog) 0.84f else 0.95f)
+                            .fillMaxHeight(if (wideDialog) 0.92f else 0.94f)
+                            .dialogGamepadKeys { onGameMenuChanged(false) },
+                        shape = RoundedCornerShape(23.dp),
+                        color = Panel,
+                        tonalElevation = 12.dp
+                    ) {
+                        // Height-bounded flex layout: switching Vídeo/Áudio/Controles
+                        // always presents an independently scrollable settings pane.
+                        Column(Modifier.fillMaxSize().padding(12.dp)) {
+                            Row(Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("MAIZOSNES / PAINEL DO JOGO",
+                                        color = Mint, fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+                                    Text(
+                                        File(currentRomName ?: "Jogo").nameWithoutExtension,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        color = Color.White, fontSize = 19.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                TextButton(onClick = { onGameMenuChanged(false) },
+                                    modifier = Modifier.focusRequester(menuFocus)) {
+                                    Text("✕ FECHAR", fontSize = 11.sp)
+                                }
                             }
-                            TextButton(onClick = { onGameMenuChanged(false) },
-                                modifier = Modifier.focusRequester(menuFocus)) { Text("FECHAR") }
+                            Row(Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { connectionOverlay = true },
+                                    modifier = Modifier.weight(1f).padFocusRing(),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) { Text("◉ STATUS / DEBUG", fontSize = 10.sp, maxLines = 1) }
+                                OutlinedButton(
+                                    onClick = {
+                                        editingControls = !editingControls
+                                        onGameMenuChanged(false)
+                                    },
+                                    modifier = Modifier.weight(1f).padFocusRing(),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (editingControls) "✓ SALVAR CONTROLES"
+                                        else "🎮 EDITAR CONTROLES", fontSize = 10.sp, maxLines = 1)
+                                }
+                            }
+                            Spacer(Modifier.height(5.dp))
+                            EmulatorSettings(
+                                settings, coreOptions, true, onSettingsChanged,
+                                onCoreOptionChanged, onSaveSlot, onLoadSlot,
+                                onRestoreMultiplayerBackup, onExportState,
+                                onImportState, onResetGame, cheats,
+                                enabledCheatIds, cheatStatus, onToggleCheat,
+                                onRefreshCheats, multiplayerActive,
+                                onSelectTouchPreset, connectionMode,
+                                onConnectionModeChanged, devUnlocked,
+                                devShareEnabled, onDevUnlock, onDevShareChanged,
+                                iceServerOverrides, onIceOverridesChanged,
+                                iceTestStatus, onTestIce,
+                                quickResumeEnabled = quickResumeEnabled,
+                                onQuickResumeEnabledChanged = onQuickResumeEnabledChanged,
+                                containerModifier = Modifier.weight(1f)
+                            )
                         }
-                        OutlinedButton(onClick = { connectionOverlay = true },
-                            modifier = Modifier.fillMaxWidth().padFocusRing()) {
-                            Text("STATUS DE CONEXÃO / DEBUG")
-                        }
-                        TextButton(onClick = {
-                            editingControls = !editingControls
-                            onGameMenuChanged(false)
-                        }) { Text(if (editingControls) "SALVAR CONTROLES" else "EDITAR CONTROLES") }
-                        EmulatorSettings(settings, coreOptions, true, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
-                            onSelectTouchPreset, connectionMode, onConnectionModeChanged,
-                            devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged,
-                    iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce)
                     }
                 }
             }
@@ -570,7 +630,9 @@ internal fun MaizoEmulatorApp(
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
                 onScanRomFolder, onApplyRomPatch, onScanAllDevice,
                 onOpenRom, onContinueGame, onRenameRom, onSetScreen,
-                onReloadCovers, onCoverNeeded
+                onReloadCovers, onCoverNeeded,
+                onPickCustomCover, onResetCustomCover,
+                hasQuickResume, onQuickResume
                 )
             }
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
@@ -610,7 +672,9 @@ internal fun MaizoEmulatorApp(
                 EmulatorSettings(settings, coreOptions, false, onSettingsChanged, onCoreOptionChanged, onSaveSlot, onLoadSlot, onRestoreMultiplayerBackup, onExportState, onImportState, onResetGame, cheats, enabledCheatIds, cheatStatus, onToggleCheat, onRefreshCheats, multiplayerActive,
                     onSelectTouchPreset, connectionMode, onConnectionModeChanged,
                     devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged,
-                    iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce)
+                    iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce,
+                    quickResumeEnabled = quickResumeEnabled,
+                    onQuickResumeEnabledChanged = onQuickResumeEnabledChanged)
             }
             AppScreen.CREDITS -> CreditsScreen(Modifier.fillMaxSize(), onOpenInstagram)
             AppScreen.GAME -> Unit
@@ -709,13 +773,17 @@ private fun LibraryScreen(
     onRenameRom: (String, String) -> Unit,
     onSetScreen: (AppScreen) -> Unit,
     onReloadCovers: () -> Unit,
-    onCoverNeeded: (String) -> Unit
+    onCoverNeeded: (String) -> Unit,
+    onPickCustomCover: (String) -> Unit,
+    onResetCustomCover: (String) -> Unit,
+    hasQuickResume: (String) -> Boolean,
+    onQuickResume: (String) -> Unit
 ) {
     var selectedRom by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<String?>(null) }
     var confirmRemove by remember { mutableStateOf<String?>(null) }
     var libraryQuery by rememberSaveable { mutableStateOf("") }
-    var columns by rememberSaveable { mutableStateOf(2) }
+    var columns by rememberSaveable { mutableStateOf(0) }
     var viewMode by rememberSaveable { mutableStateOf("GRADE") }
     var sortMode by rememberSaveable { mutableStateOf("Título") }
     var sortExpanded by remember { mutableStateOf(false) }
@@ -735,184 +803,167 @@ private fun LibraryScreen(
                 (collectionMode != "Favoritos" || name in favoriteRoms) &&
                 (collectionMode != "Recentes" || name in recentRoms)
         }
-        when (sortMode) {
-            "Recentes" -> filtered.sortedBy { recentRoms.indexOf(it).let { p ->
-                if (p < 0) Int.MAX_VALUE else p } }
-            "Arquivo" -> filtered.sortedBy { it.lowercase() }
-            else -> filtered.sortedBy { (romHeaders[it]?.title ?: it).lowercase() }
-        }
+        LibraryUiRules.order(filtered, romHeaders.mapValues { it.value.title },
+            recentRoms, sortMode)
     }
     BackHandler(enabled = selectedRom != null || renameTarget != null) {
         selectedRom = null
         renameTarget = null
     }
+    var addMenuExpanded by remember { mutableStateOf(false) }
+    var viewMenuExpanded by remember { mutableStateOf(false) }
+    var filterMenuExpanded by remember { mutableStateOf(false) }
+    var orderMenuExpanded by remember { mutableStateOf(false) }
+    var searchExpanded by rememberSaveable { mutableStateOf(false) }
+
     BoxWithConstraints(modifier.background(Brush.verticalGradient(
-        listOf(Color(0xFF15191E), Color(0xFF1A1D2E), Bg)))) {
-        val landscape = maxWidth > maxHeight
-        // One scrollable surface for BOTH controls and games:
-        // the former fixed-height hero previously hid the rest of the collection.
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(if (viewMode == "GRADE") columns else 1),
-            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp),
-            horizontalArrangement = Arrangement.spacedBy(9.dp)
-        ) {
-            item(key = "library_header", span = { GridItemSpan(maxLineSpan) }) {
-                Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 11.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("MAIZOSNES  /  BIBLIOTECA", color = Mint, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
-                Text("Minha coleção", fontSize = 24.sp, fontWeight = FontWeight.Black)
-            }
-            NeoBadge("${romNames.size} JOGOS", highlighted = romNames.isNotEmpty())
-        }
-        Box(Modifier.fillMaxWidth().height(if (landscape) 148.dp else 195.dp)
-            .clip(RoundedCornerShape(25.dp))
-            .background(Brush.linearGradient(
-                listOf(Color(0xFF353963), Color(0xFF203B64),
-                    Color(0xFF152A37), Color(0xFF2A223D))))
-            .border(1.5.dp, Accent.copy(alpha = 0.45f),
-                RoundedCornerShape(25.dp))) {
-            val featuredCover = featuredRom?.let { coverBitmaps[it] }
-            if (featuredCover != null) {
-                Image(featuredCover.asImageBitmap(), "Arte de $featuredTitle",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop, alpha = 0.58f)
-            } else {
-                Box(Modifier.align(Alignment.CenterEnd).size(220.dp)
-                    .background(Brush.radialGradient(
-                        listOf(Accent.copy(alpha = 0.42f), Color.Transparent))),
-                    contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Gamepad, "Super Nintendo",
-                        tint = Color.White.copy(alpha = 0.24f),
-                        modifier = Modifier.size(134.dp))
+        listOf(Color(0xFF101520), Color(0xFF191D31), Bg)))) {
+        val effectiveColumns = LibraryUiRules.columns(maxWidth.value, columns)
+        Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("MAIZOSNES  /  BIBLIOTECA", color = Mint,
+                        fontSize = 10.sp, letterSpacing = 1.4.sp,
+                        fontWeight = FontWeight.Bold)
+                    Text("Minha coleção", fontSize = 23.sp,
+                        color = Color.White, fontWeight = FontWeight.Black)
                 }
+                NeoBadge("${visibleRoms.size} JOGOS", highlighted = visibleRoms.isNotEmpty())
             }
-            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
-                listOf(Color(0xF0141727), Color(0xBC171A2B),
-                    Color(0x32141E32)))))
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
-                listOf(Color.Transparent, Color(0x44111821), Color(0xDA111720)))))
-            Column(Modifier.fillMaxSize().padding(20.dp),
-                verticalArrangement = Arrangement.SpaceBetween) {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("SUPER NINTENDO", color = Accent, fontSize = 12.sp,
-                        fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                    Text("ENTERTAINMENT SYSTEM", color = Color.White,
-                        fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("SUA ESTAÇÃO RETRÔ", color = Muted, fontSize = 10.sp)
+
+            // Fixed top toolbar. No oversized banner or filter rows in the collection.
+            // All options remain accessible by touch, TalkBack and gamepad focus.
+            Row(Modifier.fillMaxWidth().padding(bottom = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Box {
+                    Surface(
+                        color = Mint, shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.size(47.dp).focusRequester(homeFocus)
+                            .padFocusRing().clickable { addMenuExpanded = true }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Add, "Expandir opções de jogos",
+                                tint = Bg, modifier = Modifier.size(27.dp))
+                        }
+                    }
+                    DropdownMenu(expanded = addMenuExpanded,
+                        onDismissRequest = { addMenuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Importar ROM / ZIP") },
+                            leadingIcon = { Icon(Icons.Default.Add, null) },
+                            onClick = { addMenuExpanded = false; onChooseAddRom() })
+                        DropdownMenuItem(text = { Text("Escolher pasta") },
+                            leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
+                            onClick = { addMenuExpanded = false; onScanRomFolder() })
+                        DropdownMenuItem(text = { Text("Procurar ROMs no aparelho") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            onClick = { addMenuExpanded = false; onScanAllDevice() })
+                        DropdownMenuItem(text = { Text("Buscar capas por título") },
+                            leadingIcon = { Icon(Icons.Default.Image, null) },
+                            onClick = { addMenuExpanded = false; onReloadCovers() })
+                        if (hasLoadedRom) {
+                            DropdownMenuItem(text = { Text("Continuar jogo atual") },
+                                onClick = { addMenuExpanded = false; onContinueGame() })
+                            DropdownMenuItem(text = { Text("Aplicar patch IPS/BPS") },
+                                onClick = { addMenuExpanded = false; onApplyRomPatch() })
+                        }
+                    }
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text(featuredTitle, color = Color.White,
-                        fontSize = 22.sp, fontWeight = FontWeight.Black,
-                        lineHeight = 25.sp, maxLines = 2)
-                    Text(if (featuredRom == null)
-                        "Sua biblioteca está vazia. Importe um jogo para começar."
-                        else "Jogo selecionado  •  Pronto para jogar",
-                        color = Color(0xFFE7EAFE), fontSize = 11.sp,
-                        lineHeight = 16.sp, maxLines = 2)
-                    Row(Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        NeoBadge(if (featuredRom == null) "SNES" else "● DISPONÍVEL")
-                        Button(onClick = {
-                            if (featuredRom == null) onChooseAddRom()
-                            else if (hasLoadedRom && featuredRom == currentRomName)
-                                onContinueGame()
-                            else onOpenRom(featuredRom)
-                        }, modifier = Modifier.padFocusRing(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Mint, contentColor = Bg),
-                            contentPadding = PaddingValues(
-                                horizontal = 22.dp, vertical = 9.dp),
-                            shape = RoundedCornerShape(18.dp)) {
-                            Text(if (featuredRom == null) "+ IMPORTAR"
-                                else if (hasLoadedRom && featuredRom == currentRomName)
-                                    "▶ CONTINUAR" else "▶ JOGAR",
-                                fontSize = 12.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = { searchExpanded = !searchExpanded },
+                    modifier = Modifier.padFocusRing()) {
+                    Icon(Icons.Default.Search, "Pesquisar jogos",
+                        tint = if (searchExpanded) Mint else Color.White)
+                }
+                Box {
+                    IconButton(onClick = { filterMenuExpanded = true },
+                        modifier = Modifier.padFocusRing()) {
+                        Icon(Icons.Default.FilterList, "Filtrar coleção", tint = Color.White)
+                    }
+                    DropdownMenu(expanded = filterMenuExpanded,
+                        onDismissRequest = { filterMenuExpanded = false }) {
+                        listOf("Todos", "Favoritos", "Recentes").forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text((if (option == collectionMode) "✓ " else "") + option) },
+                                onClick = {
+                                    collectionMode = option
+                                    filterMenuExpanded = false
+                                })
+                        }
+                    }
+                }
+                Box {
+                    IconButton(onClick = { viewMenuExpanded = true },
+                        modifier = Modifier.padFocusRing()) {
+                        Icon(Icons.Default.ViewModule, "Visualização da coleção",
+                            tint = Color.White)
+                    }
+                    DropdownMenu(expanded = viewMenuExpanded,
+                        onDismissRequest = { viewMenuExpanded = false }) {
+                        listOf("GRADE" to "▦ Grade", "LISTA" to "☷ Lista",
+                            "FILEIRA" to "↔ Fileira", "COLEÇÃO" to "◫ Coleção").forEach { opt ->
+                            DropdownMenuItem(
+                                text = { Text((if (viewMode == opt.first) "✓ " else "") + opt.second) },
+                                onClick = { viewMode = opt.first; viewMenuExpanded = false })
+                        }
+                        if (viewMode == "GRADE") {
+                            androidx.compose.material3.HorizontalDivider()
+                            listOf(0, 2, 3, 4, 5).forEach { count ->
+                                DropdownMenuItem(
+                                    text = { Text((if (columns == count) "✓ " else "") +
+                                        (if (count == 0) "Colunas automáticas" else "${count} colunas")) },
+                                    onClick = { columns = count; viewMenuExpanded = false })
+                            }
+                        }
+                    }
+                }
+                Box {
+                    IconButton(onClick = { orderMenuExpanded = true },
+                        modifier = Modifier.padFocusRing()) {
+                        Icon(Icons.Default.Sort, "Ordenar jogos", tint = Color.White)
+                    }
+                    DropdownMenu(expanded = orderMenuExpanded,
+                        onDismissRequest = { orderMenuExpanded = false }) {
+                        listOf("Título", "Recentes", "Arquivo").forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text((if (sortMode == option) "✓ " else "") + option) },
+                                onClick = { sortMode = option; orderMenuExpanded = false })
                         }
                     }
                 }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-            Button(onClick = onChooseAddRom,
-                modifier = Modifier.weight(1f).focusRequester(homeFocus),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
-                Text("+ IMPORTAR ROM / ZIP", fontSize = 11.sp)
+            if (searchExpanded) {
+                TextField(
+                    value = libraryQuery, onValueChange = { libraryQuery = it.take(80) },
+                    singleLine = true, label = { Text("Buscar na coleção") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = NeoGlass,
+                        unfocusedContainerColor = NeoGlass,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent))
             }
-            OutlinedButton(onClick = onScanRomFolder,
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("PASTA", fontSize = 11.sp) }
-            OutlinedButton(onClick = onScanAllDevice,
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("BUSCAR", fontSize = 11.sp) }
-        }
-        if (hasLoadedRom) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(onClick = onContinueGame) { Text("▶ CONTINUAR") }
-                OutlinedButton(onClick = onApplyRomPatch) { Text("PATCH ROM ATUAL") }
-            }
-        }
-        TextField(value = libraryQuery, onValueChange = { libraryQuery = it.take(80) },
-                singleLine = true, label = { Text("Buscar na coleção") },
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                shape = RoundedCornerShape(22.dp),
-                colors = androidx.compose.material3.TextFieldDefaults.colors(
-                    focusedContainerColor = NeoGlass,
-                    unfocusedContainerColor = NeoGlass,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent))
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-            .padding(vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("Todos", "Favoritos", "Recentes").forEach { mode ->
-                OutlinedButton(onClick = { collectionMode = mode },
-                    contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text(if (mode == collectionMode) "● $mode" else mode, fontSize = 11.sp)
+            if (collectionMode != "Todos" || libraryQuery.isNotBlank()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Exibindo: " + collectionMode +
+                        (if (libraryQuery.isNotBlank()) " • \"$libraryQuery\"" else ""),
+                        color = Mint, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        collectionMode = "Todos"
+                        libraryQuery = ""
+                        searchExpanded = false
+                    }) { Text("LIMPAR FILTROS", fontSize = 10.sp) }
                 }
             }
-
-            listOf("GRADE" to "▦ Grade", "LISTA" to "☷ Lista",
-                "FILEIRA" to "↔ Fileira", "COLEÇÃO" to "◫ Coleção").forEach { item ->
-                androidx.compose.material3.FilterChip(selected = viewMode == item.first,
-                    onClick = { viewMode = item.first },
-                    label = { Text(item.second, fontSize = 11.sp) },
-                    modifier = Modifier.padFocusRing())
-            }
-            if (viewMode == "GRADE") listOf(2, 3, 4).forEach { count ->
-                androidx.compose.material3.FilterChip(selected = columns == count,
-                    onClick = { columns = count },
-                    label = { Text("${count}x", fontSize = 11.sp) })
-            }
-            Box {
-                OutlinedButton(onClick = { sortExpanded = true }) {
-                    Text("⇅ $sortMode", fontSize = 10.sp)
-                }
-                DropdownMenu(expanded = sortExpanded,
-                    onDismissRequest = { sortExpanded = false }) {
-                    listOf("Título", "Recentes", "Arquivo").forEach { mode ->
-                        DropdownMenuItem(text = { Text(mode) },
-                            onClick = { sortMode = mode; sortExpanded = false })
-                    }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("BIBLIOTECA • ${visibleRoms.size} JOGOS", color = Color.White,
-                fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            TextButton(onClick = onReloadCovers) {
-                Text("↻ BUSCAR CAPAS POR NOME", color = Accent, fontSize = 10.sp)
-            }
-        }
-                }
-            }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(if (viewMode == "GRADE") effectiveColumns else 1),
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentPadding = PaddingValues(bottom = 28.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp),
+                horizontalArrangement = Arrangement.spacedBy(11.dp)
+            ) {
             if (visibleRoms.isEmpty()) {
                 item(key = "empty_library", span = { GridItemSpan(maxLineSpan) }) {
                     Column(Modifier.fillMaxWidth().padding(vertical = 20.dp),
@@ -988,6 +1039,8 @@ private fun LibraryScreen(
                 Text(statusMessage, color = Muted, fontSize = 10.sp,
                     modifier = Modifier.padding(top = 4.dp))
             }
+
+            }
         }
     }
     selectedRom?.let { name ->
@@ -1001,14 +1054,37 @@ private fun LibraryScreen(
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
+                    // Hero art only opens AFTER the user selects a game.
+                    // The collection itself is immediately browsable, without a giant card.
+                    Box(
+                        Modifier.fillMaxWidth().height(230.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Brush.linearGradient(listOf(
+                                Color(0xFF27386A), Color(0xFF18453F), Bg)))
+                    ) {
                         val cover = coverBitmaps[name]
-                        if (cover != null) Image(cover.asImageBitmap(), "Capa",
-                            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                        else Icon(Icons.Default.Gamepad, "Sem capa", modifier = Modifier.size(74.dp))
+                        if (cover != null) Image(
+                            cover.asImageBitmap(), "Arte de " + name,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            alpha = .65f)
+                        else Icon(Icons.Default.Gamepad, "Sem capa",
+                            modifier = Modifier.align(Alignment.Center).size(86.dp),
+                            tint = Accent)
+                        Box(Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(listOf(Color.Transparent,
+                                Color(0xDD0E1423), Color(0xFA0E1423)))))
+                        Column(Modifier.align(Alignment.BottomStart).padding(17.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("SUPER NINTENDO", color = Mint,
+                                fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(info?.title ?: File(name).nameWithoutExtension,
+                                color = Color.White, fontSize = 21.sp,
+                                fontWeight = FontWeight.Black,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                lineHeight = 25.sp)
+                        }
                     }
-                    Text(info?.title ?: File(name).nameWithoutExtension,
-                        fontWeight = FontWeight.Bold, fontSize = 21.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         NeoBadge("SUPER NINTENDO")
@@ -1018,6 +1094,21 @@ private fun LibraryScreen(
                     info?.warning?.let { Text(it, color = Color(0xFFFFBD85), fontSize = 12.sp) }
                     Button(onClick = { selectedRom = null; onOpenRom(name) },
                         modifier = Modifier.fillMaxWidth().focusRequester(detailFocus)) { Text("▶ JOGAR") }
+                    if (hasQuickResume(name)) {
+                        OutlinedButton(
+                            onClick = { selectedRom = null; onQuickResume(name) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                                contentColor = Mint)
+                        ) { Text("↺ RETOMAR ÚLTIMA PARTIDA") }
+                    }
+                    OutlinedButton(
+                        onClick = { selectedRom = null; onPickCustomCover(name) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("◈ ESCOLHER CAPA / FUNDO DA GALERIA") }
+                    TextButton(
+                        onClick = { selectedRom = null; onResetCustomCover(name) }
+                    ) { Text("↺ RESTAURAR CAPA AUTOMÁTICA", fontSize = 11.sp) }
                     OutlinedButton(onClick = { selectedRom = null; onApplyPatchToRom(name) },
                         modifier = Modifier.fillMaxWidth()) { Text("APLICAR PATCH IPS / BPS") }
                     if (currentRomName == name && hasLoadedRom) {
@@ -2644,7 +2735,10 @@ private fun EmulatorSettings(
     iceServerOverrides: String,
     onIceOverridesChanged: (String) -> Unit,
     iceTestStatus: String,
-    onTestIce: () -> Unit
+    onTestIce: () -> Unit,
+    quickResumeEnabled: Boolean = true,
+    onQuickResumeEnabledChanged: (Boolean) -> Unit = {},
+    containerModifier: Modifier = Modifier
 ) {
     var category by remember { mutableStateOf("Vídeo") }
     var controlTarget by rememberSaveable { mutableStateOf(4) }
@@ -2655,7 +2749,7 @@ private fun EmulatorSettings(
     var confirmBackup by remember { mutableStateOf<String?>(null) }
     var cheatFilter by remember { mutableStateOf("") }
     val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Rede", "Núcleo", "Estados", "DEV")
-    Column(Modifier.fillMaxWidth()) {
+    Column(containerModifier.fillMaxWidth()) {
         if (inGame) {
             Row(Modifier.fillMaxWidth().padding(bottom = 9.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -2664,25 +2758,45 @@ private fun EmulatorSettings(
                 NeoBadge("EM JOGO")
             }
         }
-        // All eight settings sections are visible at once (no hidden horizontal chips).
-        Column(Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            categories.chunked(4).forEachIndexed { rowIndex, group ->
-                Row(Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    group.forEachIndexed { position, item ->
-                        androidx.compose.material3.FilterChip(
-                            selected = category == item,
-                            onClick = { category = item },
-                            modifier = Modifier.weight(1f)
-                                .then(if (rowIndex == 0 && position == 0)
-                                    Modifier.focusRequester(firstCategoryFocus) else Modifier)
-                                .padFocusRing(),
-                            label = { Text(item, maxLines = 1, fontSize = 10.sp) },
-                            colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                                containerColor = Panel, labelColor = Muted,
-                                selectedContainerColor = Accent,
-                                selectedLabelColor = Bg))
+        // In-game landscape gets a compact horizontal category bar so
+        // the actual settings pane has enough vertical room. The full
+        // Settings screen keeps its accessible two-row overview.
+        if (inGame) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                categories.forEachIndexed { index, item ->
+                    androidx.compose.material3.FilterChip(
+                        selected = item == category,
+                        onClick = { category = item },
+                        modifier = Modifier
+                            .then(if (index == 0) Modifier.focusRequester(firstCategoryFocus)
+                                else Modifier).padFocusRing(),
+                        label = { Text(item, fontSize = 11.sp, maxLines = 1) },
+                        colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                            containerColor = PanelRaised, labelColor = Muted,
+                            selectedContainerColor = Accent, selectedLabelColor = Bg)
+                    )
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                categories.chunked(4).forEachIndexed { rowIndex, group ->
+                    Row(Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        group.forEachIndexed { position, item ->
+                            androidx.compose.material3.FilterChip(
+                                selected = item == category,
+                                onClick = { category = item },
+                                modifier = Modifier.weight(1f)
+                                    .then(if (rowIndex == 0 && position == 0)
+                                        Modifier.focusRequester(firstCategoryFocus) else Modifier)
+                                    .padFocusRing(),
+                                label = { Text(item, maxLines = 1, fontSize = 10.sp) },
+                                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                                    containerColor = Panel, labelColor = Muted,
+                                    selectedContainerColor = Accent, selectedLabelColor = Bg))
+                        }
                     }
                 }
             }
@@ -2698,9 +2812,13 @@ private fun EmulatorSettings(
             else -> "Ferramentas extras para quem conhece o emulador."
         }, color = Muted, fontSize = 11.sp,
             modifier = Modifier.padding(top = 5.dp, bottom = 6.dp))
+        val categoryScroll = rememberScrollState()
+        LaunchedEffect(category) { categoryScroll.scrollTo(0) }
         Column(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp, max = if (inGame) 550.dp else 720.dp)
-                .verticalScroll(rememberScrollState()).padding(top = 3.dp),
+            modifier = Modifier.fillMaxWidth()
+                .then(if (inGame) Modifier.weight(1f)
+                    else Modifier.heightIn(min = 140.dp, max = 720.dp))
+                .verticalScroll(categoryScroll).padding(top = 5.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
             when (category) {
@@ -3034,6 +3152,13 @@ private fun EmulatorSettings(
                     }
                 }
                 "Estados" -> {
+                    SettingSectionTitle("Retomada rápida",
+                        "Ao sair de um jogo offline, salva uma cópia separada dos slots manuais.")
+                    ToggleSettingRow(
+                        "Salvar automaticamente ao sair (Quick Resume)",
+                        "Disponível apenas para partidas offline. Não altera seus saves.",
+                        quickResumeEnabled, onQuickResumeEnabledChanged
+                    )
                     SettingSectionTitle("Save states", "Slots privados do app e arquivos externos. O núcleo rejeita estados de outra ROM.")
                     Row(
                         modifier = Modifier.fillMaxWidth(),

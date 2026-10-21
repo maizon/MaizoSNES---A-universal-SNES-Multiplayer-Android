@@ -12,6 +12,7 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import android.net.wifi.WifiManager
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.InputDevice
@@ -61,6 +62,10 @@ class MainActivity : ComponentActivity() {
     private var pausedBeforeGameMenu = false
     private val pressedInputs = AtomicInteger(0)
     private val coverBitmaps = androidx.compose.runtime.mutableStateMapOf<String, Bitmap>()
+    private var pendingCustomCoverName: String? = null
+    private var pendingQuickResumeName: String? = null
+    private val quickResumeEnabled =
+        androidx.compose.runtime.mutableStateOf(true)
     private val loadingCovers = ConcurrentHashMap.newKeySet<String>()
     private val missingCovers = ConcurrentHashMap.newKeySet<String>()
     private val coverFetchSlots = java.util.concurrent.Semaphore(2)
@@ -170,6 +175,12 @@ class MainActivity : ComponentActivity() {
             if (granted) scanAllSharedStorage()
             else statusMessage.value = "Permissão negada. Use busca por pasta."
         }
+    private val customCoverLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val name = pendingCustomCoverName
+            pendingCustomCoverName = null
+            if (uri != null && name != null) saveUserCover(name, uri)
+        }
     private val patchRomLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) applyRomPatch(uri)
     }
@@ -234,6 +245,7 @@ class MainActivity : ComponentActivity() {
             NativeBridge.nativeSetOutputScale(appSettings.value.outputScale)
             NativeBridge.nativeSetGpuEnabled(appSettings.value.renderBackend == RenderBackend.GLES)
         }
+        quickResumeEnabled.value = prefs.getBoolean("quick_resume_enabled", true)
         refreshCovers()
         startPerformanceSampler()
         val localIp = getLocalIpv4()
@@ -340,6 +352,15 @@ class MainActivity : ComponentActivity() {
                         refreshCovers()
                     },
                     onCoverNeeded = ::requestVisibleCover,
+                    onPickCustomCover = ::chooseUserCover,
+                    onResetCustomCover = ::resetUserCover,
+                    hasQuickResume = ::hasQuickResume,
+                    onQuickResume = ::resumeLastGame,
+                    quickResumeEnabled = quickResumeEnabled.value,
+                    onQuickResumeEnabledChanged = {
+                        quickResumeEnabled.value = it
+                        prefs.edit().putBoolean("quick_resume_enabled", it).apply()
+                    },
                     onOpenInstagram = {
                         val uri = Uri.parse("https://www.instagram.com/maicon_nasciment0/")
                         runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
@@ -369,15 +390,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestVisibleCover(name: String) {
-        if (!appSettings.value.automaticCovers ||
-            name !in romFiles.value || name in coverBitmaps ||
+        if (name !in romFiles.value || name in coverBitmaps ||
             name in missingCovers || !loadingCovers.add(name)) return
         lifecycleScope.launch {
             try {
                 val bitmap = withContext(Dispatchers.IO) {
                     coverFetchSlots.acquire()
                     try { runCatching {
-                        CoverArt.load(this@MainActivity, File(romDirectory, name))
+                        CoverArt.load(this@MainActivity, File(romDirectory, name),
+                            allowNetwork = appSettings.value.automaticCovers)
                     }.getOrNull() }
                     finally { coverFetchSlots.release() }
                 }
@@ -393,11 +414,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshCovers() {
-        if (!appSettings.value.automaticCovers) {
-            coverJob?.cancel()
-            coverBitmaps.clear()
-            return
-        }
         coverJob?.cancel()
         val names = romFiles.value.take(16) // eagerly warm; remaining tiles load on demand
         coverJob = lifecycleScope.launch {
@@ -409,13 +425,112 @@ class MainActivity : ComponentActivity() {
                     val file = File(romDirectory, name)
                     if (!file.isFile) continue
                     val bitmap = withContext(Dispatchers.IO) {
-                        runCatching { CoverArt.load(this@MainActivity, file) }.getOrNull()
+                        runCatching { CoverArt.load(this@MainActivity, file,
+                            allowNetwork = appSettings.value.automaticCovers) }.getOrNull()
                     }
                     if (bitmap != null && name in romFiles.value) coverBitmaps[name] = bitmap
                     else missingCovers.add(name)
                 } finally { loadingCovers.remove(name) }
             }
         }
+    }
+
+    private fun chooseUserCover(name: String) {
+        if (name !in romFiles.value || !File(romDirectory, name).isFile) return
+        pendingCustomCoverName = name
+        customCoverLauncher.launch(arrayOf("image/png", "image/jpeg"))
+    }
+
+    private fun saveUserCover(name: String, uri: Uri) {
+        if (name !in romFiles.value) return
+        lifecycleScope.launch {
+            val image = withContext(Dispatchers.IO) {
+                runCatching {
+                    val data = readUriBytes(uri, 2_500_000)
+                    CoverArt.saveCustom(this@MainActivity, File(romDirectory, name), data)
+                }.getOrNull()
+            }
+            if (image != null) {
+                coverBitmaps[name] = image
+                missingCovers.remove(name)
+                statusMessage.value = "Imagem personalizada salva para " + name
+            } else statusMessage.value =
+                "Imagem inválida. Escolha um PNG/JPEG com até 2,5 MiB."
+        }
+    }
+
+    private fun resetUserCover(name: String) {
+        if (name !in romFiles.value) return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                CoverArt.resetCustom(this@MainActivity, File(romDirectory, name))
+            }
+            coverBitmaps.remove(name)
+            missingCovers.remove(name)
+            requestVisibleCover(name)
+            statusMessage.value = "Capa personalizada removida: " + name
+        }
+    }
+
+    private fun quickResumeFile(rom: File): File {
+        val fingerprint = MessageDigest.getInstance("SHA-256")
+            .digest(rom.name.toByteArray(Charsets.UTF_8))
+            .take(16).joinToString("") { "%02x".format(it) }
+        return File(stateDirectory, "resume_" + fingerprint + ".mzstate")
+    }
+
+    private fun hasQuickResume(name: String): Boolean =
+        quickResumeEnabled.value &&
+        name in romFiles.value &&
+        quickResumeFile(File(romDirectory, name)).isFile
+
+    private fun resumeLastGame(name: String) {
+        if (netplaySession != null) {
+            statusMessage.value = "Retomada rápida disponível somente offline."
+            return
+        }
+        if (!hasQuickResume(name)) {
+            statusMessage.value = "Não há uma partida salva para esse jogo."
+            return
+        }
+        pendingQuickResumeName = name
+        openRom(name)
+    }
+
+    private fun saveQuickResumeOnExit() {
+        if (!quickResumeEnabled.value || netplaySession != null || !hasLoadedRom)
+            return
+        val rom = currentRomFile.value ?: return
+        // Serialize before another ROM can be loaded; disk write is asynchronous.
+        val bytes = runCatching { NativeBridge.nativeSerializeState() }.getOrNull()
+            ?: return
+        if (bytes.size !in 1024..(16 * 1024 * 1024)) return
+        val destination = quickResumeFile(rom)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val temp = File(destination.parentFile, destination.name + ".tmp")
+            runCatching {
+                temp.writeBytes(bytes)
+                if (!temp.renameTo(destination)) throw IllegalStateException("Save not finalized")
+            }.onFailure { temp.delete() }
+        }
+    }
+
+    private suspend fun restoreQuickResumeIfRequested(file: File) {
+        if (pendingQuickResumeName != file.name) return
+        pendingQuickResumeName = null
+        if (netplaySession != null) return
+        val source = quickResumeFile(file)
+        if (!source.isFile) return
+        val bytes = withContext(Dispatchers.IO) {
+            runCatching { source.readBytes() }.getOrNull()
+        } ?: return
+        if (bytes.size !in 1024..(16 * 1024 * 1024)) return
+        val result = withContext(Dispatchers.Default) {
+            NativeBridge.nativeUnserializeState(bytes)
+        }
+        statusMessage.value = if (result == 0)
+            "Partida retomada: " + file.name
+        else "Não foi possível restaurar a última partida (" + result + ")."
     }
 
     private fun startPerformanceSampler() {
@@ -537,7 +652,12 @@ class MainActivity : ComponentActivity() {
     private fun selectTouchPreset(preset: TouchPreset) {
         val prefix = profilePrefix(
             if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
-        val saved = prefs.getString(prefix + "touch_preset_" + preset.name, null)
+        val orientation = if (resources.configuration.orientation ==
+            Configuration.ORIENTATION_LANDSCAPE) "landscape" else "portrait"
+        val saved = prefs.getString(
+            prefix + "touch_preset_" + preset.name + "_" + orientation, null)
+            ?: prefs.getString(prefix + "touch_preset_" + preset.name, null)
+            ?: prefs.getString("profile_global_touch_preset_" + preset.name + "_" + orientation, null)
             ?: prefs.getString("profile_global_touch_preset_" + preset.name, null)
         val chosen = (TouchLayoutCodec.decode(saved, preset) ?: preset.defaultLayout())
             .copy(enabled = appSettings.value.touch.enabled)
@@ -923,6 +1043,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (file.delete()) {
+            runCatching { quickResumeFile(file).delete() }
+            CoverArt.resetCustom(this, file)
+            coverBitmaps.remove(name)
+            missingCovers.remove(name)
             favoriteRoms.value = favoriteRoms.value - name
             recentRoms.value = recentRoms.value.filterNot { it == name }
             prefs.edit().putStringSet("library_favorites", favoriteRoms.value)
@@ -966,6 +1090,11 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "O Android não conseguiu renomear esse arquivo."
             return
         }
+        CoverArt.moveCustom(this, old, target)
+        val oldResume = quickResumeFile(old)
+        if (oldResume.isFile) runCatching {
+            oldResume.renameTo(quickResumeFile(target))
+        }
         if (currentRomFile.value?.absolutePath == old.absolutePath) {
             currentRomFile.value = target
             currentRomName.value = target.name
@@ -986,7 +1115,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (hasLoadedRom && currentRomFile.value?.absolutePath == file.absolutePath) {
-            continueGame()
+            if (pendingQuickResumeName == file.name) {
+                continueGame()
+                lifecycleScope.launch { restoreQuickResumeIfRequested(file) }
+            } else continueGame()
             return
         }
         appSettings.value = readSettings(profilePrefix(file))
@@ -1056,9 +1188,11 @@ class MainActivity : ComponentActivity() {
                 activeScreen.value = AppScreen.GAME
                 enterImmersiveGameplay()
                 statusMessage.value = "ROM carregada: " + file.name
+                restoreQuickResumeIfRequested(file)
                 syncPlaybackState()
                 searchCheats()
             } catch (error: Exception) {
+                pendingQuickResumeName = null
                 statusMessage.value = "Falha ao carregar a ROM: " + (error.message ?: "erro de leitura")
                 syncPlaybackState()
             }
@@ -1465,6 +1599,7 @@ class MainActivity : ComponentActivity() {
 
     private fun exitGameplay() {
         if (gameMenuOpen.value) setGameMenuOpen(false)
+        saveQuickResumeOnExit()
         netplaySession?.stop()
         userPaused = true
         paused.value = true
@@ -1535,8 +1670,14 @@ class MainActivity : ComponentActivity() {
             opacity = prefs.getFloat(key("touch_opacity"), presetDefaults.opacity),
             preset = preset
         )
-        val touch = TouchLayoutCodec.decode(
-            prefs.getString(key("touch_preset_" + preset.name), null), preset) ?: legacy
+        val orientation = if (resources.configuration.orientation ==
+            Configuration.ORIENTATION_LANDSCAPE) "landscape" else "portrait"
+        val touchRecord =
+            prefs.getString(prefix + "touch_preset_" + preset.name + "_" + orientation, null)
+                ?: prefs.getString(prefix + "touch_preset_" + preset.name, null)
+                ?: prefs.getString(global + "touch_preset_" + preset.name + "_" + orientation, null)
+                ?: prefs.getString(global + "touch_preset_" + preset.name, null)
+        val touch = TouchLayoutCodec.decode(touchRecord, preset) ?: legacy
         val filterName = prefs.getString(key("video_filter"), VideoFilter.ORIGINAL.name)
             ?: VideoFilter.ORIGINAL.name
         val filter = runCatching { VideoFilter.valueOf(filterName) }
@@ -1574,6 +1715,8 @@ class MainActivity : ComponentActivity() {
         appSettings.value = next
         val prefix = profilePrefix(if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
         val coversChanged = next.automaticCovers != prefs.getBoolean("library_covers_enabled", true)
+        val orientation = if (resources.configuration.orientation ==
+            Configuration.ORIENTATION_LANDSCAPE) "landscape" else "portrait"
         prefs.edit()
             .putString(prefix + "aspect", next.aspect.name)
             .putString(prefix + "video_filter", next.filter.name)
@@ -1584,6 +1727,8 @@ class MainActivity : ComponentActivity() {
             .putBoolean(prefix + "performance_hud", next.performanceHud)
             .putString(prefix + "touch_preset", next.touch.preset.name)
             .putString(prefix + "touch_preset_" + next.touch.preset.name,
+                TouchLayoutCodec.encode(next.touch))
+            .putString(prefix + "touch_preset_" + next.touch.preset.name + "_" + orientation,
                 TouchLayoutCodec.encode(next.touch))
             .putBoolean("library_covers_enabled", next.automaticCovers)
             .putBoolean("automatic_netplay_backups", next.automaticBackup)
@@ -2334,6 +2479,18 @@ class MainActivity : ComponentActivity() {
         }
         audioOutputWasAudible = shouldRun
         paused.value = userPaused || !shouldRun
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // The Activity handles rotation without restarting Snes9x or netplay.
+        // Reload ONLY the orientation-specific touch layout, never native settings.
+        val profile = profilePrefix(
+            if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
+        val nextTouch = readSettings(profile).touch
+        if (nextTouch != appSettings.value.touch) {
+            appSettings.value = appSettings.value.copy(touch = nextTouch)
+        }
     }
 
     override fun onPause() {
