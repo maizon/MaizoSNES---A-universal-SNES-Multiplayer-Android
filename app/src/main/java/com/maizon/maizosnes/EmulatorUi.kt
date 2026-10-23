@@ -357,6 +357,7 @@ internal fun MaizoEmulatorApp(
     lanRooms: List<LanRoom>,
     scanningLan: Boolean,
     onScanLan: () -> Unit,
+    onJoinRemoteLan: (LanRoom) -> Unit,
     relayAddress: String,
     relayRooms: List<InternetRoom>,
     scanningRelay: Boolean,
@@ -386,6 +387,13 @@ internal fun MaizoEmulatorApp(
     onReceiveRomAllowedChanged: (Boolean) -> Unit,
     localIpAddress: String,
     multiplayerActive: Boolean,
+    remoteHostView: RemoteHostView,
+    remoteClientView: RemoteClientView?,
+    onStartRemoteHost: () -> Unit,
+    onStopRemoteHost: () -> Unit,
+    onDecideRemote: (Boolean) -> Unit,
+    onKickRemote: () -> Unit,
+    onExitRemote: () -> Unit,
     multiplayerReady: Boolean,
     localMultiplayer: Boolean,
     onHostMultiplayer: (Int) -> Unit,
@@ -426,6 +434,7 @@ internal fun MaizoEmulatorApp(
 ) {
     var editingControls by remember { mutableStateOf(false) }
     var connectionOverlay by remember { mutableStateOf(false) }
+    var remotePanel by remember { mutableStateOf(false) }
     incomingRomName?.let { name ->
         AlertDialog(
             onDismissRequest = { onIncomingRomDecision(false) },
@@ -442,6 +451,21 @@ internal fun MaizoEmulatorApp(
                 Text("REJEITAR")
             } })
     }
+    if (remoteHostView.pending != null && screen == AppScreen.GAME) {
+        AlertDialog(
+            onDismissRequest = {}, // ignoring the dialog is a valid auto-approval choice
+            title = { Text("🎮 Novo controle LAN") },
+            text = { Text(remoteHostView.pending.name +
+                " quer entrar como Jogador 2.\n" +
+                "Aceitação automática em " + remoteHostView.secondsToAutoAccept + " s.") },
+            confirmButton = { TextButton(onClick = { onDecideRemote(true) }) {
+                Text("ACEITAR")
+            } },
+            dismissButton = { TextButton(onClick = { onDecideRemote(false) }) {
+                Text("REJEITAR")
+            } }
+        )
+    }
     if (shareConsentVisible) {
         AlertDialog(onDismissRequest = { onShareConsent(false) },
             modifier = Modifier.dialogGamepadKeys { onShareConsent(false) },
@@ -457,6 +481,18 @@ internal fun MaizoEmulatorApp(
         if (gameMenuOpen) onGameMenuChanged(false) else onExitGame()
     }
 
+    if (screen == AppScreen.GAME && remoteClientView != null) {
+        RemoteControllerScreen(
+            state = remoteClientView, settings = settings,
+            onInputChanged = onInputChanged,
+            onSettingsChanged = onSettingsChanged,
+            onSelectTouchPreset = onSelectTouchPreset,
+            onExit = onExitRemote,
+            gameMenuOpen = gameMenuOpen,
+            onGameMenuChanged = onGameMenuChanged
+        )
+        return
+    }
     if (screen == AppScreen.GAME) {
         GameScreen(
             romName = currentRomName ?: "SNES",
@@ -534,7 +570,25 @@ internal fun MaizoEmulatorApp(
                                 }
                             }
                             Spacer(Modifier.height(5.dp))
-                            EmulatorSettings(
+                            OutlinedButton(
+                                onClick = { remotePanel = !remotePanel },
+                                modifier = Modifier.fillMaxWidth().padFocusRing(),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(if (remotePanel) "‹ VOLTAR AOS AJUSTES"
+                                    else "🎮 MULTIPLAYER • CONTROLES CONECTADOS",
+                                    fontSize = 11.sp)
+                            }
+                            if (remotePanel) {
+                                RemoteHostSettings(
+                                    view = remoteHostView,
+                                    multiplayerActive = multiplayerActive,
+                                    onStart = onStartRemoteHost,
+                                    onStop = onStopRemoteHost,
+                                    onKick = onKickRemote,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else EmulatorSettings(
                                 settings, coreOptions, true, onSettingsChanged,
                                 onCoreOptionChanged, onSaveSlot, onLoadSlot,
                                 onRestoreMultiplayerBackup, onExportState,
@@ -651,7 +705,7 @@ internal fun MaizoEmulatorApp(
                 backgroundNetplayEnabled, onBackgroundNetplayChanged,
                 iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
-                lanRooms, scanningLan, onScanLan,
+                lanRooms, scanningLan, onScanLan, onJoinRemoteLan,
                 relayAddress, relayRooms, scanningRelay,
                 onRelayAddressChanged, onRefreshRelayRooms,
                 onHostRelay, onJoinRelay,
@@ -1302,6 +1356,7 @@ private fun MultiplayerScreen(
     lanRooms: List<LanRoom>,
     scanningLan: Boolean,
     onScanLan: () -> Unit,
+    onJoinRemoteLan: (LanRoom) -> Unit,
     relayAddress: String,
     relayRooms: List<InternetRoom>,
     scanningRelay: Boolean,
@@ -1350,9 +1405,11 @@ private fun MultiplayerScreen(
     }
     val visibleLanRooms = lanRooms.filter { room ->
         (room.game + " " + room.ownerName).contains(roomSearch.trim(), ignoreCase = true) &&
-            (!compatibleOnly || localRomHashPrefix.isNotBlank() && room.romHash == localRomHashPrefix)
+            (!compatibleOnly || room.netcode == "Controle remoto" ||
+                localRomHashPrefix.isNotBlank() && room.romHash == localRomHashPrefix)
     }
     var showNetcodeDetails by remember { mutableStateOf(false) }
+    var selectedLanRoom by remember { mutableStateOf<LanRoom?>(null) }
     var remoteHost by remember(connectionMode) { mutableStateOf(savedConnectionHost) }
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
@@ -1363,6 +1420,45 @@ private fun MultiplayerScreen(
             connectionMode == NetworkMode.AUTO) onScanLan()
         if (connectionMode == NetworkMode.AUTO) onRefreshAutoRooms()
         if (connectionMode == NetworkMode.RELAY && relayAddress.isNotBlank()) onRefreshRelayRooms()
+    }
+    selectedLanRoom?.let { room ->
+        val remoteOnly = room.netcode == "Controle remoto"
+        val sameRom = ready && (room.romHash.isBlank() || room.romHash == localRomHashPrefix)
+        AlertDialog(
+            onDismissRequest = { selectedLanRoom = null },
+            title = { Text("Como deseja participar?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(room.game, color = Mint, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = {
+                            selectedLanRoom = null
+                            onJoin(room.host, room.port)
+                        },
+                        enabled = !remoteOnly && (sameRom || receiveRomAllowed),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("🖥️ Jogar no dispositivo") }
+                    OutlinedButton(
+                        onClick = {
+                            selectedLanRoom = null
+                            onJoinRemoteLan(room)
+                        },
+                        enabled = remoteOnly,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("🎮 Usar como controle") }
+                    Text(
+                        if (remoteOnly) "Esta sala aceita controles remotos sem ROM. " +
+                            "O anfitrião joga na própria tela."
+                        else "Esta sala usa a emulação sincronizada. " +
+                            "O host pode ativar Controle remoto no menu Multiplayer durante o jogo.",
+                        color = Muted, fontSize = 11.sp
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedLanRoom = null }) {
+                Text("CANCELAR")
+            } }
+        )
     }
     Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1734,12 +1830,12 @@ private fun MultiplayerScreen(
                         colors = CardDefaults.cardColors(containerColor = PanelRaised),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().padFocusRing().clickable(
-                            enabled = !active && cheatsAllowed &&
-                                (hashCompatible || receiveRomAllowed)
+                            enabled = !active && (room.netcode == "Controle remoto" ||
+                                cheatsAllowed && (hashCompatible || receiveRomAllowed))
                         ) {
                             remoteHost = room.host
                             portText = room.port.toString()
-                            onJoin(room.host, room.port)
+                            selectedLanRoom = room
                         }
                     ) {
                         Row(Modifier.fillMaxWidth().padding(12.dp),
@@ -1753,6 +1849,8 @@ private fun MultiplayerScreen(
                                     Text("Conexão local • Wi-Fi / LAN", color = Muted, fontSize = 11.sp)
                                 else Text("${room.host}:${room.port}", color = Muted, fontSize = 11.sp)
                                 Text(when {
+                                    room.netcode == "Controle remoto" ->
+                                        "CONTROLE SEM FIO • SEM ROM E SEM INTERNET"
                                     !hashCompatible && receiveRomAllowed ->
                                         "ROM DIFERENTE — entre para solicitar transferência autorizada"
                                     !hashCompatible -> "ROM/MOD DIFERENTE — habilite receber ROM"
@@ -2005,6 +2103,142 @@ private fun MultiplayerScreen(
             "Transferência entre redes exige TLS autenticado, confirmação do host " +
             "e aceite do cliente. O relay não fornece criptografia ponta a ponta.",
             color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
+    }
+}
+
+
+/** The client displays the existing full touch layout without any SNES video or ROM. */
+@Composable
+private fun RemoteControllerScreen(
+    state: RemoteClientView,
+    settings: AppSettings,
+    onInputChanged: (Int, Boolean) -> Unit,
+    onSettingsChanged: (AppSettings) -> Unit,
+    onSelectTouchPreset: (TouchPreset) -> Unit,
+    onExit: () -> Unit,
+    gameMenuOpen: Boolean,
+    onGameMenuChanged: (Boolean) -> Unit
+) {
+    var editing by remember { mutableStateOf(false) }
+    var individual by remember { mutableStateOf(false) }
+    var optionsOpen by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxSize().background(
+        Brush.verticalGradient(listOf(Color(0xFF111228), Color(0xFF231C44), Bg)))) {
+        Column(Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.Gamepad, contentDescription = null,
+                tint = Accent.copy(alpha = 0.6f), modifier = Modifier.size(60.dp))
+            Text(state.title, fontWeight = FontWeight.Bold, fontSize = 20.sp,
+                color = Color.White.copy(alpha = .62f), maxLines = 1)
+            Text(state.name + " • Jogador " + state.slot, fontSize = 12.sp, color = Muted)
+            Text(state.status + (state.rttMs?.let { " • RTT ${it} ms" } ?: ""),
+                fontSize = 10.sp, color = if (state.connected) Mint else Color(0xFFFFC06A))
+        }
+        if (settings.touch.enabled) {
+            TouchOverlay(settings.touch, onInputChanged, editing, individual) { updated ->
+                onSettingsChanged(settings.copy(touch = updated))
+            }
+        }
+        if (editing) Surface(Modifier.align(Alignment.BottomCenter).padding(9.dp),
+            color = Panel.copy(alpha = .92f), shape = RoundedCornerShape(14.dp)) {
+            Text("ARRASTE OS CONTROLES • SALVAR", Modifier.padding(10.dp), fontSize = 11.sp)
+        }
+        Row(Modifier.align(Alignment.TopEnd).padding(8.dp)
+                .background(Panel.copy(alpha = .84f), RoundedCornerShape(18.dp)),
+            verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onExit) { Text("‹ SAIR", fontSize = 11.sp) }
+            TextButton(onClick = { editing = !editing }) {
+                Text(if (editing) "✓ SALVAR" else "EDITAR", fontSize = 11.sp)
+            }
+            if (editing) TextButton(onClick = { individual = !individual }) {
+                Text(if (individual) "BOTÕES" else "GRUPOS", fontSize = 10.sp)
+            }
+            IconButton(onClick = { optionsOpen = true }) {
+                Icon(Icons.Default.Settings, "Configurar controles")
+            }
+        }
+    }
+    if (optionsOpen || gameMenuOpen) {
+        AlertDialog(onDismissRequest = {
+            optionsOpen = false
+            onGameMenuChanged(false)
+        }, title = { Text("🎮 Configurações do controle") }, text = {
+            Column(Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Layouts do MaizoSNES", color = Mint)
+                TouchPreset.values().forEach { preset ->
+                    TextButton(onClick = {
+                        onSelectTouchPreset(preset)
+                        optionsOpen = false
+                        onGameMenuChanged(false)
+                    }) { Text(preset.name.replace('_', ' '),
+                        color = if (preset == settings.touch.preset) Mint else Color.White) }
+                }
+                Text("Tamanho dos botões")
+                Slider(value = settings.touch.scale.coerceIn(.65f, 1.45f),
+                    onValueChange = {
+                        onSettingsChanged(settings.copy(touch = settings.touch.copy(scale = it)))
+                    }, valueRange = .65f..1.45f)
+                Text("Transparência")
+                Slider(value = settings.touch.opacity.coerceIn(.15f, 1f),
+                    onValueChange = {
+                        onSettingsChanged(settings.copy(touch = settings.touch.copy(opacity = it)))
+                    }, valueRange = .15f..1f)
+                ToggleSettingRow("Controles na tela", "Gamepad USB/Bluetooth também funciona",
+                    settings.touch.enabled, { onSettingsChanged(settings.copy(
+                        touch = settings.touch.copy(enabled = it))) })
+            }
+        }, confirmButton = { TextButton(onClick = {
+            optionsOpen = false
+            onGameMenuChanged(false)
+        }) { Text("CONCLUÍDO") } })
+    }
+}
+
+@Composable
+private fun RemoteHostSettings(
+    view: RemoteHostView,
+    multiplayerActive: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onKick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier.verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        Text("MULTIPLAYER / CONTROLES CONECTADOS",
+            fontWeight = FontWeight.ExtraBold, color = Mint)
+        Text("Use outro celular como controle P2 nesta rede Wi-Fi. " +
+            "Sem internet, sem ROM no cliente e sem transmissão de imagem.",
+            color = Muted, fontSize = 12.sp)
+        if (!view.enabled) {
+            Button(onClick = onStart, enabled = !multiplayerActive,
+                modifier = Modifier.fillMaxWidth()) {
+                Text("ATIVAR CONTROLE REMOTO LAN")
+            }
+            if (multiplayerActive) Text("Finalize a sessão de vídeo GekkoNet antes " +
+                "de abrir uma sala somente de controles.", color = Muted, fontSize = 11.sp)
+        } else {
+            Text("● Sala LAN disponível • UDP 55437", color = Mint)
+            Text("P1 • controle local do anfitrião", color = Color.White)
+            Text("P2 • " + (view.peer?.name ?: "Aguardando controle…"),
+                color = if (view.peer != null) Mint else Muted)
+            view.peer?.let {
+                Text("Conectado via Wi-Fi local: " + it.address,
+                    fontSize = 10.sp, color = Muted)
+                OutlinedButton(onClick = onKick) { Text("DESCONECTAR P2") }
+            }
+            view.pending?.let {
+                Text("Solicitação: " + it.name + " • autoaceitar em " +
+                    view.secondsToAutoAccept + " s", color = Color(0xFFFFC06A))
+            }
+            OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) {
+                Text("ENCERRAR SALA DE CONTROLES")
+            }
+        }
+        Text("P3/P4 dependem da implementação de multitap nativo. " +
+            "Nesta versão, P2 é a porta remota disponível.",
+            color = Muted, fontSize = 10.sp)
     }
 }
 

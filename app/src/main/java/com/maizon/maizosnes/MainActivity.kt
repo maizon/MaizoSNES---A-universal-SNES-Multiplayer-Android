@@ -101,6 +101,11 @@ class MainActivity : ComponentActivity() {
     private val lanStatus = androidx.compose.runtime.mutableStateOf("Sem sessão ativa.")
     private val availableLanRooms = androidx.compose.runtime.mutableStateOf<List<LanRoom>>(emptyList())
     private val scanningLan = androidx.compose.runtime.mutableStateOf(false)
+    // Controller-only UDP never modifies the existing MZNP/Gekko session.
+    private val remoteHostView = androidx.compose.runtime.mutableStateOf(RemoteHostView())
+    private val remoteClientView = androidx.compose.runtime.mutableStateOf<RemoteClientView?>(null)
+    private var remoteHost: RemoteLanHost? = null
+    private var remoteClient: RemoteLanClient? = null
     private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val keepMultiplayerInBackground = androidx.compose.runtime.mutableStateOf(true)
@@ -339,6 +344,7 @@ class MainActivity : ComponentActivity() {
                     lanRooms = availableLanRooms.value,
                     scanningLan = scanningLan.value,
                     onScanLan = ::scanLan,
+                    onJoinRemoteLan = ::joinRemoteLan,
                     relayAddress = relayAddress.value,
                     relayRooms = relayRooms.value,
                     scanningRelay = scanningRelay.value,
@@ -379,6 +385,13 @@ class MainActivity : ComponentActivity() {
                     onRefreshCheats = { searchCheats(refresh = true) },
                     localIpAddress = localIp,
                     multiplayerActive = netplaySession != null,
+                    remoteHostView = remoteHostView.value,
+                    remoteClientView = remoteClientView.value,
+                    onStartRemoteHost = ::startRemoteHost,
+                    onStopRemoteHost = ::stopRemoteHost,
+                    onDecideRemote = ::decideRemote,
+                    onKickRemote = ::kickRemote,
+                    onExitRemote = ::exitRemoteClient,
                     localMultiplayer = localPlayer2Enabled.value,
                     multiplayerReady = hasLoadedRom,
                     onHostMultiplayer = ::hostMultiplayer,
@@ -1161,6 +1174,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openRom(name: String) {
+        if (remoteHost != null) stopRemoteHost()
         if (netplaySession != null) {
             statusMessage.value = "Encerre o multiplayer antes de trocar a ROM."
             return
@@ -1570,6 +1584,97 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+
+    private fun startRemoteHost() {
+        if (remoteHost != null) return
+        if (!hasLoadedRom || currentRomFile.value == null ||
+            activeScreen.value != AppScreen.GAME || netplaySession != null) {
+            statusMessage.value = "Abra um jogo local, sem sessão GekkoNet ativa, para compartilhar o controle."
+            return
+        }
+        val file = currentRomFile.value ?: return
+        runCatching {
+            val server = RemoteLanHost(file.nameWithoutExtension,
+                playerProfile.value.name, currentRomHashPrefix.value,
+                onChanged = { state -> runOnUiThread { remoteHostView.value = state } },
+                onButtons = { mask ->
+                    // Direct native atomic input: no Compose roundtrip on key edges.
+                    runCatching { NativeBridge.nativeSetPlayer2Input(mask) }
+                })
+            remoteHost = server
+            remoteHostView.value = RemoteHostView(enabled = true)
+            hostWifiLock = createDiscoveryLock()
+            startMultiplayerKeepAlive()
+            lanStatus.value = "Controle remoto LAN: sala visível no Wi-Fi local • P2."
+        }.onFailure {
+            lanStatus.value = "Não foi possível abrir controle remoto UDP 55437: " +
+                (it.message ?: "porta indisponível")
+        }
+    }
+
+    private fun stopRemoteHost() {
+        val server = remoteHost ?: return
+        remoteHost = null
+        server.close()
+        remoteHostView.value = RemoteHostView()
+        runCatching { NativeBridge.nativeSetPlayer2Input(0) }
+        runCatching { hostWifiLock?.release() }
+        hostWifiLock = null
+        if (netplaySession == null && remoteClient == null) stopMultiplayerKeepAlive()
+        publishInputs()
+    }
+
+    private fun decideRemote(approve: Boolean) { remoteHost?.decide(approve) }
+    private fun kickRemote() { remoteHost?.kick() }
+
+    private fun joinRemoteLan(room: LanRoom) {
+        if (remoteClient != null || netplaySession != null || remoteHost != null) return
+        if (room.netcode != "Controle remoto") {
+            lanStatus.value = "O host precisa ativar Controle remoto no menu Multiplayer do jogo."
+            return
+        }
+        try {
+            remoteClient = RemoteLanClient(room.host, playerProfile.value.name, room.game) { state ->
+                runOnUiThread {
+                    if (remoteClient != null) remoteClientView.value = state
+                }
+            }
+            remoteClientView.value = RemoteClientView(room.game, room.host, playerProfile.value.name)
+            appSettings.value = readSettings("profile_global_")
+            pressedInputs.set(0)
+            gamepadKeyMasks.clear()
+            gamepadAxisMasks.clear()
+            userPaused = true
+            syncPlaybackState()
+            activeScreen.value = AppScreen.GAME
+            enterImmersiveGameplay()
+            startMultiplayerKeepAlive()
+        } catch (error: Exception) {
+            remoteClient = null
+            remoteClientView.value = null
+            lanStatus.value = "Controle remoto LAN indisponível: " + (error.message ?: "rede")
+        }
+    }
+
+    private fun exitRemoteClient() {
+        remoteClient?.sendButtons(0)
+        remoteClient?.close()
+        remoteClient = null
+        remoteClientView.value = null
+        gameMenuOpen.value = false
+        pressedInputs.set(0)
+        gamepadKeyMasks.clear()
+        gamepadAxisMasks.clear()
+        if (netplaySession == null && remoteHost == null) stopMultiplayerKeepAlive()
+        userPaused = true
+        activeScreen.value = AppScreen.MULTIPLAYER
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+        publishInputs()
+        syncPlaybackState()
+    }
+
     private fun scanLan() {
         if (scanningLan.value || netplaySession != null) return
         scanningLan.value = true
@@ -1665,6 +1770,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exitGameplay() {
+        if (remoteClient != null) { exitRemoteClient(); return }
+        stopRemoteHost()
         if (gameMenuOpen.value) setGameMenuOpen(false)
         saveQuickResumeOnExit()
         netplaySession?.stop()
@@ -2109,6 +2216,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun publishInputs() {
+        if (remoteClient != null) {
+            val pads = gamepadIds()
+            val mask = pressedInputs.get() or pads.fold(0) { value, id ->
+                value or (gamepadKeyMasks[id] ?: 0) or (gamepadAxisMasks[id] ?: 0)
+            }
+            remoteClient?.sendButtons(mask)
+            return
+        }
         if (netplaySession != null) return // Network thread applies per-frame P1/P2.
         val ids = gamepadIds()
         val first = ids.firstOrNull()
@@ -2120,8 +2235,9 @@ class MainActivity : ComponentActivity() {
             (if (first == null || oneGamepadAsP2) 0 else
                 (gamepadKeyMasks[first] ?: 0) or (gamepadAxisMasks[first] ?: 0))
         val p2Device = if (oneGamepadAsP2) first else second
-        val p2 = if (!localPlayer2Enabled.value || p2Device == null) 0 else
-            (gamepadKeyMasks[p2Device] ?: 0) or (gamepadAxisMasks[p2Device] ?: 0)
+        val p2 = if (remoteHost != null) remoteHost?.currentButtons ?: 0
+            else if (!localPlayer2Enabled.value || p2Device == null) 0 else
+                (gamepadKeyMasks[p2Device] ?: 0) or (gamepadAxisMasks[p2Device] ?: 0)
         runCatching {
             NativeBridge.nativeSetInput(p1)
             NativeBridge.nativeSetPlayer2Input(p2)
@@ -2148,7 +2264,10 @@ class MainActivity : ComponentActivity() {
         else "Modo local de dois jogadores desativado."
     }
 
-    private fun hostMultiplayer(port: Int) = startNetplay(null, port)
+    private fun hostMultiplayer(port: Int) {
+        if (remoteHost != null) { lanStatus.value = "Desative Controle remoto antes do multiplayer GekkoNet."; return }
+        startNetplay(null, port)
+    }
 
     private fun joinMultiplayer(host: String, port: Int) = startNetplay(host, port)
 
@@ -2587,6 +2706,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        remoteClient?.close()
+        remoteClient = null
+        remoteHost?.close()
+        remoteHost = null
         coverJob?.cancel()
         perfJob?.cancel()
         netplaySession?.stop()

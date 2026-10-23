@@ -30,6 +30,17 @@ class LanDiscoveryProtocolTest {
         assertTrue(old.cheats)
     }
 
+    @Test fun remoteControllerRoomIsVisibleWithoutRomAndDoesNotAlterGekko() {
+        val room = LanDiscovery.parseOffer(
+            "MZOFFER3|55437|Super Mario World|0123456789abcdef|0|4d61697a6f6e|C",
+            "192.168.1.24")
+        assertNotNull(room)
+        assertEquals(55437, room!!.port)
+        assertEquals("Controle remoto", room.netcode)
+        assertEquals("Maizon", room.ownerName)
+        assertEquals("Super Mario World", room.game)
+    }
+
     @Test fun invalidOwnerMetadataIsIgnoredWithoutDiscardingGame() {
         val room = LanDiscovery.parseOffer(
             "MZOFFER3|55435|Homebrew|0123456789abcdef|0|!!!!|L", "192.168.1.9")

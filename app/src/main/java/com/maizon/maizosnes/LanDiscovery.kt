@@ -75,7 +75,7 @@ internal object LanDiscovery {
                         val response = if (message == PROBE) legacy else
                             "$OFFER_V3$tcpPort|$display|$safeHash|" +
                             (if (cheats) "1" else "0") + "|$encodedName|" +
-                            (if (netcode == "Lockstep") "L" else "R")
+                            (when (netcode) { "Lockstep" -> "L"; "Remote" -> "C"; else -> "R" })
                         val encoded = response.toByteArray(Charsets.UTF_8)
                         socket.send(DatagramPacket(encoded, encoded.size, packet.address, packet.port))
                     } catch (_: SocketTimeoutException) {
@@ -115,6 +115,7 @@ internal object LanDiscovery {
         val mode = if (modern) when (fields.getOrNull(5)) {
             "R" -> "Rollback disponível"
             "L" -> "Lockstep"
+            "C" -> "Controle remoto"
             else -> ""
         } else ""
         return LanRoom(address, port, game, hash, fields.getOrNull(3) == "1", owner, mode)

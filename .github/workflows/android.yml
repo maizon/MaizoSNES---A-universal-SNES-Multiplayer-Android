@@ -16,7 +16,7 @@ on:
       - docs/CI_PERFORMANCE.md
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -110,3 +110,75 @@ jobs:
         run: |
           echo "Railway public WSS smoke outcome: ${{ steps.railway_smoke.outcome }}" >> "$GITHUB_STEP_SUMMARY"
           echo "External uptime is not an APK build gate; see smoke step logs." >> "$GITHUB_STEP_SUMMARY"
+
+      # GitHub Actions artifacts are always ZIP wrappers. The GitHub Release
+      # below instead attaches a directly installable standalone .apk.
+      - name: Prepare standalone signed Android APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/work/android-foundation'
+        id: standalone
+        shell: bash
+        env:
+          STORE_B64: ${{ secrets.KEYSTORE_BASE64 || secrets.MAIZO_KEYSTORE_B64 }}
+          STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || secrets.MAIZO_STORE_PASSWORD }}
+          SIGN_ALIAS: ${{ secrets.KEY_ALIAS || secrets.MAIZO_KEY_ALIAS }}
+          SIGN_PASS: ${{ secrets.KEY_PASSWORD || secrets.MAIZO_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APKSIGNER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/apksigner"
+          if [[ -n "$STORE_B64" && -n "$STORE_PASS" && -n "$SIGN_ALIAS" && -n "$SIGN_PASS" ]]; then
+            printf '%s' "$STORE_B64" | base64 --decode > "$RUNNER_TEMP/maizosnes-final.jks"
+            chmod 600 "$RUNNER_TEMP/maizosnes-final.jks"
+            export MAIZO_KEYSTORE_PATH="$RUNNER_TEMP/maizosnes-final.jks"
+            export MAIZO_STORE_PASSWORD="$STORE_PASS"
+            export MAIZO_KEY_ALIAS="$SIGN_ALIAS"
+            export MAIZO_KEY_PASSWORD="$SIGN_PASS"
+            ./gradlew --no-daemon assembleRelease
+            APK="app/build/outputs/apk/release/app-release.apk"
+            DEST="MaizoSNES-Universal-LAN-Signed.apk"
+            echo "SIGNATURE_TYPE=release" >> "$GITHUB_ENV"
+          else
+            echo "No stable release key configured: publishing clearly labeled DEBUG preview." >&2
+            APK="app/build/outputs/apk/debug/app-debug.apk"
+            DEST="MaizoSNES-Universal-LAN-Debug-Preview.apk"
+            echo "SIGNATURE_TYPE=debug" >> "$GITHUB_ENV"
+          fi
+          test -s "$APK"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          cp "$APK" "dist/$DEST"
+          echo "filename=$DEST" >> "$GITHUB_OUTPUT"
+          sha256sum "dist/$DEST" > dist/SHA256SUMS.txt
+          echo "Standalone APK: $DEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish directly installable APK on GitHub Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/work/android-foundation'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_FILENAME: ${{ steps.standalone.outputs.filename }}
+        run: |
+          set -euo pipefail
+          TAG="v1.0.0-remote-lan.${GITHUB_RUN_NUMBER}"
+          test -s "dist/$APK_FILENAME"
+          {
+            echo "🎮 MaizoSNES — Controle Remoto LAN (prévia Android)"
+            echo
+            echo "Use outro celular como controle do jogador 2 na mesma Wi-Fi."
+            echo "Sem internet, sem vídeo ou ROM no cliente."
+            echo "Nicknames, layouts e gamepads físicos suportados."
+            echo "O anfitrião aceita/rejeita ou permite aceitação automática em 10 s."
+            echo
+            echo "⚠️ Modo controle remoto ainda requer testes reais em dois aparelhos."
+            echo "Somente P1 local + P2 remoto nesta prévia."
+            if [[ "$SIGNATURE_TYPE" == "debug" ]]; then
+              echo "⚠️ Build de desenvolvimento assinada com chave DEBUG; não é assinatura estável de produção."
+              echo "O pacote .debug é independente do pacote de produção."
+            else
+              echo "APK universal de release assinado com a chave configurada no repositório."
+            fi
+            echo "ROMs e BIOS não incluídas."
+          } > dist/NOTES.txt
+          gh release create "$TAG" "dist/$APK_FILENAME" "dist/SHA256SUMS.txt" \
+            --target "$GITHUB_SHA" \
+            --title "MaizoSNES • Controle Remoto LAN • $TAG" \
+            --notes-file dist/NOTES.txt --prerelease
+          echo "APK direto: https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$APK_FILENAME" >> "$GITHUB_STEP_SUMMARY"
