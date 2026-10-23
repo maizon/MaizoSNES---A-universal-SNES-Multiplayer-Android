@@ -14,6 +14,8 @@ import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.TimeUnit
 
 /**
  * An opt-in, ROM-free controller-only LAN transport. Entirely separate from
@@ -386,6 +388,11 @@ internal class RemoteLanClient(
     private val nonce = SecureRandom().nextLong()
     private val seq = AtomicInteger()
     private val buttons = AtomicInteger()
+    // Touch/gamepad events are enqueued on the UI thread, but never perform
+    // socket.send() there (Android StrictMode + unpredictable UI blocking).
+    // The TX worker wakes immediately on a new edge; no fixed-frame delay.
+    private val sendQueue = LinkedBlockingDeque<Int>(48)
+    private val exitSignal = -1
     @Volatile private var token = 0L
     @Volatile private var slot = 2
     @Volatile private var connected = false
@@ -394,7 +401,8 @@ internal class RemoteLanClient(
     @Volatile private var rtt: Long? = null
 
     init {
-        Thread({ loop() }, "Maizo-RemoteClient-UDP").apply { isDaemon = true; start() }
+        Thread({ sendLoop() }, "Maizo-RemoteClient-TX").apply { isDaemon = true; start() }
+        Thread({ loop() }, "Maizo-RemoteClient-RX").apply { isDaemon = true; start() }
     }
 
     private fun notifyState(status: String) {
@@ -411,9 +419,41 @@ internal class RemoteLanClient(
     }
 
     fun sendButtons(mask: Int) {
-        buttons.set(mask and 0xffff)
-        if (connected) send(RemoteLanWire.Message(RemoteLanWire.INPUT,
-            token = token, sequence = seq.getAndIncrement(), buttons = buttons.get()))
+        val value = mask and 0xffff
+        buttons.set(value)
+        if (connected && !closed.get()) {
+            if (!sendQueue.offerLast(value)) {
+                // Congested handset: discard the oldest stale key state,
+                // retaining releases and sending the latest complete mask.
+                sendQueue.pollFirst()
+                sendQueue.offerLast(value)
+            }
+        }
+    }
+
+    private fun sendLoop() {
+        try {
+            while (true) {
+                val next = sendQueue.pollFirst(80, TimeUnit.MILLISECONDS)
+                if (next == exitSignal) {
+                    // BYE uses the original UDP endpoint/token and clears held
+                    // buttons promptly even if Android closes the Activity.
+                    val bye = RemoteLanWire.Message(RemoteLanWire.BYE,
+                        token = if (connected) token else nonce)
+                    val packet = RemoteLanWire.encode(bye)
+                    runCatching {
+                        socket.send(DatagramPacket(packet, packet.size, server))
+                    }
+                    break
+                }
+                if (next != null && connected && !closed.get())
+                    send(RemoteLanWire.Message(RemoteLanWire.INPUT,
+                        token = token, sequence = seq.getAndIncrement(), buttons = next))
+                if (closed.get()) break
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally { socket.close() }
     }
 
     private fun loop() {
@@ -471,16 +511,14 @@ internal class RemoteLanClient(
                 } catch (_: SocketTimeoutException) { }
             }
         } catch (_: SocketException) { }
-        finally { socket.close() }
+        finally { close() }
     }
 
     override fun close() {
-        if (!closed.get()) {
-            send(RemoteLanWire.Message(RemoteLanWire.BYE,
-                token = if (connected) token else nonce))
-        }
         if (!closed.compareAndSet(false, true)) return
-        connected = false
-        socket.close()
+        // Do not send anything or close socket on UI thread. The sender
+        // emits BYE before closing its own socket.
+        sendQueue.clear()
+        sendQueue.offerFirst(exitSignal)
     }
 }

@@ -37,6 +37,44 @@ class RemoteLanMultitapTest {
         } catch (_: java.net.SocketTimeoutException) { null }
     }
 
+    @Test fun touchEdgesGoThroughDedicatedClientSenderAndClearOnRelease() {
+        val ip = NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .firstOrNull { it.isSiteLocalAddress }?.hostAddress
+        assumeTrue("Private IPv4 needed", ip != null)
+        val view = AtomicReference(RemoteHostView())
+        val clientView = AtomicReference<RemoteClientView?>(null)
+        val held = ConcurrentHashMap<Int, Int>()
+        val host = RemoteLanHost("Super Bomberman", "Host",
+            "0123456789abcdef", onChanged = { view.set(it) },
+            onButtons = { slot, mask -> held[slot] = mask })
+        val client = RemoteLanClient(ip!!, "Pad via touch", "Super Bomberman",
+            onChanged = { clientView.set(it) })
+        try {
+            assertTrue("Client should request approval", until(5000) {
+                view.get().pending.isNotEmpty()
+            })
+            val p = view.get().pending.first()
+            host.decide(p.nonce, true)
+            assertTrue("Remote client must receive ACK", until(5000) {
+                clientView.get()?.connected == true
+            })
+            client.sendButtons(1 shl 9)
+            assertTrue("Touch button press should reach native host input", until(3000) {
+                held[2] == (1 shl 9)
+            })
+            client.sendButtons(0)
+            assertTrue("Touch button release must not stick", until(3000) {
+                held[2] == 0
+            })
+        } finally {
+            client.close()
+            host.close()
+        }
+    }
+
     @Test fun threePadsJoinInSlotsP2P3P4AndDisconnectIndependently() {
         val local = NetworkInterface.getNetworkInterfaces().toList()
             .filter { it.isUp && !it.isLoopback }
