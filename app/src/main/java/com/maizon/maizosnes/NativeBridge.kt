@@ -14,6 +14,10 @@ object NativeBridge {
     /** Available only during MZNP v3 setup, before the first netplay frame. */
     external fun nativeApplyOnlineCheats(codes: Array<String>): Int
     external fun nativeSetPlayer2Input(bits: Int)
+    /** Direct atomic per-player inputs. Slots 3/4 require SNES multitap enabled. */
+    external fun nativeSetPlayerInput(player: Int, bits: Int)
+    /** Attach/detach the physical SNES multitap on port 2. Not for GekkoNet. */
+    external fun nativeSetMultitapEnabled(enabled: Boolean)
     external fun nativeSetNetplayMode(enabled: Boolean)
     external fun nativeNetplayStep(player1: Int, player2: Int): Int
     /** Mutes speculative rollback re-simulation; preserves stable audio/video normally. */

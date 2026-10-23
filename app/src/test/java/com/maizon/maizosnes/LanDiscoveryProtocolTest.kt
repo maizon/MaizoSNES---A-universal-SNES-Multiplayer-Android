@@ -41,6 +41,30 @@ class LanDiscoveryProtocolTest {
         assertEquals("Super Mario World", room.game)
     }
 
+    @Test fun dualModeLanRoomOffersBothButtonsAndGameTransferPath() {
+        val room = LanDiscovery.parseOffer(
+            "MZOFFER3|55435|Super Bomberman|0123456789abcdef|0|4d61697a6f6e|B",
+            "192.168.0.20")!!
+        assertEquals(55435, room.port) // TCP game/ROM session; UDP pads use 55437
+        assertEquals("Maizon", room.ownerName)
+        assertEquals("Jogar ou controle", room.netcode)
+        assertTrue("Game option must be available", room.acceptsGameClient)
+        assertTrue("Remote controller must be available", room.acceptsRemotePad)
+    }
+
+    @Test fun oldLanRoomKeepsGameWithoutAdvertisingIncompatibleController() {
+        val old = LanDiscovery.parseOffer(
+            "MZOFFER3|55435|Homebrew|0123456789abcdef|0||R",
+            "192.168.0.19")!!
+        assertTrue(old.acceptsGameClient)
+        assertFalse(old.acceptsRemotePad)
+        val remoteOnly = LanDiscovery.parseOffer(
+            "MZOFFER3|55437|Homebrew|0123456789abcdef|0||C",
+            "192.168.0.21")!!
+        assertTrue(remoteOnly.acceptsRemotePad)
+        assertFalse(remoteOnly.acceptsGameClient)
+    }
+
     @Test fun invalidOwnerMetadataIsIgnoredWithoutDiscardingGame() {
         val room = LanDiscovery.parseOffer(
             "MZOFFER3|55435|Homebrew|0123456789abcdef|0|!!!!|L", "192.168.1.9")

@@ -35,6 +35,18 @@ class RemoteLanWireTest {
         assertEquals("Super Mario World", result.text)
     }
 
+    @Test fun independentP3P4ReservationsUseExistingWireVersion() {
+        for (slot in 2..4) {
+            val packet = RemoteLanWire.encode(RemoteLanWire.Message(
+                RemoteLanWire.ACCEPT, nonce = slot.toLong(), token = slot * 100L,
+                slot = slot, text = "Super Bomberman"))
+            val result = RemoteLanWire.decode(packet)!!
+            assertEquals(slot, result.slot)
+            assertEquals(slot * 100L, result.token)
+            assertEquals("Super Bomberman", result.text)
+        }
+    }
+
     @Test fun rejectsMalformedOrTrailingPackets() {
         val good = RemoteLanWire.encode(RemoteLanWire.Message(RemoteLanWire.WAIT, nonce = 5))
         assertNull(RemoteLanWire.decode(byteArrayOf(0x01, 0x02, 0x03)))

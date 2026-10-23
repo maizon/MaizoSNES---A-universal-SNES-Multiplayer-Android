@@ -34,6 +34,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.security.MessageDigest
@@ -105,13 +106,17 @@ class MainActivity : ComponentActivity() {
     private val remoteHostView = androidx.compose.runtime.mutableStateOf(RemoteHostView())
     private val remoteClientView = androidx.compose.runtime.mutableStateOf<RemoteClientView?>(null)
     private var remoteHost: RemoteLanHost? = null
+    private var remoteGameListener: LanGameJoinListener? = null
+    private var classicLanAnnouncement: LanDiscovery.Announcement? = null
     private var remoteClient: RemoteLanClient? = null
+    private val remoteLanEnabled = androidx.compose.runtime.mutableStateOf(true)
     private val shareRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val receiveRomAllowed = androidx.compose.runtime.mutableStateOf(true)
     private val keepMultiplayerInBackground = androidx.compose.runtime.mutableStateOf(true)
     private val shareConsentVisible = androidx.compose.runtime.mutableStateOf(false)
     private data class PendingHost(val port: Int, val roomId: String?, val relayHost: String?,
-        val relayTls: Boolean, val wssEndpoint: String?, val profileNames: Boolean)
+        val relayTls: Boolean, val wssEndpoint: String?, val profileNames: Boolean,
+        val acceptedSocket: Socket? = null)
     private var pendingHost: PendingHost? = null
     private var hostApproved = false
     private var hostAnswered = false
@@ -280,6 +285,7 @@ class MainActivity : ComponentActivity() {
         onlineCheatsOptIn.value = prefs.getBoolean("online_cheats_opt_in", false)
         devUnlocked.value = prefs.getBoolean("dev_unlocked", false)
         devShareEnabled.value = prefs.getBoolean("dev_share_advanced", true)
+        remoteLanEnabled.value = prefs.getBoolean("remote_lan_enabled", true)
         shareRomAllowed.value = prefs.getBoolean("share_rom_enabled", true)
         receiveRomAllowed.value = prefs.getBoolean("receive_rom_enabled", true)
         runCatching {
@@ -391,6 +397,7 @@ class MainActivity : ComponentActivity() {
                     onStopRemoteHost = ::stopRemoteHost,
                     onDecideRemote = ::decideRemote,
                     onKickRemote = ::kickRemote,
+                    onMoveRemote = ::moveRemote,
                     onExitRemote = ::exitRemoteClient,
                     localMultiplayer = localPlayer2Enabled.value,
                     multiplayerReady = hasLoadedRom,
@@ -721,7 +728,8 @@ class MainActivity : ComponentActivity() {
 
     private fun selectTouchPreset(preset: TouchPreset) {
         val prefix = profilePrefix(
-            if (activeScreen.value == AppScreen.GAME) currentRomFile.value else null)
+            if (activeScreen.value == AppScreen.GAME && remoteClient == null)
+                currentRomFile.value else null)
         val orientation = if (resources.configuration.orientation ==
             Configuration.ORIENTATION_LANDSCAPE) "landscape" else "portrait"
         val saved = prefs.getString(
@@ -1175,6 +1183,7 @@ class MainActivity : ComponentActivity() {
 
     private fun openRom(name: String) {
         if (remoteHost != null) stopRemoteHost()
+        if (classicLanAnnouncement != null) stopClassicRoom()
         if (netplaySession != null) {
             statusMessage.value = "Encerre o multiplayer antes de trocar a ROM."
             return
@@ -1261,6 +1270,7 @@ class MainActivity : ComponentActivity() {
                 statusMessage.value = "ROM carregada: " + file.name
                 restoreQuickResumeIfRequested(file)
                 syncPlaybackState()
+                if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
                 searchCheats()
             } catch (error: Exception) {
                 pendingQuickResumeName = null
@@ -1392,7 +1402,9 @@ class MainActivity : ComponentActivity() {
         }
         if (lanCandidate != null) {
             lanStatus.value = "Tentando conexão LAN automática…"
-            startNetplay(lanCandidate.host, lanCandidate.port)
+            if (lanCandidate.acceptsGameClient)
+                startNetplay(lanCandidate.host, lanCandidate.port)
+            else lanStatus.value = "Sala de controle remoto; escolha Usar como controle."
             return
         }
         val compatibleRoom = autoRooms.value.firstOrNull { room ->
@@ -1411,7 +1423,7 @@ class MainActivity : ComponentActivity() {
         } else {
             lanStatus.value = "Nenhum servidor público disponível. " +
                 "Abrindo sala na sua rede Wi-Fi…"
-            startNetplay(null, 55435)
+            hostMultiplayer(55435)
         }
     }
 
@@ -1585,51 +1597,151 @@ class MainActivity : ComponentActivity() {
     }
 
 
+    /**
+     * Controller LAN defaults to ON. Advertise both the game TCP entrypoint
+     * and control-only UDP in the same discoverable Wi-Fi LAN room.
+     */
     private fun startRemoteHost() {
-        if (remoteHost != null) return
-        if (!hasLoadedRom || currentRomFile.value == null ||
-            activeScreen.value != AppScreen.GAME || netplaySession != null) {
-            statusMessage.value = "Abra um jogo local, sem sessão GekkoNet ativa, para compartilhar o controle."
-            return
-        }
+        if (!remoteLanEnabled.value || remoteHost != null) return
+        if (classicLanAnnouncement != null) stopClassicRoom()
+        if (!hasLoadedRom || currentRomFile.value == null || remoteClient != null ||
+            activeScreen.value != AppScreen.GAME || netplaySession != null) return
         val file = currentRomFile.value ?: return
+        var host: RemoteLanHost? = null
+        var listener: LanGameJoinListener? = null
         runCatching {
-            val server = RemoteLanHost(file.nameWithoutExtension,
+            listener = LanGameJoinListener(55435) { socket ->
+                runOnUiThread { handleAcceptedLanGame(socket) }
+            }
+            host = RemoteLanHost(file.nameWithoutExtension,
                 playerProfile.value.name, currentRomHashPrefix.value,
-                onChanged = { state -> runOnUiThread { remoteHostView.value = state } },
-                onButtons = { mask ->
-                    // Direct native atomic input: no Compose roundtrip on key edges.
-                    runCatching { NativeBridge.nativeSetPlayer2Input(mask) }
-                })
-            remoteHost = server
+                onChanged = { state -> runOnUiThread {
+                    if (remoteHost != null) {
+                        remoteHostView.value = state
+                        publishInputs() // Restore local P2 when a remote client leaves.
+                    }
+                } },
+                onButtons = { slot, mask ->
+                    runCatching { NativeBridge.nativeSetPlayerInput(slot, mask) }
+                }, gamePort = 55435)
+            remoteGameListener = listener
+            remoteHost = host
             remoteHostView.value = RemoteHostView(enabled = true)
+            NativeBridge.nativeSetMultitapEnabled(true)
             hostWifiLock = createDiscoveryLock()
             startMultiplayerKeepAlive()
-            lanStatus.value = "Controle remoto LAN: sala visível no Wi-Fi local • P2."
-        }.onFailure {
-            lanStatus.value = "Não foi possível abrir controle remoto UDP 55437: " +
-                (it.message ?: "porta indisponível")
+            lanStatus.value = "Sala LAN: jogar no dispositivo ou usar controle P2–P4."
+        }.onFailure { error ->
+            listener?.close()
+            host?.close()
+            remoteGameListener = null
+            remoteHost = null
+            remoteHostView.value = RemoteHostView()
+            runCatching { NativeBridge.nativeSetMultitapEnabled(false) }
+            lanStatus.value = "Falha ao iniciar sala LAN: " +
+                (error.message ?: "portas 55435/55436/55437 ocupadas")
         }
     }
 
     private fun stopRemoteHost() {
-        val server = remoteHost ?: return
+        val host = remoteHost ?: return
         remoteHost = null
-        server.close()
+        remoteGameListener?.close()
+        remoteGameListener = null
+        host?.close()
         remoteHostView.value = RemoteHostView()
-        runCatching { NativeBridge.nativeSetPlayer2Input(0) }
+        runCatching {
+            NativeBridge.nativeSetMultitapEnabled(false)
+            for (slot in 2..4) NativeBridge.nativeSetPlayerInput(slot, 0)
+        }
         runCatching { hostWifiLock?.release() }
         hostWifiLock = null
         if (netplaySession == null && remoteClient == null) stopMultiplayerKeepAlive()
         publishInputs()
     }
 
-    private fun decideRemote(approve: Boolean) { remoteHost?.decide(approve) }
-    private fun kickRemote() { remoteHost?.kick() }
+    /**
+     * Keep the traditional discoverable TCP room alive even when the host
+     * explicitly disables remote virtual controllers. No ROM gameplay
+     * regression: only the UDP pad receiver and multitap are disabled.
+     */
+    private fun startClassicRoom() {
+        if (classicLanAnnouncement != null || remoteHost != null ||
+            remoteClient != null || netplaySession != null ||
+            activeScreen.value != AppScreen.GAME || !hasLoadedRom) return
+        val rom = currentRomFile.value ?: return
+        var listener: LanGameJoinListener? = null
+        var announcement: LanDiscovery.Announcement? = null
+        runCatching {
+            listener = LanGameJoinListener(55435) { accepted ->
+                runOnUiThread { handleAcceptedLanGame(accepted) }
+            }
+            announcement = LanDiscovery.announce(55435, rom.nameWithoutExtension,
+                currentRomHashPrefix.value, ownerName = playerProfile.value.name,
+                netcode = if (netcodeMode.value == NetcodeMode.ROLLBACK)
+                    "Rollback" else "Lockstep")
+            check(announcement != null) { "Porta de descoberta UDP 55436 ocupada." }
+            remoteGameListener = listener
+            classicLanAnnouncement = announcement
+            hostWifiLock = createDiscoveryLock()
+            startMultiplayerKeepAlive()
+            lanStatus.value = "Sala LAN tradicional: jogar no dispositivo e receber ROM autorizada."
+        }.onFailure { error ->
+            listener?.close()
+            announcement?.close()
+            remoteGameListener = null
+            classicLanAnnouncement = null
+            lanStatus.value = "Não foi possível anunciar a sala LAN: " +
+                (error.message ?: "rede")
+        }
+    }
+
+    private fun stopClassicRoom() {
+        if (classicLanAnnouncement == null) return
+        classicLanAnnouncement?.close()
+        classicLanAnnouncement = null
+        remoteGameListener?.close()
+        remoteGameListener = null
+        runCatching { hostWifiLock?.release() }
+        hostWifiLock = null
+        if (netplaySession == null && remoteClient == null) stopMultiplayerKeepAlive()
+    }
+
+    private fun setRemoteLanEnabled(enabled: Boolean) {
+        remoteLanEnabled.value = enabled
+        prefs.edit().putBoolean("remote_lan_enabled", enabled).apply()
+        if (enabled) {
+            stopClassicRoom()
+            startRemoteHost()
+        } else {
+            stopRemoteHost()
+            startClassicRoom()
+        }
+    }
+
+    private fun decideRemote(nonce: Long, approve: Boolean) {
+        remoteHost?.decide(nonce, approve)
+    }
+    private fun kickRemote(slot: Int) { remoteHost?.kick(slot) }
+    private fun moveRemote(from: Int, to: Int) { remoteHost?.move(from, to) }
+
+    private fun handleAcceptedLanGame(socket: Socket) {
+        if (netplaySession != null || !hasLoadedRom ||
+            (remoteHost == null && classicLanAnnouncement == null) ||
+            activeScreen.value != AppScreen.GAME) {
+            socket.close()
+            return
+        }
+        // No emulation suspension before a real remote game request.
+        stopRemoteHost()
+        stopClassicRoom()
+        lanStatus.value = "Jogador LAN solicitou ROM/jogo no dispositivo…"
+        startNetplay(null, 55435, acceptedSocket = socket)
+    }
 
     private fun joinRemoteLan(room: LanRoom) {
         if (remoteClient != null || netplaySession != null || remoteHost != null) return
-        if (room.netcode != "Controle remoto") {
+        if (!room.acceptsRemotePad) {
             lanStatus.value = "O host precisa ativar Controle remoto no menu Multiplayer do jogo."
             return
         }
@@ -1757,6 +1869,9 @@ class MainActivity : ComponentActivity() {
         activeScreen.value = AppScreen.GAME
         enterImmersiveGameplay()
         syncPlaybackState()
+        if (netplaySession == null && remoteClient == null) {
+            if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
+        }
     }
 
     private fun enterImmersiveGameplay() {
@@ -1772,6 +1887,7 @@ class MainActivity : ComponentActivity() {
     private fun exitGameplay() {
         if (remoteClient != null) { exitRemoteClient(); return }
         stopRemoteHost()
+        stopClassicRoom()
         if (gameMenuOpen.value) setGameMenuOpen(false)
         saveQuickResumeOnExit()
         netplaySession?.stop()
@@ -2235,12 +2351,17 @@ class MainActivity : ComponentActivity() {
             (if (first == null || oneGamepadAsP2) 0 else
                 (gamepadKeyMasks[first] ?: 0) or (gamepadAxisMasks[first] ?: 0))
         val p2Device = if (oneGamepadAsP2) first else second
-        val p2 = if (remoteHost != null) remoteHost?.currentButtons ?: 0
+        val p2 = if (remoteHost?.hasPeer(2) == true)
+                remoteHost?.currentButtons(2) ?: 0
             else if (!localPlayer2Enabled.value || p2Device == null) 0 else
                 (gamepadKeyMasks[p2Device] ?: 0) or (gamepadAxisMasks[p2Device] ?: 0)
         runCatching {
             NativeBridge.nativeSetInput(p1)
             NativeBridge.nativeSetPlayer2Input(p2)
+            if (remoteHost != null) {
+                NativeBridge.nativeSetPlayerInput(3, remoteHost?.currentButtons(3) ?: 0)
+                NativeBridge.nativeSetPlayerInput(4, remoteHost?.currentButtons(4) ?: 0)
+            }
         }
     }
 
@@ -2265,8 +2386,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun hostMultiplayer(port: Int) {
-        if (remoteHost != null) { lanStatus.value = "Desative Controle remoto antes do multiplayer GekkoNet."; return }
-        startNetplay(null, port)
+        if (netplaySession != null || !hasLoadedRom) return
+        if (port == 55435) {
+            continueGame() // The game keeps running until someone joins.
+            if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
+        } else startNetplay(null, port) // Existing MZNP custom-port session.
     }
 
     private fun joinMultiplayer(host: String, port: Int) = startNetplay(host, port)
@@ -2355,18 +2479,23 @@ class MainActivity : ComponentActivity() {
         hostApproved = authorized
         // Declining sharing still starts the multiplayer room without ROM transfer.
         if (request != null) startNetplay(null, request.port, request.roomId, request.relayHost,
-                request.relayTls, request.wssEndpoint, request.profileNames)
+                request.relayTls, request.wssEndpoint, request.profileNames,
+                request.acceptedSocket)
     }
 
     private fun startNetplay(host: String?, port: Int,
         relayRoomId: String? = null, relayServerHost: String? = null,
         relayTls: Boolean = false, wssEndpoint: String? = null,
-        profileNames: Boolean = false) {
-        if (netplaySession != null) return
+        profileNames: Boolean = false, acceptedSocket: Socket? = null) {
+        if (netplaySession != null) { acceptedSocket?.close(); return }
+        // All legacy one-to-one network transports are mutually exclusive
+        // with the local multitap room; release its ports before MZNP.
+        if (remoteHost != null) stopRemoteHost()
+        if (classicLanAnnouncement != null) stopClassicRoom()
         // Per-session rights check; includes public-relay rooms, not only LAN.
         if (host == null && shareRomAllowed.value && !hostAnswered) {
             pendingHost = PendingHost(port, relayRoomId, relayServerHost,
-                relayTls, wssEndpoint, profileNames)
+                relayTls, wssEndpoint, profileNames, acceptedSocket)
             shareConsentVisible.value = true
             return
         }
@@ -2592,7 +2721,8 @@ class MainActivity : ComponentActivity() {
                 current?.nameWithoutExtension ?: "SNES", relayTls = relayTls,
                 ownerName = if (profileNames) playerProfile.value.name else "")
             else session.joinViaRelay(relayServerHost, port, relayRoomId, relayTls = relayTls)
-        } else if (host == null) session.host(port) else session.join(host, port)
+        } else if (acceptedSocket != null) session.hostAccepted(acceptedSocket)
+        else if (host == null) session.host(port) else session.join(host, port)
     }
 
     private fun shareNetworkDiagnostics() {
@@ -2706,6 +2836,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        remoteGameListener?.close()
+        remoteGameListener = null
+        classicLanAnnouncement?.close()
+        classicLanAnnouncement = null
+        pendingHost?.acceptedSocket?.close()
+        pendingHost = null
         remoteClient?.close()
         remoteClient = null
         remoteHost?.close()

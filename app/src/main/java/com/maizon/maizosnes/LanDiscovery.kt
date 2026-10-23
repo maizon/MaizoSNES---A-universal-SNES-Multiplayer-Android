@@ -18,7 +18,12 @@ internal data class LanRoom(
     val cheats: Boolean = false,
     val ownerName: String = "",
     val netcode: String = ""
-)
+) {
+    /** Dual-mode is one discoverable LAN room, not two mutually exclusive rooms. */
+    val acceptsRemotePad: Boolean get() =
+        netcode == "Controle remoto" || netcode == "Jogar ou controle"
+    val acceptsGameClient: Boolean get() = netcode != "Controle remoto"
+}
 
 /**
  * Local-only UDP broadcast discovery. It neither uses the internet nor requires
@@ -75,7 +80,7 @@ internal object LanDiscovery {
                         val response = if (message == PROBE) legacy else
                             "$OFFER_V3$tcpPort|$display|$safeHash|" +
                             (if (cheats) "1" else "0") + "|$encodedName|" +
-                            (when (netcode) { "Lockstep" -> "L"; "Remote" -> "C"; else -> "R" })
+                            (when (netcode) { "Lockstep" -> "L"; "Remote" -> "C"; "Both" -> "B"; else -> "R" })
                         val encoded = response.toByteArray(Charsets.UTF_8)
                         socket.send(DatagramPacket(encoded, encoded.size, packet.address, packet.port))
                     } catch (_: SocketTimeoutException) {
@@ -116,6 +121,7 @@ internal object LanDiscovery {
             "R" -> "Rollback disponível"
             "L" -> "Lockstep"
             "C" -> "Controle remoto"
+            "B" -> "Jogar ou controle"
             else -> ""
         } else ""
         return LanRoom(address, port, game, hash, fields.getOrNull(3) == "1", owner, mode)

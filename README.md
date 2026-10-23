@@ -1,5 +1,32 @@
 # MaizoSNES — Super Nintendo Android / LAN + Online
 
+## Sala LAN compartilhada + até 4 jogadores (23/10/2026)
+
+**Correção da versão anterior:** ao entrar em uma sala LAN moderna,
+o cliente pode escolher **Jogar no dispositivo** (MZNP/GekkoNet com
+compartilhamento autorizado de ROM) **ou Usar como controle virtual**
+(gamepad UDP sem ROM). Os dois botões estão ativos em uma mesma sala,
+sem duplicação de salas exclusivas de controle.
+
+A sala é anunciada por padrão quando o host abre um jogo local.
+O controle virtual pode ser desativado/reativado em **Jogo → Menu do
+emulador → Multiplayer / Controles conectados**. P1 fica no host e o
+Snes9x usa multitap para aceitar até P2, P3 e P4 remotos nos jogos
+compatíveis. Aceitar/rejeitar pedidos, aceitar automaticamente após
+10 segundos, atribuir/trocar jogadores e desconectar individualmente.
+
+Os dois modos são **alternativos**: quando alguém entrar para jogar
+no próprio dispositivo, o host passa ao multiplayer determinístico
+e os controles remotos são encerrados para não causar dessincronização.
+A ROM nunca é enviada a quem escolhe apenas usar como controle;
+o modo clássico mantém aprovação bilateral e SHA-256.
+
+**APK universal Android ARM64+ARMv7:** o workflow publica um **.apk
+direto na GitHub Release**, sem ZIP. Quando os secrets de chave de
+produção não existem, publica apenas prévia com assinatura debug.
+É necessário testar em aparelhos reais. Consulte
+[`docs/REMOTE_LAN.md`](docs/REMOTE_LAN.md) para o roteiro completo.
+
 ## Multiplayer Premium Ultimate — experiência e desempenho (21/10/2026)
 
 - Perfil de boas-vindas na primeira abertura, apelido e foto circular **locais**

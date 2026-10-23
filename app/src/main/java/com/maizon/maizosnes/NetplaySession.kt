@@ -135,6 +135,21 @@ internal class NetplaySession(
         joinLockstep(host, port)
     }
 
+    /**
+     * A default LAN game room only enters deterministic mode after the
+     * player selects "Jogar no dispositivo" and the TCP socket is accepted.
+     * This reuses the exact original ROM/SHA-256/permissions handshake.
+     */
+    fun hostAccepted(accepted: Socket) = launch {
+        require(rom?.isFile == true) { "O anfitrião precisa abrir uma ROM." }
+        prepare(true)
+        accepted.use { connection ->
+            socket = connection
+            runSession(connection, host = true)
+        }
+    }
+
+
 
     private fun hostLockstep(port: Int) = launch {
         require(port in 1024..65535) { "Porta deve estar entre 1024 e 65535." }
@@ -776,7 +791,10 @@ internal class NetplaySession(
         connection.tcpNoDelay = true
         connection.keepAlive = true
         runCatching { connection.trafficClass = 0x10 } // IPTOS_LOWDELAY best-effort
-        connection.soTimeout = 20000
+        // A classic client can connect while the host is still displaying
+        // its per-session ROM redistribution approval dialog. Do not time out
+        // the client before the host has had an opportunity to approve it.
+        connection.soTimeout = if (host) 20000 else 90000
         // Bounded buffers avoid per-frame allocations while preserving TCP_NODELAY.
         // A buffered output stream flushes once per complete packet below.
         val input = DataInputStream(BufferedInputStream(connection.getInputStream(), 8192))

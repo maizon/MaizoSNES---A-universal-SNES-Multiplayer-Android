@@ -35,6 +35,11 @@ std::atomic<bool> g_runFrames{false};
 std::atomic<bool> g_paused{false};
 std::atomic<uint32_t> g_inputMask{0};
 std::atomic<uint32_t> g_player2InputMask{0};
+std::atomic<uint32_t> g_player3InputMask{0};
+std::atomic<uint32_t> g_player4InputMask{0};
+std::atomic<bool> g_multitapEnabled{false};
+// Upstream Snes9x 1.63: RETRO_DEVICE_JOYPAD_MULTITAP is subclass #0.
+constexpr unsigned kSnes9xMultitap = ((1u << 8) | RETRO_DEVICE_JOYPAD);
 std::atomic<bool> g_netplayMode{false};
 std::atomic<bool> g_rollbackReplaying{false};
 std::atomic<int> g_netplayRenderStride{1};
@@ -227,13 +232,15 @@ size_t RETRO_CALLCONV audioSampleBatch(const int16_t* data, size_t frames) {
 void RETRO_CALLCONV inputPoll() {}
 
 int16_t RETRO_CALLCONV inputState(unsigned port, unsigned device, unsigned index, unsigned id) {
-    if (port > 1 || index != 0 || device != RETRO_DEVICE_JOYPAD ||
-        id > RETRO_DEVICE_ID_JOYPAD_R3) {
-        return 0;
-    }
-    const uint32_t bits = port == 0
-        ? g_inputMask.load(std::memory_order_relaxed)
-        : g_player2InputMask.load(std::memory_order_relaxed);
+    if (port > 4 || index != 0 || device != RETRO_DEVICE_JOYPAD ||
+        id > RETRO_DEVICE_ID_JOYPAD_R3) return 0;
+    // In Snes9x port 1 multitap maps virtual libretro ports 1..4 to P2..P5.
+    // With normal joypad the port 1 callback remains P2, unchanged.
+    const uint32_t bits =
+        port == 0 ? g_inputMask.load(std::memory_order_relaxed) :
+        port == 1 ? g_player2InputMask.load(std::memory_order_relaxed) :
+        port == 2 ? g_player3InputMask.load(std::memory_order_relaxed) :
+        port == 3 ? g_player4InputMask.load(std::memory_order_relaxed) : 0u;
     return (bits & (1u << id)) ? 1 : 0;
 }
 
@@ -561,7 +568,39 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetInput(JNIEnv*, jobject, jint bit
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSetPlayer2Input(JNIEnv*, jobject, jint bits) {
-    g_player2InputMask.store(static_cast<uint32_t>(bits), std::memory_order_release);
+    g_player2InputMask.store(static_cast<uint32_t>(bits) & 0xffffu, std::memory_order_release);
+}
+
+// Atomic per-pad update. Remote UDP receiver calls this directly on its own
+// thread; no UI message queue and no emulated-frame lock on individual inputs.
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetPlayerInput(
+    JNIEnv*, jobject, jint player, jint bits) {
+    const uint32_t value = static_cast<uint32_t>(bits) & 0xffffu;
+    switch (player) {
+        case 1: g_inputMask.store(value, std::memory_order_release); break;
+        case 2: g_player2InputMask.store(value, std::memory_order_release); break;
+        case 3: g_player3InputMask.store(value, std::memory_order_release); break;
+        case 4: g_player4InputMask.store(value, std::memory_order_release); break;
+        default: break;
+    }
+}
+
+// Snes9x supports up to four pads on its second SNES controller port.
+// Reconfigure only while holding the same mutex as retro_run().
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSetMultitapEnabled(
+    JNIEnv*, jobject, jboolean enabled) {
+    const bool requested = enabled == JNI_TRUE;
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (g_multitapEnabled.load(std::memory_order_relaxed) == requested) return;
+    retro_set_controller_port_device(1, requested
+        ? kSnes9xMultitap : RETRO_DEVICE_JOYPAD);
+    g_multitapEnabled.store(requested, std::memory_order_release);
+    if (!requested) {
+        g_player3InputMask.store(0, std::memory_order_release);
+        g_player4InputMask.store(0, std::memory_order_release);
+    }
 }
 
 // Netplay owns the frame clock while enabled. The offline frame thread must be
@@ -575,6 +614,13 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetNetplayMode(JNIEnv*, jobject, jb
         stopFrameThread();
         g_inputMask.store(0, std::memory_order_release);
         g_player2InputMask.store(0, std::memory_order_release);
+        g_player3InputMask.store(0, std::memory_order_release);
+        g_player4InputMask.store(0, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(g_coreMutex);
+            if (g_multitapEnabled.exchange(false, std::memory_order_acq_rel))
+                retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+        }
         // Cheats are not frame-deterministic across all cores/ROMs. Disable them.
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (g_gameLoaded.load(std::memory_order_acquire)) retro_cheat_reset();
@@ -966,6 +1012,9 @@ Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
     }
     g_inputMask.store(0, std::memory_order_release);
     g_player2InputMask.store(0, std::memory_order_release);
+    g_player3InputMask.store(0, std::memory_order_release);
+    g_player4InputMask.store(0, std::memory_order_release);
+    g_multitapEnabled.store(false, std::memory_order_release);
     g_netplayMode.store(false, std::memory_order_release);
     g_audioWrite.store(0, std::memory_order_release);
     g_audioRead.store(0, std::memory_order_release);
