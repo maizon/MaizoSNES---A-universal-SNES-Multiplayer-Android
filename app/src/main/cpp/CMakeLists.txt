@@ -121,4 +121,5 @@ target_link_libraries(native-lib PRIVATE
     snes9x_core
     ${android_lib}
     ${log_lib}
+    dl
 )

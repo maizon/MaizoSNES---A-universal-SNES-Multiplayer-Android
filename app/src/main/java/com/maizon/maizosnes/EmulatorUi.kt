@@ -931,6 +931,7 @@ private fun LibraryScreen(
 
     BoxWithConstraints(modifier.background(Brush.verticalGradient(
         listOf(Color(0xFF101520), Color(0xFF191D31), Bg)))) {
+        val isWideConsole = maxWidth > maxHeight
         val effectiveColumns = LibraryUiRules.columns(maxWidth.value, columns)
         Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
             Row(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 6.dp),
@@ -1121,7 +1122,7 @@ private fun LibraryScreen(
                         Row(Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                            Box(Modifier.width(if (maxWidth > maxHeight) 112.dp else 86.dp)
+                            Box(Modifier.width(if (isWideConsole) 112.dp else 86.dp)
                                 .height(113.dp).clip(RoundedCornerShape(13.dp))
                                 .background(Brush.linearGradient(listOf(Accent, NeoPink))),
                                 contentAlignment = Alignment.Center) {
@@ -1133,7 +1134,8 @@ private fun LibraryScreen(
                             }
                             Column(Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text("★  EM DESTAQUE  •  SUPER NINTENDO", color = Mint,
+                                Text("★  EM DESTAQUE  •  " + RomSystem.platform(featuredRom).uppercase(),
+                                    color = Mint,
                                     fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
                                 Text(featuredTitle, color = Color.White, fontSize = 17.sp,
                                     lineHeight = 20.sp, fontWeight = FontWeight.Black,
@@ -1170,7 +1172,7 @@ private fun LibraryScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Default.Gamepad, null, tint = Accent,
                             modifier = Modifier.size(48.dp))
-                        Text(if (romNames.isEmpty()) "Importe seu primeiro jogo SNES"
+                        Text(if (romNames.isEmpty()) "Importe seu primeiro jogo SNES ou NES"
                             else "Nenhum jogo encontrado", color = Muted)
                         if (romNames.isEmpty()) Button(onClick = onChooseAddRom) {
                             Text("+ ADICIONAR JOGO")
@@ -1275,7 +1277,7 @@ private fun LibraryScreen(
                                 Color(0xDD0E1423), Color(0xFA0E1423)))))
                         Column(Modifier.align(Alignment.BottomStart).padding(17.dp),
                             verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text("SUPER NINTENDO", color = Mint,
+                            Text(RomSystem.platform(name).uppercase(), color = Mint,
                                 fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Text(info?.title ?: File(name).nameWithoutExtension,
                                 color = Color.White, fontSize = 21.sp,
@@ -1286,7 +1288,7 @@ private fun LibraryScreen(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        NeoBadge("SUPER NINTENDO")
+                        NeoBadge(RomSystem.platform(name).uppercase())
                         NeoBadge("REGIÃO: " + (info?.region ?: "DESCONHECIDA"),
                             highlighted = false)
                     }
@@ -1398,7 +1400,7 @@ private fun RomCard(
                     Text(displayTitle, color = Color.White,
                         fontWeight = FontWeight.Bold, fontSize = 14.sp,
                         maxLines = 2, lineHeight = 18.sp)
-                    Text(if (current) "● EM MEMÓRIA" else "SUPER NINTENDO",
+                    Text(if (current) "● EM MEMÓRIA" else RomSystem.platform(fileName).uppercase(),
                         color = if (current) Mint else Muted, fontSize = 10.sp)
                     Text("A  •  DETALHES", color = Muted, fontSize = 9.sp)
                 }
@@ -1422,7 +1424,7 @@ private fun RomCard(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Gamepad, "SNES", tint = Accent,
                                 modifier = Modifier.size(if (compact) 40.dp else 55.dp))
-                            Text("SUPER NINTENDO", color = Muted, fontSize = 8.sp,
+                            Text(RomSystem.platform(fileName).uppercase(), color = Muted, fontSize = 8.sp,
                                 letterSpacing = 1.1.sp)
                         }
                     }
@@ -1431,7 +1433,7 @@ private fun RomCard(
                         shape = RoundedCornerShape(8.dp),
                         color = Color(0xE51D232A)
                     ) {
-                        Text(if (current) "● ATIVO" else "SNES",
+                        Text(if (current) "● ATIVO" else if (RomSystem.isNes(fileName)) "NES" else "SNES",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             color = if (current) Mint else Color.White,
                             fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -2471,7 +2473,8 @@ private fun GameScreen(
         val portableLandscape = maxWidth > maxHeight && settings.touch.enabled &&
             (settings.aspect == AspectMode.CRT || settings.aspect == AspectMode.NATIVE ||
                 settings.aspect == AspectMode.PIXEL || settings.aspect == AspectMode.CLASSIC)
-        VideoSurface(settings, onSurfaceChanged, onGpuReady)
+        VideoSurface(settings, onSurfaceChanged, onGpuReady,
+            nesSystem = RomSystem.isNes(romName))
         // Decorative handheld side rails: no touch handlers or video surface changes.
         if (portableLandscape) {
             Box(Modifier.align(Alignment.CenterStart).fillMaxHeight()
@@ -2481,6 +2484,7 @@ private fun GameScreen(
         }
         if (settings.touch.enabled) TouchOverlay(
             settings.touch, onInputChanged, editingControls, editIndividual,
+            nesLayout = RomSystem.isNes(romName),
             onLayoutChanged = { onSettingsChanged(settings.copy(touch = it)) }
         )
         if (!toolbarExpanded && !editingControls) {
@@ -2597,7 +2601,8 @@ private fun GameScreen(
 private fun VideoSurface(
     settings: AppSettings,
     onSurfaceChanged: (Surface?) -> Unit,
-    onGpuReady: (Boolean) -> Unit
+    onGpuReady: (Boolean) -> Unit,
+    nesSystem: Boolean = false
 ) {
     val aspect = settings.aspect
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
@@ -2608,8 +2613,9 @@ private fun VideoSurface(
             AspectMode.STRETCH -> maxWidth to maxHeight
             AspectMode.FILL -> maxWidth to (maxWidth / (4f / 3f))
             AspectMode.PIXEL -> {
-                val integerScale = floor(min(widthPx / 256f, heightPx / 224f)).toInt().coerceAtLeast(1)
-                with(density) { (256 * integerScale).toDp() } to with(density) { (224 * integerScale).toDp() }
+                val height = if (nesSystem) 240 else 224
+                val integerScale = floor(min(widthPx / 256f, heightPx / height.toFloat())).toInt().coerceAtLeast(1)
+                with(density) { (256 * integerScale).toDp() } to with(density) { (height * integerScale).toDp() }
             }
             AspectMode.CRT -> containedSize(maxWidth, maxHeight, 4f / 3f)
             AspectMode.NATIVE -> containedSize(maxWidth, maxHeight, 8f / 7f)
@@ -2661,6 +2667,7 @@ private fun TouchOverlay(
     onInputChanged: (Int, Boolean) -> Unit,
     editing: Boolean,
     editIndividual: Boolean,
+    nesLayout: Boolean = false,
     onLayoutChanged: (TouchLayout) -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -2740,7 +2747,17 @@ private fun TouchOverlay(
             .size(faceWidth).then(moveFace)
             .then(if (editing && !editIndividual) Modifier.border(1.dp,
                 Mint.copy(alpha = 0.75f), RoundedCornerShape(18.dp)) else Modifier)) {
-            if (layout.preset.diamond) {
+            if (nesLayout) {
+                Row(Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0, 8).forEach { bit ->
+                        TouchButton(if (bit == 0) "B" else "A", bit,
+                            faceSize * bitScale(bit), bitOpacity(bit),
+                            onInputChanged, enabled = !editing, skin = layout.preset,
+                            positionModifier = bitModifier(bit))
+                    }
+                }
+            } else if (layout.preset.diamond) {
                 // SNES: X north, Y west, A east, B south.
                 listOf(
                     Triple(9, Alignment.TopCenter, layout.preset.faceLegend(9)),
@@ -2777,7 +2794,7 @@ private fun TouchOverlay(
 
         // Shoulder buttons stay at the upper corners, away from game art.
         val shoulderSize = (base * 0.11f * layout.scale).coerceIn(33f, 53f)
-        listOf(10, 11).forEach { bit ->
+        if (!nesLayout) listOf(10, 11).forEach { bit ->
             Box(Modifier.align(if (bit == 10) Alignment.TopStart
                 else Alignment.TopEnd).padding(
                 start = if (bit == 10) 14.dp else 0.dp,

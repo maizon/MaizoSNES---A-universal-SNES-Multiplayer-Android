@@ -75,3 +75,15 @@ No ROMs or copyrighted game assets are bundled.
 - Android SDK packaging copyright 2023 WebRTC SDKs; **MIT** (full text `LICENSES/webrtc-sdk-mit.txt`, also bundled in APK).
 - Upstream source: https://webrtc.googlesource.com/src and https://github.com/webrtc-sdk/android ; binaries use the SDK's official redistributable pre-built AAR.
 - TURN is not shipped; STUN uses public servers. No Google proprietary games or BIOS are bundled. Third-party notices and patents of underlying WebRTC releases remain subject to upstream distribution review before signed release.
+
+## FCEUmm (GPLv2) — Nintendo NES/Famicom
+
+Pinned upstream: https://github.com/libretro/libretro-fceumm
+at ac0d00a7fc01166f84c7bac01d1084ebfd2b865e.
+
+Original GNU GPL version 2 license retained in LICENSES/fceumm-gpl2.txt,
+and copied to APK assets/licenses/fceumm-gpl2.txt.
+
+Distribution of a combined app using non-commercial Snes9x and GPLv2
+FCEUmm may create conflicting licensing obligations. Separate dynamic
+libraries do not automatically cure this. Audit before release.

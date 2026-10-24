@@ -792,8 +792,8 @@ class MainActivity : ComponentActivity() {
                 }
                 val cleaned = safeFileName(name)
                 val extension = cleaned.substringAfterLast('.', "").lowercase()
-                require(extension in setOf("sfc", "smc", "zip")) {
-                    "Formato não suportado. Use .sfc, .smc ou ZIP com uma única ROM."
+                require(extension in RomSystem.acceptedExtensions + "zip") {
+                    "Formato não suportado. Use SNES/NES (.sfc/.smc/.nes/.unf/.unif/.fds) ou ZIP."
                 }
                 val (romName, bytes) = withContext(Dispatchers.IO) {
                     if (extension == "zip") {
@@ -809,7 +809,7 @@ class MainActivity : ComponentActivity() {
                                 require(entryCount <= 128) { "ZIP possui entradas demais." }
                                 val entryName = safeFileName(entry.name)
                                 val isRom = !entry.isDirectory &&
-                                    entryName.substringAfterLast('.', "").lowercase() in setOf("sfc", "smc")
+                                    entryName.substringAfterLast('.', "").lowercase() in RomSystem.acceptedExtensions
                                 if (isRom) require(found == null) {
                                     "ZIP com várias ROMs. Importe uma por vez."
                                 }
@@ -828,7 +828,7 @@ class MainActivity : ComponentActivity() {
                                 zip.closeEntry()
                             }
                         }
-                        found ?: error("ZIP sem ROM SNES .sfc/.smc.")
+                        found ?: error("ZIP sem ROM SNES ou NES compatível.")
                     } else cleaned to readUriBytes(uri, 64 * 1024 * 1024)
                 }
                 require(bytes.isNotEmpty()) { "A ROM está vazia." }
@@ -925,7 +925,7 @@ class MainActivity : ComponentActivity() {
                                 continue
                             }
                             if (!child.isFile) continue
-                            if (child.extension.lowercase() !in setOf("smc", "sfc", "zip") ||
+                            if (child.extension.lowercase() !in RomSystem.acceptedExtensions + "zip" ||
                                 child.length() !in 1..(64L * 1024L * 1024L)) continue
                             try {
                                 val (romName, bytes) = if (child.extension.lowercase() == "zip") {
@@ -939,7 +939,7 @@ class MainActivity : ComponentActivity() {
                                             val name = safeFileName(item.name)
                                             val isRom = !item.isDirectory &&
                                                 name.substringAfterLast('.', "").lowercase() in
-                                                    setOf("sfc", "smc")
+                                                    RomSystem.acceptedExtensions
                                             check(!isRom || chosen == null) { "ZIP com múltiplas ROMs." }
                                             val bytesOut = if (isRom) ByteArrayOutputStream() else null
                                             val chunk = ByteArray(65536)
@@ -1003,7 +1003,7 @@ class MainActivity : ComponentActivity() {
                                 pending.add(child to (depth + 1))
                             } else if (child.isFile &&
                                 child.name.orEmpty().substringAfterLast('.', "").lowercase() in
-                                    setOf("sfc", "smc")) {
+                                    RomSystem.acceptedExtensions) {
                                 matches.add(child.uri)
                             }
                         }
@@ -1011,7 +1011,7 @@ class MainActivity : ComponentActivity() {
                     matches
                 }
                 if (files.isEmpty()) {
-                    statusMessage.value = "Nenhuma ROM .sfc/.smc encontrada nessa pasta."
+                    statusMessage.value = "Nenhuma ROM SNES/NES encontrada nessa pasta."
                     return@launch
                 }
                 var imported = 0
@@ -1135,13 +1135,13 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshLibrary() {
         romFiles.value = romDirectory.listFiles()
-            ?.filter { it.isFile && it.extension.lowercase() in setOf("sfc", "smc") }
+            ?.filter { it.isFile && it.extension.lowercase() in RomSystem.acceptedExtensions }
             ?.sortedBy { it.name.lowercase() }
             ?.map { it.name }
             ?: emptyList()
         romHeaders.clear()
         romFiles.value.forEach { name ->
-            romHeaders[name] = SnesRomHeader.inspect(File(romDirectory, name))
+            romHeaders[name] = RomSystem.details(File(romDirectory, name))
         }
         refreshCovers()
     }
@@ -1155,8 +1155,8 @@ class MainActivity : ComponentActivity() {
         }
         var candidate = safeFileName(requestedName)
         if (!candidate.contains('.')) candidate += "." + old.extension.lowercase()
-        if (candidate.substringAfterLast('.', "").lowercase() !in setOf("sfc", "smc")) {
-            statusMessage.value = "Use um nome terminado em .sfc ou .smc."
+        if (candidate.substringAfterLast('.', "").lowercase() !in RomSystem.acceptedExtensions) {
+            statusMessage.value = "Use uma extensão SNES/NES suportada."
             return
         }
         val target = File(romDirectory, candidate)
@@ -1245,7 +1245,7 @@ class MainActivity : ComponentActivity() {
                     currentRomFile.value = null
                     currentRomName.value = null
                     activeScreen.value = AppScreen.LIBRARY
-                    statusMessage.value = "O núcleo recusou a ROM (" + result + "). Verifique se é uma ROM SNES válida."
+                    statusMessage.value = "O núcleo recusou a ROM (" + result + "). Confira o arquivo e o console."
                     syncPlaybackState()
                     return@launch
                 }
@@ -1271,7 +1271,9 @@ class MainActivity : ComponentActivity() {
                 restoreQuickResumeIfRequested(file)
                 syncPlaybackState()
                 if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
-                searchCheats()
+                if (RomSystem.isNes(file.name)) {
+                    cheatStatus.value = "FCEUmm: cheats NES devem usar códigos compatíveis."
+                } else searchCheats()
             } catch (error: Exception) {
                 pendingQuickResumeName = null
                 statusMessage.value = "Falha ao carregar a ROM: " + (error.message ?: "erro de leitura")
@@ -1810,7 +1812,7 @@ class MainActivity : ComponentActivity() {
         // Invoked by TCP worker, never by the Android UI thread.
         val cleaned = safeFileName(name)
         val extension = cleaned.substringAfterLast('.', "").lowercase()
-        if (extension !in setOf("sfc", "smc") || bytes.isEmpty() ||
+        if (extension !in RomSystem.acceptedExtensions || bytes.isEmpty() ||
             bytes.size > 64 * 1024 * 1024) return false
         var destination = File(romDirectory, cleaned)
         var n = 2

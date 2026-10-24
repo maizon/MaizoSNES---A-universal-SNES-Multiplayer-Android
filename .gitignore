@@ -5,3 +5,5 @@ local.properties
 **/.cxx/
 app/src/main/cpp/third_party/snes9x/
 app/src/main/assets/licenses/
+app/src/main/cpp/third_party/fceumm/
+app/src/main/jniLibs/

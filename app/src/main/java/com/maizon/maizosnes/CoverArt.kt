@@ -18,6 +18,8 @@ import java.security.MessageDigest
 internal object CoverArt {
     private const val BASE =
         "https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/Named_Boxarts/"
+    private const val NES_BASE =
+        "https://thumbnails.libretro.com/Nintendo%20-%20Nintendo%20Entertainment%20System/Named_Boxarts/"
     private const val MAX_IMAGE = 2_500_000
 
     private const val CATALOG_MAX_BYTES = 2_500_000
@@ -30,17 +32,21 @@ internal object CoverArt {
         if (preferred.isFile && preferred.length() in 1L..MAX_IMAGE.toLong()) {
             runCatching { decodeSmall(preferred.readBytes()) }.getOrNull()?.let { return it }
         }
-        val knownName = runCatching { RomDatabase.lookup(context, file)?.title }.getOrNull()
-        val headerTitle = runCatching { SnesRomHeader.inspect(file).title }.getOrNull()
+        val nes = RomSystem.isNes(file.name)
+        val base = if (nes) NES_BASE else BASE
+        val knownName = if (nes) null else runCatching {
+            RomDatabase.lookup(context, file)?.title }.getOrNull()
+        val headerTitle = runCatching { RomSystem.details(file).title }.getOrNull()
         if (!allowNetwork) return null
         val filename = file.nameWithoutExtension
         val aliases = listOfNotNull(knownName, headerTitle, filename,
             filename.substringBefore('(').substringBefore('[').takeIf { it.length > 5 })
             .distinct().filter { it.length in 5..150 }
         val cache = File(context.filesDir, "covers").apply { mkdirs() }
+        val cacheKey = if (nes) "nes_" + filename else filename
 
         // Reuse both the old title-keyed cache and the new filename-keyed cache.
-        val keys = listOf(filename) + aliases
+        val keys = listOf(cacheKey) + if (nes) emptyList() else aliases
         keys.distinct().forEach { alias ->
             val destination = File(cache, hash(alias) + ".png")
             if (destination.isFile && destination.length() in 1L..MAX_IMAGE.toLong()) {
@@ -49,19 +55,19 @@ internal object CoverArt {
             }
         }
 
-        val catalog = readCatalog(cache)
+        val catalog = readCatalog(cache, base, nes)
         val exactName = CoverTitleMatcher.bestCover(aliases, catalog)
         val candidates = listOfNotNull(exactName) +
             CoverTitleMatcher.directCandidates(aliases).map { "$it.png" }
         for (candidate in candidates.distinct().take(6)) {
             val safe = candidate.removeSuffix(".png")
                 .replace(Regex("""[&*/:"<>?\\|]"""), "_")
-            val url = BASE + Uri.encode(safe) + ".png"
-            val data = runCatching { fetchPng(url) }.getOrNull() ?: continue
+            val url = base + Uri.encode(safe) + ".png"
+            val data = runCatching { fetchPng(url, base) }.getOrNull() ?: continue
             val bitmap = decodeSmall(data) ?: continue
             runCatching {
-                val destination = File(cache, hash(filename) + ".png")
-                val part = File(cache, hash(filename) + ".part")
+                val destination = File(cache, hash(cacheKey) + ".png")
+                val part = File(cache, hash(cacheKey) + ".part")
                 part.writeBytes(data)
                 if (!part.renameTo(destination)) {
                     part.delete()
@@ -74,7 +80,8 @@ internal object CoverArt {
 
     private fun customFile(context: Context, rom: File): File =
         File(File(context.filesDir, "covers").apply { mkdirs() },
-            "custom_" + hash(rom.nameWithoutExtension) + ".png")
+            "custom_" + hash((if (RomSystem.isNes(rom.name)) "nes_" else "") +
+                rom.nameWithoutExtension) + ".png")
 
     /**
      * Copy a selected image (PNG or JPEG) to the app's private cache.
@@ -117,14 +124,15 @@ internal object CoverArt {
         .digest(text.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
 
-    private fun readCatalog(cache: File): List<String> {
-        val index = File(cache, "libretro_snes_boxarts.txt")
+    private fun readCatalog(cache: File, base: String, nes: Boolean): List<String> {
+        val index = File(cache, if (nes) "libretro_nes_boxarts.txt"
+            else "libretro_snes_boxarts.txt")
         val now = System.currentTimeMillis()
         if (index.isFile && index.length() in 1L..CATALOG_MAX_BYTES.toLong() &&
             now - index.lastModified() < CATALOG_TTL_MS) {
             return runCatching { index.readLines() }.getOrDefault(emptyList())
         }
-        val connection = (URL(BASE).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(base).openConnection() as HttpURLConnection).apply {
             connectTimeout = 3000
             readTimeout = 5000
             instanceFollowRedirects = false
@@ -160,8 +168,8 @@ internal object CoverArt {
         }
     }
 
-    private fun fetchPng(url: String): ByteArray {
-        require(url.startsWith(BASE)) { "Origem de capa inválida." }
+    private fun fetchPng(url: String, base: String): ByteArray {
+        require(url.startsWith(base)) { "Origem de capa inválida." }
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 5000
             readTimeout = 10000

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <dlfcn.h>
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -88,6 +89,122 @@ std::unordered_map<std::string, std::string> g_coreOptions = {
     {"snes9x_sndchan_6", "enabled"}, {"snes9x_sndchan_7", "enabled"},
     {"snes9x_sndchan_8", "enabled"}, {"snes9x_region", "auto"}
 };
+
+void logMessage(int priority, const char* format, ...);
+
+/*
+ * Core selection is only at ROM load boundaries. Snes9x 1.63 stays statically
+ * linked and its sources untouched. FCEUmm is a separate Libretro DSO which
+ * implements the identical frame/audio/video/input/state callbacks used by
+ * the existing offline and GekkoNet execution paths.
+ */
+struct CoreApi {
+    decltype(&retro_set_environment) set_environment = nullptr;
+    decltype(&retro_set_video_refresh) set_video_refresh = nullptr;
+    decltype(&retro_set_audio_sample) set_audio_sample = nullptr;
+    decltype(&retro_set_audio_sample_batch) set_audio_sample_batch = nullptr;
+    decltype(&retro_set_input_poll) set_input_poll = nullptr;
+    decltype(&retro_set_input_state) set_input_state = nullptr;
+    decltype(&retro_init) init = nullptr;
+    decltype(&retro_set_controller_port_device) set_controller_port_device = nullptr;
+    decltype(&retro_deinit) deinit = nullptr;
+    decltype(&retro_load_game) load_game = nullptr;
+    decltype(&retro_unload_game) unload_game = nullptr;
+    decltype(&retro_run) run = nullptr;
+    decltype(&retro_reset) reset = nullptr;
+    decltype(&retro_serialize) serialize = nullptr;
+    decltype(&retro_unserialize) unserialize = nullptr;
+    decltype(&retro_serialize_size) serialize_size = nullptr;
+    decltype(&retro_get_system_av_info) get_system_av_info = nullptr;
+    decltype(&retro_get_system_info) get_system_info = nullptr;
+    decltype(&retro_cheat_reset) cheat_reset = nullptr;
+    decltype(&retro_cheat_set) cheat_set = nullptr;
+};
+CoreApi g_snesApi {
+    &retro_set_environment,
+    &retro_set_video_refresh,
+    &retro_set_audio_sample,
+    &retro_set_audio_sample_batch,
+    &retro_set_input_poll,
+    &retro_set_input_state,
+    &retro_init,
+    &retro_set_controller_port_device,
+    &retro_deinit,
+    &retro_load_game,
+    &retro_unload_game,
+    &retro_run,
+    &retro_reset,
+    &retro_serialize,
+    &retro_unserialize,
+    &retro_serialize_size,
+    &retro_get_system_av_info,
+    &retro_get_system_info,
+    &retro_cheat_reset,
+    &retro_cheat_set
+};
+CoreApi g_nesApi{};
+CoreApi* g_api = &g_snesApi;
+void* g_nesDso = nullptr;
+bool g_nesReady = false;
+bool g_isNes = false;
+
+bool loadFceummDso() {
+    if (g_nesDso) return true;
+    void* dso = dlopen("libfceumm_libretro.so", RTLD_NOW | RTLD_LOCAL);
+    if (!dso) {
+        logMessage(ANDROID_LOG_ERROR, "FCEUmm dlopen failed: %s", dlerror());
+        return false;
+    }
+    CoreApi api{};
+    api.set_environment = reinterpret_cast<decltype(api.set_environment)>(dlsym(dso, "retro_set_environment"));
+    api.set_video_refresh = reinterpret_cast<decltype(api.set_video_refresh)>(dlsym(dso, "retro_set_video_refresh"));
+    api.set_audio_sample = reinterpret_cast<decltype(api.set_audio_sample)>(dlsym(dso, "retro_set_audio_sample"));
+    api.set_audio_sample_batch = reinterpret_cast<decltype(api.set_audio_sample_batch)>(dlsym(dso, "retro_set_audio_sample_batch"));
+    api.set_input_poll = reinterpret_cast<decltype(api.set_input_poll)>(dlsym(dso, "retro_set_input_poll"));
+    api.set_input_state = reinterpret_cast<decltype(api.set_input_state)>(dlsym(dso, "retro_set_input_state"));
+    api.init = reinterpret_cast<decltype(api.init)>(dlsym(dso, "retro_init"));
+    api.set_controller_port_device = reinterpret_cast<decltype(api.set_controller_port_device)>(dlsym(dso, "retro_set_controller_port_device"));
+    api.deinit = reinterpret_cast<decltype(api.deinit)>(dlsym(dso, "retro_deinit"));
+    api.load_game = reinterpret_cast<decltype(api.load_game)>(dlsym(dso, "retro_load_game"));
+    api.unload_game = reinterpret_cast<decltype(api.unload_game)>(dlsym(dso, "retro_unload_game"));
+    api.run = reinterpret_cast<decltype(api.run)>(dlsym(dso, "retro_run"));
+    api.reset = reinterpret_cast<decltype(api.reset)>(dlsym(dso, "retro_reset"));
+    api.serialize = reinterpret_cast<decltype(api.serialize)>(dlsym(dso, "retro_serialize"));
+    api.unserialize = reinterpret_cast<decltype(api.unserialize)>(dlsym(dso, "retro_unserialize"));
+    api.serialize_size = reinterpret_cast<decltype(api.serialize_size)>(dlsym(dso, "retro_serialize_size"));
+    api.get_system_av_info = reinterpret_cast<decltype(api.get_system_av_info)>(dlsym(dso, "retro_get_system_av_info"));
+    api.get_system_info = reinterpret_cast<decltype(api.get_system_info)>(dlsym(dso, "retro_get_system_info"));
+    api.cheat_reset = reinterpret_cast<decltype(api.cheat_reset)>(dlsym(dso, "retro_cheat_reset"));
+    api.cheat_set = reinterpret_cast<decltype(api.cheat_set)>(dlsym(dso, "retro_cheat_set"));
+    if (!(api.set_environment && api.set_video_refresh && api.set_audio_sample && api.set_audio_sample_batch && api.set_input_poll && api.set_input_state && api.init && api.set_controller_port_device && api.deinit && api.load_game && api.unload_game && api.run && api.reset && api.serialize && api.unserialize && api.serialize_size && api.get_system_av_info && api.get_system_info && api.cheat_reset && api.cheat_set)) {
+        logMessage(ANDROID_LOG_ERROR, "FCEUmm is missing required Libretro symbols");
+        dlclose(dso);
+        return false;
+    }
+    g_nesApi = api;
+    g_nesDso = dso;
+    return true;
+}
+#define retro_set_environment g_api->set_environment
+#define retro_set_video_refresh g_api->set_video_refresh
+#define retro_set_audio_sample g_api->set_audio_sample
+#define retro_set_audio_sample_batch g_api->set_audio_sample_batch
+#define retro_set_input_poll g_api->set_input_poll
+#define retro_set_input_state g_api->set_input_state
+#define retro_init g_api->init
+#define retro_set_controller_port_device g_api->set_controller_port_device
+#define retro_deinit g_api->deinit
+#define retro_load_game g_api->load_game
+#define retro_unload_game g_api->unload_game
+#define retro_run g_api->run
+#define retro_reset g_api->reset
+#define retro_serialize g_api->serialize
+#define retro_unserialize g_api->unserialize
+#define retro_serialize_size g_api->serialize_size
+#define retro_get_system_av_info g_api->get_system_av_info
+#define retro_get_system_info g_api->get_system_info
+#define retro_cheat_reset g_api->cheat_reset
+#define retro_cheat_set g_api->cheat_set
 
 void logMessage(int priority, const char* format, ...) {
     va_list args;
@@ -417,6 +534,40 @@ void RETRO_CALLCONV videoRefresh(const void* data, unsigned width, unsigned heig
     g_presentFrames.fetch_add(1, std::memory_order_relaxed);
 }
 
+
+bool hasNesExtension(const std::string& name) {
+    const size_t pos = name.rfind('.');
+    if (pos == std::string::npos) return false;
+    std::string ext = name.substr(pos + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == "nes" || ext == "unf" || ext == "unif" || ext == "fds";
+}
+
+bool chooseCoreForGame(bool nes) {
+    if (!nes) {
+        g_api = &g_snesApi;
+        g_isNes = false;
+        return true;
+    }
+    if (!loadFceummDso()) return false;
+    g_api = &g_nesApi;
+    g_isNes = true;
+    if (!g_nesReady) {
+        retro_set_environment(environmentCallback);
+        retro_set_video_refresh(videoRefresh);
+        retro_set_audio_sample(audioSample);
+        retro_set_audio_sample_batch(audioSampleBatch);
+        retro_set_input_poll(inputPoll);
+        retro_set_input_state(inputState);
+        retro_init();
+        retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
+        retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+        g_nesReady = true;
+    }
+    return true;
+}
+
 void stopFrameThread() {
     g_runFrames.store(false, std::memory_order_release);
     if (g_frameThread.joinable()) g_frameThread.join();
@@ -513,13 +664,22 @@ Java_com_maizon_maizosnes_NativeBridge_nativeLoadRom(
         g_gameLoaded.store(false, std::memory_order_release);
         g_romFingerprint = 0;
         g_romName = name;
+        g_pixelFormat = RETRO_PIXEL_FORMAT_RGB565;
+        if (!chooseCoreForGame(hasNesExtension(name))) {
+            logMessage(ANDROID_LOG_ERROR, "Unable to load optional NES FCEUmm core");
+            return -11;
+        }
         retro_game_info info{};
-        info.path = g_romName.c_str();
-        info.data = bytes.data();
-        info.size = bytes.size();
+        // FCEUmm requires need_fullpath=true; Android imports local files to
+        // filesDir/roms. The supplied displayName is reduced to a basename.
+        static std::string fullRomPath;
+        fullRomPath = g_appDataPath + "/roms/" + g_romName;
+        info.path = g_isNes ? fullRomPath.c_str() : g_romName.c_str();
+        info.data = g_isNes ? nullptr : bytes.data();
+        info.size = g_isNes ? 0 : bytes.size();
         info.meta = nullptr;
         loaded = retro_load_game(&info);
-        if (loaded) retro_cheat_reset(); // Do not carry previous ROM's cheat groups.
+        if (loaded) retro_cheat_reset(); // No cheats leak across games.
         g_romFingerprint = loaded ? romFingerprint : 0;
         g_gameLoaded.store(loaded, std::memory_order_release);
     }
@@ -593,6 +753,10 @@ Java_com_maizon_maizosnes_NativeBridge_nativeSetMultitapEnabled(
     JNIEnv*, jobject, jboolean enabled) {
     const bool requested = enabled == JNI_TRUE;
     std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (g_isNes) { // SNES-specific multitap subclass is invalid on NES.
+        g_multitapEnabled.store(false, std::memory_order_release);
+        return;
+    }
     if (g_multitapEnabled.load(std::memory_order_relaxed) == requested) return;
     retro_set_controller_port_device(1, requested
         ? kSnes9xMultitap : RETRO_DEVICE_JOYPAD);
@@ -999,7 +1163,18 @@ Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
         std::lock_guard<std::mutex> lock(g_coreMutex);
         if (g_gameLoaded.exchange(false, std::memory_order_acq_rel)) retro_unload_game();
         g_romFingerprint = 0;
-        if (g_initialized.exchange(false, std::memory_order_acq_rel)) retro_deinit();
+        if (g_nesReady) {
+            g_nesApi.deinit();
+            g_nesReady = false;
+        }
+        g_isNes = false;
+        g_api = &g_snesApi;
+        if (g_initialized.exchange(false, std::memory_order_acq_rel)) g_snesApi.deinit();
+        if (g_nesDso) {
+            dlclose(g_nesDso);
+            g_nesDso = nullptr;
+            g_nesApi = CoreApi{};
+        }
     }
     {
         std::lock_guard<std::mutex> guard(g_surfaceMutex);

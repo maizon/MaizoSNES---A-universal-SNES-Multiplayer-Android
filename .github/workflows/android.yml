@@ -73,6 +73,8 @@ jobs:
         run: bash scripts/fetch_snes9x.sh
       - name: Fetch pinned GekkoNet SDK and keep license
         run: bash scripts/fetch_gekkonet.sh
+      - name: Build pinned FCEUmm NES core for ARMv7 and ARM64
+        run: bash scripts/fetch_fceumm.sh --build
       - name: Run loopback multiplayer tests and build debug APK
         run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
       - name: Verify native library is packaged
@@ -87,6 +89,9 @@ jobs:
           grep -Eq 'lib/armeabi-v7a/libgekko_bridge[.]so$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/gekkonet-bsd-2[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes9x[.]txt$' /tmp/apk-contents.txt
+          grep -Eq 'lib/arm64-v8a/libfceumm_libretro[.]so$' /tmp/apk-contents.txt
+          grep -Eq 'lib/armeabi-v7a/libfceumm_libretro[.]so$' /tmp/apk-contents.txt
+          grep -Eq 'assets/licenses/fceumm-gpl2[.]txt$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
           if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
