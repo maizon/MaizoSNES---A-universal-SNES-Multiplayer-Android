@@ -1,6 +1,7 @@
 package com.maizon.maizosnes
 
 import android.graphics.Bitmap
+import android.content.res.Configuration
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -101,6 +102,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.composed
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
@@ -180,6 +182,17 @@ private val Muted = Color(0xFFB2C2CE)
 private val NeoPink = Color(0xFFF43098)
 private val NeoOutline = Color(0xFF454C73)
 private val NeoGlass = Color(0xE51D2035)
+
+@Composable
+private fun ConsoleRoomAvatar(ownerName: String) {
+    Box(Modifier.size(40.dp).clip(CircleShape)
+        .background(Brush.linearGradient(listOf(Color(0xFF31518B), Color(0xFF22564A))))
+        .border(1.dp, Mint.copy(alpha = 0.4f), CircleShape),
+        contentAlignment = Alignment.Center) {
+        Text(ConsoleExperienceRules.avatarInitials(ownerName),
+            color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+    }
+}
 
 /** Visible directional-controller focus, without affecting touch/click actions. */
 private fun Modifier.padFocusRing(): Modifier = composed {
@@ -569,6 +582,36 @@ internal fun MaizoEmulatorApp(
                                         else "🎮 EDITAR CONTROLES", fontSize = 10.sp, maxLines = 1)
                                 }
                             }
+                            // Fast presentation controls; never touch frame timing or netcode.
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Button(onClick = { onGameMenuChanged(false) },
+                                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Mint)) {
+                                    Text("▶ CONTINUAR", fontSize = 10.sp, color = Bg,
+                                        fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(onClick = {
+                                    onSettingsChanged(settings.copy(aspect = AspectMode.CRT))
+                                }, contentPadding = PaddingValues(horizontal = 11.dp, vertical = 4.dp)) {
+                                    Text("▣ PORTÁTIL 4:3", fontSize = 10.sp,
+                                        color = if (settings.aspect == AspectMode.CRT) Mint else Muted)
+                                }
+                                OutlinedButton(onClick = {
+                                    onSettingsChanged(settings.copy(aspect = AspectMode.PIXEL))
+                                }, contentPadding = PaddingValues(horizontal = 11.dp, vertical = 4.dp)) {
+                                    Text("▦ PIXEL PERFECT", fontSize = 10.sp,
+                                        color = if (settings.aspect == AspectMode.PIXEL) Mint else Muted)
+                                }
+                                OutlinedButton(onClick = {
+                                    onSettingsChanged(settings.copy(
+                                        touch = settings.touch.copy(enabled = !settings.touch.enabled)))
+                                }, contentPadding = PaddingValues(horizontal = 11.dp, vertical = 4.dp)) {
+                                    Text(if (settings.touch.enabled) "◉ TOUCH LIGADO" else "○ TOUCH OCULTO",
+                                        fontSize = 10.sp)
+                                }
+                            }
                             Spacer(Modifier.height(5.dp))
                             OutlinedButton(
                                 onClick = { remotePanel = !remotePanel },
@@ -621,7 +664,8 @@ internal fun MaizoEmulatorApp(
     // Avoid the status bar overlapping titles, as reported in the device screenshots.
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)
         .windowInsetsPadding(WindowInsets.statusBars)) {
-    val wideLayout = maxWidth >= 720.dp
+    val compactConsole = maxWidth > maxHeight && maxHeight < 480.dp
+    val wideLayout = maxWidth >= 720.dp || (maxWidth > maxHeight && maxWidth >= 560.dp)
     val screenStateHolder = rememberSaveableStateHolder()
     Scaffold(
         containerColor = Bg,
@@ -632,11 +676,11 @@ internal fun MaizoEmulatorApp(
             .windowInsetsPadding(WindowInsets.navigationBars)) {
             if (wideLayout) {
                 Column(
-                    Modifier.width(232.dp).fillMaxHeight()
+                    Modifier.width(if (compactConsole) 176.dp else 232.dp).fillMaxHeight()
                         .background(Brush.verticalGradient(listOf(Panel, Bg)))
                         .border(1.dp, NeoOutline.copy(alpha = 0.30f))
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(if (compactConsole) 10.dp else 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (compactConsole) 6.dp else 12.dp)
                 ) {
                     Box(Modifier.size(47.dp).clip(RoundedCornerShape(15.dp))
                         .background(Brush.linearGradient(listOf(Accent, NeoPink))),
@@ -646,8 +690,9 @@ internal fun MaizoEmulatorApp(
                     }
                     Text("MAIZOSNES", color = Color.White, fontSize = 21.sp,
                         fontWeight = FontWeight.Black, letterSpacing = 1.1.sp)
-                    Text("YOUR SUPER NINTENDO UNIVERSE", color = Muted, fontSize = 10.sp)
-                    Spacer(Modifier.height(13.dp))
+                    if (!compactConsole)
+                        Text("YOUR SUPER NINTENDO UNIVERSE", color = Muted, fontSize = 10.sp)
+                    Spacer(Modifier.height(if (compactConsole) 2.dp else 13.dp))
                     Text("NAVEGAR", color = Mint, fontWeight = FontWeight.Bold,
                         fontSize = 10.sp, letterSpacing = 1.8.sp)
                     listOf(
@@ -663,7 +708,7 @@ internal fun MaizoEmulatorApp(
                             color = if (selected) Accent else Color.Transparent,
                             shape = RoundedCornerShape(14.dp)
                         ) {
-                            Row(Modifier.padding(14.dp),
+                            Row(Modifier.padding(if (compactConsole) 8.dp else 14.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Text(symbol, color = if (selected) Bg else Muted,
                                     fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
@@ -674,7 +719,7 @@ internal fun MaizoEmulatorApp(
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    NeoBadge("SNES  •  Snes9x 1.63", highlighted = false)
+                    if (!compactConsole) NeoBadge("SNES  •  Snes9x 1.63", highlighted = false)
                     Spacer(Modifier.height(5.dp))
                     Text("BY MAICON NASCIMENTO", color = Muted, fontSize = 10.sp,
                         fontWeight = FontWeight.Bold)
@@ -858,9 +903,7 @@ private fun LibraryScreen(
     var sortMode by rememberSaveable { mutableStateOf("Título") }
     var sortExpanded by remember { mutableStateOf(false) }
     var collectionMode by rememberSaveable { mutableStateOf("Todos") }
-    val featuredRom = currentRomName?.takeIf { it in romNames }
-        ?: recentRoms.firstOrNull { it in romNames }
-        ?: romNames.firstOrNull()
+    val featuredRom = ConsoleExperienceRules.featuredGame(currentRomName, recentRoms, romNames)
     val featuredTitle = featuredRom?.let { romHeaders[it]?.title ?: File(it).nameWithoutExtension }
         ?: "Sua coleção começa aqui"
     val homeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -1015,6 +1058,37 @@ private fun LibraryScreen(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent))
             }
+            // One-tap local collection shelves (preserves the existing grid/list modes).
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                listOf("Todos", "Favoritos", "Recentes").forEach { shelf ->
+                    val selected = collectionMode == shelf && viewMode != "COLEÇÃO"
+                    Surface(
+                        color = if (selected) Accent else PanelRaised,
+                        shape = RoundedCornerShape(50.dp),
+                        modifier = Modifier.padFocusRing().clickable {
+                            collectionMode = shelf
+                            if (viewMode == "COLEÇÃO") viewMode = "GRADE"
+                        }
+                    ) {
+                        Text(shelf.uppercase(), color = if (selected) Bg else Muted,
+                            fontWeight = FontWeight.Bold, fontSize = 10.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                    }
+                }
+                Surface(
+                    color = if (viewMode == "COLEÇÃO") Accent else PanelRaised,
+                    shape = RoundedCornerShape(50.dp),
+                    modifier = Modifier.padFocusRing().clickable {
+                        collectionMode = "Todos"
+                        viewMode = "COLEÇÃO"
+                    }
+                ) {
+                    Text("COLEÇÕES", color = if (viewMode == "COLEÇÃO") Bg else Muted,
+                        fontWeight = FontWeight.Bold, fontSize = 10.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                }
+            }
             if (collectionMode != "Todos" || libraryQuery.isNotBlank()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Exibindo: " + collectionMode +
@@ -1034,6 +1108,61 @@ private fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(11.dp),
                 horizontalArrangement = Arrangement.spacedBy(11.dp)
             ) {
+            // A responsive, low-cost hero reusing the already cached cover and ROM header.
+            if (featuredRom != null && libraryQuery.isBlank() && collectionMode == "Todos") {
+                item(key = "console_featured", span = { GridItemSpan(maxLineSpan) }) {
+                    LaunchedEffect(featuredRom) {
+                        if (coverBitmaps[featuredRom] == null) onCoverNeeded(featuredRom)
+                    }
+                    Surface(color = Panel, shape = RoundedCornerShape(19.dp),
+                        modifier = Modifier.fillMaxWidth()
+                            .border(1.dp, Accent.copy(alpha = 0.28f),
+                                RoundedCornerShape(19.dp))) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                            Box(Modifier.width(if (maxWidth > maxHeight) 112.dp else 86.dp)
+                                .height(113.dp).clip(RoundedCornerShape(13.dp))
+                                .background(Brush.linearGradient(listOf(Accent, NeoPink))),
+                                contentAlignment = Alignment.Center) {
+                                val cover = coverBitmaps[featuredRom]
+                                if (cover != null) Image(cover.asImageBitmap(),
+                                    "Capa em destaque", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                                else Icon(Icons.Default.Gamepad, "Jogo em destaque",
+                                    tint = Color.White, modifier = Modifier.size(45.dp))
+                            }
+                            Column(Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("★  EM DESTAQUE  •  SUPER NINTENDO", color = Mint,
+                                    fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                                Text(featuredTitle, color = Color.White, fontSize = 17.sp,
+                                    lineHeight = 20.sp, fontWeight = FontWeight.Black,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text((romHeaders[featuredRom]?.region ?: "SNES") +
+                                    (if (featuredRom in favoriteRoms) "  •  ★ Favorito"
+                                     else "  •  Seu próximo jogo"),
+                                    color = Muted, fontSize = 10.sp, maxLines = 1)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Button(onClick = {
+                                        if (currentRomName == featuredRom && hasLoadedRom)
+                                            onContinueGame()
+                                        else onOpenRom(featuredRom)
+                                    }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Mint)) {
+                                        Text("▶ JOGAR", fontSize = 10.sp,
+                                            color = Bg, fontWeight = FontWeight.Bold)
+                                    }
+                                    TextButton(onClick = { selectedRom = featuredRom },
+                                        contentPadding = PaddingValues(horizontal = 4.dp)) {
+                                        Text("DETALHES ›", fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (visibleRoms.isEmpty()) {
                 item(key = "empty_library", span = { GridItemSpan(maxLineSpan) }) {
                     Column(Modifier.fillMaxWidth().padding(vertical = 20.dp),
@@ -1391,6 +1520,8 @@ private fun MultiplayerScreen(
     onDebug: () -> Unit
 ) {
     var advancedNetwork by remember { mutableStateOf(false) }
+    val compactLobby = LocalConfiguration.current.orientation ==
+        Configuration.ORIENTATION_LANDSCAPE
     var roomSearch by rememberSaveable { mutableStateOf("") }
     var compatibleOnly by rememberSaveable { mutableStateOf(false) }
     var fastestFirst by rememberSaveable { mutableStateOf(true) }
@@ -1476,11 +1607,21 @@ private fun MultiplayerScreen(
             } }
         )
     }
-    Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        NeoPageHeader("SOCIAL  /  MULTIPLAYER",
-            "Multiplayer",
-            "Seus amigos e jogos, na mesma tela.")
+    Column(modifier.verticalScroll(rememberScrollState())
+        .padding(if (compactLobby) 11.dp else 18.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compactLobby) 8.dp else 12.dp)) {
+        if (compactLobby) Row(Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("◉  CONSOLE MULTIPLAYER", color = Mint,
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("Jogue com seus amigos", color = Color.White,
+                    fontSize = 21.sp, fontWeight = FontWeight.Black)
+            }
+            NeoBadge(if (active) "● SESSÃO ATIVA" else "LAN + ONLINE", active)
+        }
+        else NeoPageHeader("SOCIAL  /  MULTIPLAYER",
+            "Multiplayer", "Seus amigos e jogos, na mesma tela.")
         Surface(color = Panel, shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth().clickable { onEditPlayerProfile() }) {
             Row(Modifier.fillMaxWidth().padding(12.dp),
@@ -1505,6 +1646,8 @@ private fun MultiplayerScreen(
                         Row(Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
+                            ConsoleRoomAvatar(room.ownerName)
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Medium,
                                     fontSize = 12.sp, maxLines = 1)
@@ -1580,11 +1723,27 @@ private fun MultiplayerScreen(
                     fontWeight = FontWeight.Bold)
                 Text("Toque em uma opção. Não altera sua biblioteca nem os saves.",
                     color = Muted, fontSize = 11.sp)
-                NetworkMode.values().filter { choice ->
+                val displayModes = NetworkMode.values().filter { choice ->
                     advancedNetwork || choice == NetworkMode.AUTO ||
                         choice == NetworkMode.LAN_AUTO ||
                         choice == NetworkMode.LOCAL || choice == connectionMode
-                }.forEachIndexed { index, choice ->
+                }
+                if (compactLobby) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        displayModes.forEach { choice ->
+                            Surface(modifier = Modifier.padFocusRing()
+                                .clickable(enabled = !active) { onConnectionModeChanged(choice) },
+                                shape = RoundedCornerShape(13.dp),
+                                color = if (choice == connectionMode)
+                                    Accent.copy(alpha = 0.32f) else PanelRaised) {
+                                Text((if (choice == connectionMode) "✓ " else "") +
+                                    choice.label, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp))
+                            }
+                        }
+                    }
+                } else displayModes.forEachIndexed { index, choice ->
                     Card(
                         modifier = Modifier.fillMaxWidth()
                             .then(if (index == 0) Modifier.focusRequester(firstModeFocus) else Modifier)
@@ -1757,6 +1916,8 @@ private fun MultiplayerScreen(
                         ) {
                             Row(Modifier.fillMaxWidth().padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
+                                ConsoleRoomAvatar(room.ownerName)
+                                Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(room.game, fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold)
@@ -1856,6 +2017,8 @@ private fun MultiplayerScreen(
                     ) {
                         Row(Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically) {
+                            ConsoleRoomAvatar(room.ownerName)
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text("👤 " + room.ownerName.ifBlank { "Anfitrião não informado" } +
@@ -1939,6 +2102,8 @@ private fun MultiplayerScreen(
                     ) {
                         Row(Modifier.fillMaxWidth().padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically) {
+                            ConsoleRoomAvatar(room.ownerName)
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(room.game, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text("👤 " + room.ownerName.ifBlank { "Anfitrião não informado" } +
@@ -2302,8 +2467,18 @@ private fun GameScreen(
 ) {
     var toolbarExpanded by remember(romName) { mutableStateOf(false) }
     var editIndividual by remember(romName) { mutableStateOf(false) }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val portableLandscape = maxWidth > maxHeight && settings.touch.enabled &&
+            (settings.aspect == AspectMode.CRT || settings.aspect == AspectMode.NATIVE ||
+                settings.aspect == AspectMode.PIXEL || settings.aspect == AspectMode.CLASSIC)
         VideoSurface(settings, onSurfaceChanged, onGpuReady)
+        // Decorative handheld side rails: no touch handlers or video surface changes.
+        if (portableLandscape) {
+            Box(Modifier.align(Alignment.CenterStart).fillMaxHeight()
+                .fillMaxWidth(0.095f).background(Color(0xB2161C2D)))
+            Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                .fillMaxWidth(0.095f).background(Color(0xB2161C2D)))
+        }
         if (settings.touch.enabled) TouchOverlay(
             settings.touch, onInputChanged, editingControls, editIndividual,
             onLayoutChanged = { onSettingsChanged(settings.copy(touch = it)) }
