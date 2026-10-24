@@ -37,7 +37,8 @@ internal object CoverArt {
         val knownName = if (nes) null else runCatching {
             RomDatabase.lookup(context, file)?.title }.getOrNull()
         val headerTitle = runCatching { RomSystem.details(file).title }.getOrNull()
-        if (!allowNetwork) return null
+        // Existing covers are always visible offline, regardless of the
+        // optional remote search permission.
         val filename = file.nameWithoutExtension
         val aliases = listOfNotNull(knownName, headerTitle, filename,
             filename.substringBefore('(').substringBefore('[').takeIf { it.length > 5 })
@@ -46,7 +47,9 @@ internal object CoverArt {
         val cacheKey = if (nes) "nes_" + filename else filename
 
         // Reuse both the old title-keyed cache and the new filename-keyed cache.
-        val keys = listOf(cacheKey) + if (nes) emptyList() else aliases
+        val keys = if (nes) {
+            listOf(cacheKey) + aliases.map { "nes_" + it }
+        } else listOf(cacheKey) + aliases
         keys.distinct().forEach { alias ->
             val destination = File(cache, hash(alias) + ".png")
             if (destination.isFile && destination.length() in 1L..MAX_IMAGE.toLong()) {
@@ -55,6 +58,7 @@ internal object CoverArt {
             }
         }
 
+        if (!allowNetwork) return null
         val catalog = readCatalog(cache, base, nes)
         val exactName = CoverTitleMatcher.bestCover(aliases, catalog)
         val candidates = listOfNotNull(exactName) +
@@ -76,6 +80,15 @@ internal object CoverArt {
             return bitmap
         }
         return null
+    }
+
+    /** Fast local existence probe; never opens a socket or decodes pixels. */
+    fun hasCached(context: Context, rom: File): Boolean {
+        if (customFile(context, rom).isFile) return true
+        val prefix = if (RomSystem.isNes(rom.name)) "nes_" else ""
+        val key = prefix + rom.nameWithoutExtension
+        val cached = File(context.filesDir, "covers")
+        return File(cached, hash(key) + ".png").isFile
     }
 
     private fun customFile(context: Context, rom: File): File =

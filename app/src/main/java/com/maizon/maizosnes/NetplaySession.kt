@@ -351,6 +351,27 @@ internal class NetplaySession(
         }, "Maizo-Netplay").apply { isDaemon = true; start() }
     }
 
+    /**
+     * Used by Activity teardown only. The native bridge MUST NOT unload a core
+     * while a netplay worker is still inside a Libretro/Gekko callback.
+     * This never changes transport negotiation, frame timing or rollback.
+     */
+    fun awaitStopped(timeoutMillis: Long): Boolean {
+        val self = Thread.currentThread()
+        val until = System.nanoTime() + timeoutMillis.coerceAtLeast(1L) * 1_000_000L
+        val current = thread
+        if (current != null && current !== self) {
+            try { current.join(timeoutMillis.coerceAtLeast(1L)) }
+            catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        val left = ((until - System.nanoTime()) / 1_000_000L).coerceAtLeast(1L)
+        val rollbackDone = rollback?.awaitStopped(left) ?: true
+        return (current == null || current === self || !current.isAlive) && rollbackDone
+    }
+
     fun stop() {
         closed.set(true)
         rollback?.stop()
@@ -458,6 +479,12 @@ internal class NetplaySession(
                                   roomId: String, host: Boolean): Boolean {
         val snapshot = saveState() ?: return false
         if (snapshot.size !in 32..RollbackFeasibility.MAX_STATE_BYTES) return false
+        if (rom?.let { RomSystem.isNes(it.name) } == true &&
+            !NesRollbackSafety.isSafe(snapshot, saveState, loadState)) {
+            onStatus("FCEUmm: estado de rollback instável ou grande demais; " +
+                "alternando para Lockstep sem modificar o SNES.")
+            return false
+        }
         val start = System.nanoTime()
         val saved = saveState() ?: return false
         val savedAt = System.nanoTime()
@@ -611,8 +638,12 @@ internal class NetplaySession(
         val synchronizedState = saveState()
         val stateLoaded = synchronizedState != null && loadState(synchronizedState) == 0
         val saveLoadMs = (System.nanoTime() - benchmark) / 1e6
+        // FCEUmm can be fine offline but not support constant-size, rapid
+        // rollback snapshots for every title. Gate only NES, never Snes9x.
+        val nesSafe = rom?.let { RomSystem.isNes(it.name) } != true ||
+            NesRollbackSafety.isSafe(synchronizedState, saveState, loadState)
         val address = connection.inetAddress as? Inet4Address
-        val readyForUdp = stateLoaded && synchronizedState != null &&
+        val readyForUdp = stateLoaded && nesSafe && synchronizedState != null &&
             synchronizedState.size in 32..RollbackFeasibility.MAX_STATE_BYTES &&
             saveLoadMs <= 24.0 && address != null && !closed.get()
         // Both sides must agree to skip UDP before entering the unchanged TCP

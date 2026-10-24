@@ -13,6 +13,9 @@ import kotlin.math.max
 internal class AudioOutput(private val requestedSampleRate: Int, private val targetBufferMs: Int = 40) {
     @Volatile
     private var running = false
+    // An old worker must never resume against an already released AudioTrack
+    // if Android rapidly stops/starts audio during game exit or app switching.
+    @Volatile private var playbackGeneration = 0L
     private var track: AudioTrack? = null
     private var worker: Thread? = null
     @Volatile private var enabled = true
@@ -75,6 +78,7 @@ internal class AudioOutput(private val requestedSampleRate: Int, private val tar
 
         track = output
         applyVolume()
+        val generation = ++playbackGeneration
         running = true
         runCatching { output.play() }.onFailure {
             running = false
@@ -85,11 +89,11 @@ internal class AudioOutput(private val requestedSampleRate: Int, private val tar
 
         worker = Thread({
             val buffer = ShortArray(2048)
-            while (running) {
+            while (running && playbackGeneration == generation) {
                 val count = NativeBridge.nativeReadAudio(buffer)
                 if (count > 0) {
                     var offset = 0
-                    while (running && offset < count) {
+                    while (running && playbackGeneration == generation && offset < count) {
                         val written = output.write(buffer, offset, count - offset, AudioTrack.WRITE_BLOCKING)
                         if (written <= 0) break
                         offset += written
@@ -110,16 +114,29 @@ internal class AudioOutput(private val requestedSampleRate: Int, private val tar
 
     fun stop() {
         running = false
+        playbackGeneration++
         val output = track
-        // Stopping the AudioTrack first helps unblock a worker inside WRITE_BLOCKING.
-        if (output != null) runCatching { output.stop() }
-        worker?.interrupt()
-        runCatching { worker?.join(1_000) }
-        worker = null
-        if (output != null) {
-            runCatching { output.flush() }
-            output.release()
-        }
         track = null
+        // Stopping AudioTrack unblocks WRITE_BLOCKING. Do not release a track
+        // until its writer terminates; otherwise native AudioTrack backends can
+        // crash when the user quickly exits and enters gameplay.
+        runCatching { output?.stop() }
+        val previous = worker
+        worker = null
+        previous?.interrupt()
+        if (previous != null && previous !== Thread.currentThread())
+            runCatching { previous.join(1_000) }
+        val cleanup = {
+            if (output != null) {
+                runCatching { output.flush() }
+                runCatching { output.release() }
+            }
+        }
+        if (previous != null && previous.isAlive) {
+            Thread({
+                runCatching { previous.join() }
+                cleanup()
+            }, "Maizo-Audio-Cleanup").apply { isDaemon = true; start() }
+        } else cleanup()
     }
 }

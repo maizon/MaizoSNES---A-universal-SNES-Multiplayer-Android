@@ -39,6 +39,18 @@ internal class GekkoRollbackSession(
     @Volatile private var announcement: LanDiscovery.Announcement? = null
     fun host(port: Int) = launch(null, port)
     fun join(host: String, port: Int) = launch(host, port)
+    /** Wait for the rollback worker before allowing JNI core unload. */
+    fun awaitStopped(timeoutMillis: Long): Boolean {
+        val worker = thread ?: return true
+        if (worker === Thread.currentThread()) return false
+        try { worker.join(timeoutMillis.coerceAtLeast(1L)) }
+        catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+        return !worker.isAlive
+    }
+
     fun stop() {
         stopped.set(true)
         runCatching { socket?.close() }

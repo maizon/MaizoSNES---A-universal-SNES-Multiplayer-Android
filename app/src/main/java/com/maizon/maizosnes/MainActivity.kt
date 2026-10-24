@@ -76,6 +76,12 @@ class MainActivity : ComponentActivity() {
     private val missingCovers = ConcurrentHashMap.newKeySet<String>()
     private val coverFetchSlots = java.util.concurrent.Semaphore(2)
     private var coverJob: Job? = null
+    private var coverDownloadJob: Job? = null
+    private val pendingCoverOffer =
+        androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
+    private var previouslyInterrupted: String? = null
+    @Volatile private var destroyingActivity = false
+    private var exitingNetplayToLibrary = false
     private var perfJob: Job? = null
     private val performanceText = androidx.compose.runtime.mutableStateOf("Aguardando métricas…")
     private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.AUTO)
@@ -230,6 +236,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        previouslyInterrupted = CrashJournal.recover(this)
         window.statusBarColor = android.graphics.Color.rgb(9, 13, 24)
         window.navigationBarColor = android.graphics.Color.rgb(9, 13, 24)
         romDirectory.mkdirs()
@@ -266,6 +273,10 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Falha na inicialização do núcleo: " + initResult
         }
         appSettings.value = readSettings("profile_global_")
+        previouslyInterrupted?.let {
+            statusMessage.value = "Sessão anterior interrompida durante $it. " +
+                "Caso o jogo tenha fechado sozinho, compartilhe o diagnóstico."
+        }
         val restoredMode = prefs.getString("network_mode", NetworkMode.AUTO.name)
         connectionMode.value = runCatching {
             NetworkMode.valueOf(restoredMode ?: NetworkMode.AUTO.name)
@@ -409,10 +420,7 @@ class MainActivity : ComponentActivity() {
                     onScanRomFolder = { scanRomTreeLauncher.launch(null) },
                     onApplyRomPatch = { patchRomLauncher.launch(arrayOf("*/*")) },
                     onScanAllDevice = ::requestGlobalRomScan,
-                    onReloadCovers = {
-                        missingCovers.clear()
-                        refreshCovers()
-                    },
+                    onReloadCovers = { downloadMissingCovers(romFiles.value) },
                     onCoverNeeded = ::requestVisibleCover,
                     onPickCustomCover = ::chooseUserCover,
                     onResetCustomCover = ::resetUserCover,
@@ -447,6 +455,29 @@ class MainActivity : ComponentActivity() {
                     onGpuReady = ::updateGpuReady,
                     onExportDebug = ::shareNetworkDiagnostics
                 )
+                if (pendingCoverOffer.value.isNotEmpty()) {
+                    val offered = pendingCoverOffer.value
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { pendingCoverOffer.value = emptyList() },
+                        title = { androidx.compose.material3.Text("Baixar capas dos jogos?") },
+                        text = { androidx.compose.material3.Text(
+                            "Adicionados " + offered.size + " jogo(s). Deseja buscar as capas " +
+                                "que faltam? Capas existentes são reutilizadas. " +
+                                "Nada será baixado sem autorização."
+                        ) },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(onClick = {
+                                pendingCoverOffer.value = emptyList()
+                                downloadMissingCovers(offered)
+                            }) { androidx.compose.material3.Text("BAIXAR CAPAS") }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = {
+                                pendingCoverOffer.value = emptyList()
+                            }) { androidx.compose.material3.Text("AGORA NÃO") }
+                        }
+                    )
+                }
                 if (showWelcomeProfile.value || showEditProfile.value) {
                     PlayerProfileDialog(
                         profile = playerProfile.value,
@@ -466,6 +497,57 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Imported ROMs prompt once per batch; never downloads on their own. */
+    private fun offerImportedCovers(names: List<String>) {
+        if (appSettings.value.automaticCovers && names.isNotEmpty())
+            pendingCoverOffer.value = names.distinct()
+    }
+
+    /** Serial explicit downloads; never run while a game/netplay is active. */
+    private fun downloadMissingCovers(names: List<String>) {
+        if (!CoverFetchPolicy.networkAllowed(true,
+                activeScreen.value == AppScreen.GAME, netplaySession != null)) {
+            statusMessage.value = "Busque capas pela biblioteca, fora de uma partida."
+            return
+        }
+        coverDownloadJob?.cancel()
+        coverJob?.cancel()
+        val choices = names.distinct().filter { it in romFiles.value }
+        if (choices.isEmpty()) return
+        coverDownloadJob = lifecycleScope.launch {
+            var cached = 0
+            var downloaded = 0
+            var unavailable = 0
+            for (name in choices) {
+                if (!isActive || !CoverFetchPolicy.networkAllowed(true,
+                        activeScreen.value == AppScreen.GAME, netplaySession != null)) break
+                val file = File(romDirectory, name)
+                if (!file.isFile || name in coverBitmaps) { cached++; continue }
+                var attempts = 0
+                while (name in loadingCovers && attempts++ < 10 && isActive) delay(60)
+                if (!loadingCovers.add(name)) { unavailable++; continue }
+                try {
+                    val existed = withContext(Dispatchers.IO) {
+                        CoverArt.hasCached(this@MainActivity, file)
+                    }
+                    val image = withContext(Dispatchers.IO) {
+                        runCatching { CoverArt.load(this@MainActivity, file,
+                            allowNetwork = true) }.getOrNull()
+                    }
+                    if (image != null) {
+                        missingCovers.remove(name)
+                        coverBitmaps[name] = image
+                        if (coverBitmaps.size > 48)
+                            coverBitmaps.keys.firstOrNull { it != name }?.let(coverBitmaps::remove)
+                        if (existed) cached++ else downloaded++
+                    } else { missingCovers.add(name); unavailable++ }
+                } finally { loadingCovers.remove(name) }
+            }
+            statusMessage.value = "Capas: $downloaded nova(s), $cached em cache, " +
+                "$unavailable não encontradas."
+        }
+    }
+
     private fun requestVisibleCover(name: String) {
         if (name !in romFiles.value || name in coverBitmaps ||
             name in missingCovers || !loadingCovers.add(name)) return
@@ -475,14 +557,14 @@ class MainActivity : ComponentActivity() {
                     coverFetchSlots.acquire()
                     try { runCatching {
                         CoverArt.load(this@MainActivity, File(romDirectory, name),
-                            allowNetwork = appSettings.value.automaticCovers)
+                            allowNetwork = false)
                     }.getOrNull() }
                     finally { coverFetchSlots.release() }
                 }
                 if (bitmap != null && name in romFiles.value) {
                     coverBitmaps[name] = bitmap
                     // Bound decoded bitmaps on ARMv7; images remain disk cached.
-                    if (coverBitmaps.size > 96) {
+                    if (coverBitmaps.size > 48) {
                         coverBitmaps.keys.firstOrNull { it != name }?.let(coverBitmaps::remove)
                     }
                 } else missingCovers.add(name)
@@ -492,10 +574,11 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshCovers() {
         coverJob?.cancel()
-        val names = romFiles.value.take(16) // eagerly warm; remaining tiles load on demand
+        val names = if (activeScreen.value == AppScreen.GAME) emptyList()
+            else romFiles.value.take(12) // disk cache only; never remote
         coverJob = lifecycleScope.launch {
             for (name in names) {
-                if (!isActive || !appSettings.value.automaticCovers) break
+                if (!isActive || activeScreen.value == AppScreen.GAME) break
                 if (coverBitmaps.containsKey(name) ||
                     name in missingCovers || !loadingCovers.add(name)) continue
                 try {
@@ -503,7 +586,7 @@ class MainActivity : ComponentActivity() {
                     if (!file.isFile) continue
                     val bitmap = withContext(Dispatchers.IO) {
                         runCatching { CoverArt.load(this@MainActivity, file,
-                            allowNetwork = appSettings.value.automaticCovers) }.getOrNull()
+                            allowNetwork = false) }.getOrNull()
                     }
                     if (bitmap != null && name in romFiles.value) coverBitmaps[name] = bitmap
                     else missingCovers.add(name)
@@ -842,6 +925,7 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) { target.writeBytes(bytes) }
                 refreshLibrary()
                 statusMessage.value = "Adicionada à biblioteca: " + target.name
+                offerImportedCovers(listOf(target.name))
             } catch (error: Exception) {
                 statusMessage.value = "Não foi possível adicionar a ROM: " + (error.message ?: "erro de leitura")
             }
@@ -904,6 +988,7 @@ class MainActivity : ComponentActivity() {
                     val seen = HashSet<String>()
                     var inspected = 0
                     var imported = 0
+                    val newRomNames = mutableListOf<String>()
                     var ignored = 0
                     while (pending.isNotEmpty() && inspected < 30000 && imported < 500) {
                         val (folder, depth, storageRoot) = pending.removeFirst()
@@ -968,15 +1053,17 @@ class MainActivity : ComponentActivity() {
                                     check(tmp.renameTo(target)) { "Arquivo não movido." }
                                 } finally { tmp.delete() }
                                 imported++
+                                newRomNames.add(target.name)
                             } catch (_: Exception) { ignored++ }
                         }
                     }
-                    Triple(imported, inspected, ignored)
+                    Pair(Triple(imported, inspected, ignored), newRomNames)
                 }
                 refreshLibrary()
-                statusMessage.value = "Busca concluída: ${result.first} ROM(s) " +
-                    "importada(s) • ${result.second} itens verificados • " +
-                    "${result.third} ignorados. Pastas privadas do Android não são acessíveis."
+                statusMessage.value = "Busca concluída: ${result.first.first} ROM(s) " +
+                    "importada(s) • ${result.first.second} itens verificados • " +
+                    "${result.first.third} ignorados. Pastas privadas do Android não são acessíveis."
+                offerImportedCovers(result.second)
             } catch (error: Exception) {
                 statusMessage.value = "Falha ao pesquisar dispositivo: " +
                     (error.message ?: "armazenamento inacessível")
@@ -1015,6 +1102,7 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
                 var imported = 0
+                val newRomNames = mutableListOf<String>()
                 var skipped = 0
                 for (item in files) {
                     val name = withContext(Dispatchers.IO) {
@@ -1041,11 +1129,13 @@ class MainActivity : ComponentActivity() {
                             } finally { tmp.delete() }
                         }
                         imported++
+                        newRomNames.add(safe)
                     } catch (_: Exception) { skipped++ }
                 }
                 refreshLibrary()
                 statusMessage.value = "Busca concluída: $imported ROM(s) adicionada(s), " +
                     "$skipped ignorada(s)."
+                offerImportedCovers(newRomNames)
             } catch (error: Exception) {
                 statusMessage.value = "Busca não concluída: " +
                     (error.message ?: "sem permissão de leitura")
@@ -1182,6 +1272,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openRom(name: String) {
+        coverDownloadJob?.cancel() // never compete for bandwidth during gameplay
         if (remoteHost != null) stopRemoteHost()
         if (classicLanAnnouncement != null) stopClassicRoom()
         if (netplaySession != null) {
@@ -1250,6 +1341,8 @@ class MainActivity : ComponentActivity() {
                     return@launch
                 }
                 hasLoadedRom = true
+                CrashJournal.mark(this@MainActivity, if (RomSystem.isNes(file.name))
+                    "NES/FCEUmm offline" else "SNES/Snes9x offline")
                 cheatEntries.value = emptyList()
                 activeCheatIds.value = emptySet()
                 cheatRomKey = null
@@ -1892,6 +1985,10 @@ class MainActivity : ComponentActivity() {
         stopClassicRoom()
         if (gameMenuOpen.value) setGameMenuOpen(false)
         saveQuickResumeOnExit()
+        if (netplaySession != null) {
+            exitingNetplayToLibrary = true
+            CrashJournal.mark(this, "encerrando multiplayer")
+        } else CrashJournal.clean(this)
         netplaySession?.stop()
         userPaused = true
         paused.value = true
@@ -2047,7 +2144,9 @@ class MainActivity : ComponentActivity() {
             NativeBridge.nativeSetOutputScale(next.outputScale)
             NativeBridge.nativeSetGpuEnabled(next.renderBackend == RenderBackend.GLES)
         }
-        if (coversChanged) refreshCovers()
+        // Toggle only controls the import confirmation dialog. It never
+        // silently launches an online search or even a batch cache refresh.
+        if (coversChanged) missingCovers.clear()
     }
 
     private fun changeCoreOption(key: String, value: String) {
@@ -2517,6 +2616,9 @@ class MainActivity : ComponentActivity() {
             lanStatus.value = "Informe endereço e porta válidos (1024–65535)."
             return
         }
+        coverDownloadJob?.cancel()
+        CrashJournal.mark(this, if (RomSystem.isNes(currentRomFile.value?.name.orEmpty()))
+            "NES/FCEUmm preparando multiplayer" else "SNES preparando multiplayer")
         userPaused = true
         syncPlaybackState()
         createMultiplayerBackup("before")
@@ -2663,6 +2765,9 @@ class MainActivity : ComponentActivity() {
                                 message.removePrefix("ICE:").trim()
                                 else networkDebug.value.iceState)
                         if (message.startsWith("Conectado como")) {
+                            CrashJournal.mark(this@MainActivity,
+                                if (RomSystem.isNes(currentRomFile.value?.name.orEmpty()))
+                                    "NES/FCEUmm multiplayer ativo" else "SNES multiplayer ativo")
                             userPaused = false
                             localPlayer2Enabled.value = false
                             activeScreen.value = AppScreen.GAME
@@ -2673,8 +2778,8 @@ class MainActivity : ComponentActivity() {
                 }
             },
             onFinish = { message ->
-                runOnUiThread {
-                    if (netplaySession === session) {
+                if (!destroyingActivity) runOnUiThread {
+                    if (!destroyingActivity && netplaySession === session) {
                         netplaySession = null
                         stopMultiplayerKeepAlive()
                         runCatching { NativeBridge.nativeSetPaused(true) }
@@ -2694,14 +2799,19 @@ class MainActivity : ComponentActivity() {
                         statusMessage.value = message
                         userPaused = true
                         paused.value = true
-                        activeScreen.value = AppScreen.MULTIPLAYER
+                        activeScreen.value = if (exitingNetplayToLibrary) {
+                            exitingNetplayToLibrary = false
+                            CrashJournal.clean(this@MainActivity)
+                            AppScreen.LIBRARY
+                        } else AppScreen.MULTIPLAYER
                         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         @Suppress("DEPRECATION")
                         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
                         publishInputs()
                         syncPlaybackState()
                         applyActiveCheats()
-                        if (currentRomFile.value != null && cheatEntries.value.isEmpty()) {
+                        if (currentRomFile.value != null && cheatEntries.value.isEmpty() &&
+                            !RomSystem.isNes(currentRomFile.value?.name.orEmpty())) {
                             searchCheats()
                         }
                     }
@@ -2731,6 +2841,15 @@ class MainActivity : ComponentActivity() {
         val debug = networkDebug.value
         val details = buildString {
             appendLine("MaizoSNES • diagnóstico de rede")
+            appendLine("Núcleo: " +
+                (if (RomSystem.isNes(currentRomFile.value?.name.orEmpty()))
+                    "FCEUmm NES" else "Snes9x SNES"))
+            appendLine("Última sessão interrompida: " +
+                (CrashJournal.lastInterrupted(this@MainActivity) ?: "nenhuma registrada"))
+            appendLine("Memória Java livre aproximada (MiB): " +
+                ((Runtime.getRuntime().maxMemory() -
+                    (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()))
+                    / (1024 * 1024)))
             appendLine("Data: " + java.util.Date())
             appendLine("Motor: " + debug.mode)
             appendLine("Transporte: " + debug.transport)
@@ -2838,6 +2957,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        destroyingActivity = true
         remoteGameListener?.close()
         remoteGameListener = null
         classicLanAnnouncement?.close()
@@ -2849,8 +2969,13 @@ class MainActivity : ComponentActivity() {
         remoteHost?.close()
         remoteHost = null
         coverJob?.cancel()
+        coverDownloadJob?.cancel()
         perfJob?.cancel()
-        netplaySession?.stop()
+        val activeNetplay = netplaySession
+        activeNetplay?.stop()
+        // Never deinitialize a Libretro DSO while the Gekko worker is inside
+        // a native callback. A bounded join prevents a shutdown use-after-free.
+        val workersStopped = activeNetplay?.awaitStopped(1800L) ?: true
         stopMultiplayerKeepAlive()
         runCatching { hostWifiLock?.release() }
         hostWifiLock = null
@@ -2858,7 +2983,13 @@ class MainActivity : ComponentActivity() {
         surfaceAttached = false
         audioOutput?.stop()
         audioOutput = null
-        runCatching { NativeBridge.nativeShutdown() }
+        if (workersStopped) {
+            runCatching { NativeBridge.nativeShutdown() }
+            CrashJournal.clean(this)
+        } else {
+            android.util.Log.w("MaizoSNES",
+                "Core teardown skipped: Gekko/network worker still active")
+        }
         super.onDestroy()
     }
 }

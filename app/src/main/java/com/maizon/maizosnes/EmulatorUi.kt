@@ -973,7 +973,7 @@ private fun LibraryScreen(
                         DropdownMenuItem(text = { Text("Procurar ROMs no aparelho") },
                             leadingIcon = { Icon(Icons.Default.Search, null) },
                             onClick = { addMenuExpanded = false; onScanAllDevice() })
-                        DropdownMenuItem(text = { Text("Buscar capas por título") },
+                        DropdownMenuItem(text = { Text("Baixar capas ausentes (manual)") },
                             leadingIcon = { Icon(Icons.Default.Image, null) },
                             onClick = { addMenuExpanded = false; onReloadCovers() })
                         if (hasLoadedRom) {
@@ -3489,8 +3489,9 @@ private fun EmulatorSettings(
                         settings.performanceHud) {
                         onSettingsChanged(settings.copy(performanceHud = it))
                     }
-                    ToggleSettingRow("Capas automáticas",
-                        "Baixa miniaturas opcionais via libretro para o cache do aplicativo.",
+                    ToggleSettingRow("Perguntar sobre capas após importar",
+                        "Ao adicionar jogos, oferece baixar capas somente com sua autorização. " +
+                            "Capas já armazenadas permanecem disponíveis offline.",
                         settings.automaticCovers) {
                         onSettingsChanged(settings.copy(automaticCovers = it))
                     }
