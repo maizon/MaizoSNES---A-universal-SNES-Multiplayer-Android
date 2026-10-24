@@ -45,16 +45,21 @@ internal object CoverArt {
             .distinct().filter { it.length in 5..150 }
         val cache = File(context.filesDir, "covers").apply { mkdirs() }
         val cacheKey = if (nes) "nes_" + filename else filename
+        // One physical image for multiple region/revision-tagged ROM names.
+        // This key is never used for multiplayer/game identity.
+        val sharedKey = BoxArtIdentity.sharedKey(file.name)
 
         // Reuse both the old title-keyed cache and the new filename-keyed cache.
-        val keys = if (nes) {
-            listOf(cacheKey) + aliases.map { "nes_" + it }
-        } else listOf(cacheKey) + aliases
-        keys.distinct().forEach { alias ->
+        val keys = (listOfNotNull(sharedKey, cacheKey) + if (nes) {
+            aliases.map { "nes_" + it }
+        } else aliases).distinct()
+        keys.forEach { alias ->
             val destination = File(cache, hash(alias) + ".png")
             if (destination.isFile && destination.length() in 1L..MAX_IMAGE.toLong()) {
                 val image = runCatching { decodeSmall(destination.readBytes()) }.getOrNull()
                 if (image != null) return image
+                // Corrupt/incomplete thumbnails should not poison the cache.
+                runCatching { destination.delete() }
             }
         }
 
@@ -70,8 +75,9 @@ internal object CoverArt {
             val data = runCatching { fetchPng(url, base) }.getOrNull() ?: continue
             val bitmap = decodeSmall(data) ?: continue
             runCatching {
-                val destination = File(cache, hash(cacheKey) + ".png")
-                val part = File(cache, hash(cacheKey) + ".part")
+                val imageKey = sharedKey ?: cacheKey
+                val destination = File(cache, hash(imageKey) + ".png")
+                val part = File(cache, hash(imageKey) + ".part")
                 part.writeBytes(data)
                 if (!part.renameTo(destination)) {
                     part.delete()
@@ -86,9 +92,12 @@ internal object CoverArt {
     fun hasCached(context: Context, rom: File): Boolean {
         if (customFile(context, rom).isFile) return true
         val prefix = if (RomSystem.isNes(rom.name)) "nes_" else ""
-        val key = prefix + rom.nameWithoutExtension
         val cached = File(context.filesDir, "covers")
-        return File(cached, hash(key) + ".png").isFile
+        val keys = listOfNotNull(
+            BoxArtIdentity.sharedKey(rom.name), prefix + rom.nameWithoutExtension)
+        return keys.any { key ->
+            File(cached, hash(key) + ".png").length() in 1L..MAX_IMAGE.toLong()
+        }
     }
 
     private fun customFile(context: Context, rom: File): File =

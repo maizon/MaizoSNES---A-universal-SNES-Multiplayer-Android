@@ -335,6 +335,8 @@ internal fun MaizoEmulatorApp(
     settings: AppSettings,
     coreOptions: Map<String, String>,
     performanceText: String,
+    nesDiagnosticMessage: String?,
+    onRunNesDiagnostic: () -> Unit,
     networkDebug: NetworkDebugState,
     playerProfile: PlayerProfile,
     playerAvatar: Bitmap?,
@@ -419,6 +421,8 @@ internal fun MaizoEmulatorApp(
     onApplyRomPatch: () -> Unit,
     onScanAllDevice: () -> Unit,
     onReloadCovers: () -> Unit,
+    coverDownloadProgress: String?,
+    onCancelCoverDownload: () -> Unit,
     onCoverNeeded: (String) -> Unit,
     onPickCustomCover: (String) -> Unit,
     onResetCustomCover: (String) -> Unit,
@@ -512,6 +516,8 @@ internal fun MaizoEmulatorApp(
             paused = paused,
             settings = settings,
             performanceText = performanceText,
+            diagnosticMessage = nesDiagnosticMessage,
+            onRunNesDiagnostic = onRunNesDiagnostic,
             networkDebug = networkDebug,
             multiplayerActive = multiplayerActive,
             editingControls = editingControls,
@@ -737,8 +743,8 @@ internal fun MaizoEmulatorApp(
                 statusMessage, currentRomName, hasLoadedRom, onChooseAddRom,
                 onScanRomFolder, onApplyRomPatch, onScanAllDevice,
                 onOpenRom, onContinueGame, onRenameRom, onSetScreen,
-                onReloadCovers, onCoverNeeded,
-                onPickCustomCover, onResetCustomCover,
+                onReloadCovers, coverDownloadProgress, onCancelCoverDownload,
+                onCoverNeeded, onPickCustomCover, onResetCustomCover,
                 hasQuickResume, onQuickResume
                 )
             }
@@ -888,6 +894,8 @@ private fun LibraryScreen(
     onRenameRom: (String, String) -> Unit,
     onSetScreen: (AppScreen) -> Unit,
     onReloadCovers: () -> Unit,
+    coverDownloadProgress: String?,
+    onCancelCoverDownload: () -> Unit,
     onCoverNeeded: (String) -> Unit,
     onPickCustomCover: (String) -> Unit,
     onResetCustomCover: (String) -> Unit,
@@ -903,16 +911,24 @@ private fun LibraryScreen(
     var sortMode by rememberSaveable { mutableStateOf("Título") }
     var sortExpanded by remember { mutableStateOf(false) }
     var collectionMode by rememberSaveable { mutableStateOf("Todos") }
-    val featuredRom = ConsoleExperienceRules.featuredGame(currentRomName, recentRoms, romNames)
+    var platformFilter by rememberSaveable { mutableStateOf("TODOS") }
+    val featuredNames = if (platformFilter == "TODOS") romNames else
+        romNames.filter { RomSystem.isNes(it) == (platformFilter == "NES") }
+    val featuredRom = ConsoleExperienceRules.featuredGame(
+        currentRomName, recentRoms, featuredNames)
     val featuredTitle = featuredRom?.let { romHeaders[it]?.title ?: File(it).nameWithoutExtension }
         ?: "Sua coleção começa aqui"
     val homeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { homeFocus.requestFocus() }
-    val visibleRoms = remember(romNames, romHeaders, libraryQuery, collectionMode, favoriteRoms, recentRoms, sortMode) {
+    val visibleRoms = remember(romNames, romHeaders, libraryQuery,
+        collectionMode, platformFilter, favoriteRoms, recentRoms, sortMode) {
         val filtered = romNames.filter { name ->
             val gameTitle = romHeaders[name]?.title ?: name
             (name.contains(libraryQuery.trim(), ignoreCase = true) ||
                 gameTitle.contains(libraryQuery.trim(), ignoreCase = true)) &&
+                (platformFilter == "TODOS" ||
+                    (platformFilter == "NES" && RomSystem.isNes(name)) ||
+                    (platformFilter == "SNES" && !RomSystem.isNes(name))) &&
                 (collectionMode != "Favoritos" || name in favoriteRoms) &&
                 (collectionMode != "Recentes" || name in recentRoms)
         }
@@ -1077,6 +1093,20 @@ private fun LibraryScreen(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
                     }
                 }
+                listOf("SNES", "NES").forEach { system ->
+                    val selected = platformFilter == system
+                    Surface(
+                        color = if (selected) Mint.copy(alpha = 0.25f) else PanelRaised,
+                        shape = RoundedCornerShape(50.dp),
+                        modifier = Modifier.padFocusRing().clickable {
+                            platformFilter = if (selected) "TODOS" else system
+                        }
+                    ) {
+                        Text(system, color = if (selected) Mint else Muted,
+                            fontWeight = FontWeight.Bold, fontSize = 10.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp))
+                    }
+                }
                 Surface(
                     color = if (viewMode == "COLEÇÃO") Accent else PanelRaised,
                     shape = RoundedCornerShape(50.dp),
@@ -1090,13 +1120,31 @@ private fun LibraryScreen(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
                 }
             }
-            if (collectionMode != "Todos" || libraryQuery.isNotBlank()) {
+            coverDownloadProgress?.let { progress ->
+                Surface(
+                    color = PanelRaised, shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                    Row(Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("⇣  $progress", modifier = Modifier.weight(1f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 10.sp, color = Mint)
+                        TextButton(onClick = onCancelCoverDownload) {
+                            Text("CANCELAR", fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+            if (collectionMode != "Todos" || platformFilter != "TODOS" ||
+                libraryQuery.isNotBlank()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Exibindo: " + collectionMode +
+                        (if (platformFilter != "TODOS") " • $platformFilter" else "") +
                         (if (libraryQuery.isNotBlank()) " • \"$libraryQuery\"" else ""),
                         color = Mint, fontSize = 11.sp, modifier = Modifier.weight(1f))
                     TextButton(onClick = {
                         collectionMode = "Todos"
+                        platformFilter = "TODOS"
                         libraryQuery = ""
                         searchExpanded = false
                     }) { Text("LIMPAR FILTROS", fontSize = 10.sp) }
@@ -2455,6 +2503,8 @@ private fun GameScreen(
     paused: Boolean,
     settings: AppSettings,
     performanceText: String,
+    diagnosticMessage: String?,
+    onRunNesDiagnostic: () -> Unit,
     networkDebug: NetworkDebugState,
     multiplayerActive: Boolean,
     editingControls: Boolean,
@@ -2508,15 +2558,17 @@ private fun GameScreen(
             }
         } else {
             Row(
-                modifier = Modifier.align(Alignment.TopCenter).padding(8.dp)
+                modifier = Modifier.align(Alignment.TopCenter)
+                    .fillMaxWidth().padding(horizontal = 7.dp, vertical = 5.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color(0xE51D232A))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onExit) { Text("‹ Biblioteca", fontSize = 12.sp) }
-                Column(Modifier.weight(1f, fill = false)) {
+                Column(Modifier.width(175.dp)) {
                     Text(File(romName).nameWithoutExtension,
                         fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                     if (paused) Text("PAUSADO", color = Mint, fontSize = 9.sp)
@@ -2533,6 +2585,32 @@ private fun GameScreen(
                 }
                 TextButton(onClick = onPause) {
                     Text(if (paused) "▶" else "Ⅱ", fontSize = 17.sp)
+                }
+                if (!editingControls) {
+                    TextButton(onClick = {
+                        onSettingsChanged(settings.copy(performanceHud = !settings.performanceHud))
+                    }) {
+                        Text(if (settings.performanceHud) "FPS ✓" else "FPS",
+                            fontSize = 10.sp, color = Mint)
+                    }
+                    if (!multiplayerActive) {
+                        TextButton(onClick = {
+                            onSettingsChanged(settings.copy(
+                                filter = VideoFilter.ORIGINAL, outputScale = 1))
+                        }) { Text("⚡ RÁPIDO", fontSize = 10.sp, color = Mint) }
+                    }
+                    TextButton(onClick = {
+                        onSettingsChanged(settings.copy(
+                            touch = settings.touch.copy(enabled = !settings.touch.enabled)))
+                    }) {
+                        Text(if (settings.touch.enabled) "TOUCH ✓" else "TOUCH",
+                            fontSize = 10.sp, color = Mint)
+                    }
+                    if (RomSystem.isNes(romName) && !multiplayerActive) {
+                        TextButton(onClick = onRunNesDiagnostic) {
+                            Text("TESTE NES", fontSize = 10.sp, color = Mint)
+                        }
+                    }
                 }
                 TextButton(onClick = onOpenMenu) {
                     Icon(Icons.Default.Settings, contentDescription = "Ajustes", tint = Color.White)
@@ -2555,6 +2633,15 @@ private fun GameScreen(
                     fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
         }
+        if (RomSystem.isNes(romName) && diagnosticMessage != null && !editingControls) {
+            Surface(modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(horizontal = 25.dp, vertical = 58.dp),
+                color = Color(0xEF1D232A), shape = RoundedCornerShape(12.dp)) {
+                Text(diagnosticMessage, color = Mint, fontSize = 10.sp,
+                    lineHeight = 14.sp, maxLines = 3,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp))
+            }
+        }
         if (multiplayerActive && !editingControls) {
             val latency = networkDebug.rttAvg
             val unstable = (latency != null && latency > 180) ||
@@ -2565,7 +2652,9 @@ private fun GameScreen(
                 else if (fair) Color(0xFFFFCA6E) else Mint
             Surface(modifier = Modifier.align(Alignment.TopCenter).padding(6.dp),
                 color = Color(0xD91B2333), shape = RoundedCornerShape(14.dp)) {
-                Text("●  " + (latency?.let {
+                Text("●  " + (if (networkDebug.mode.contains("Rollback", true))
+                    "GEKKONET " else if (networkDebug.mode.contains("Lockstep", true))
+                    "TCP " else "ONLINE ") + (latency?.let {
                     String.format(java.util.Locale.US, "%.0f ms", it)
                 } ?: "Conectando") + (if (unstable) " • REDE INSTÁVEL" else ""),
                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),

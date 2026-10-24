@@ -17,7 +17,7 @@ internal object CoverTitleMatcher {
     private val badEdition = Regex("""\((?:Beta|Proto|Sample|Demo|Hack|Unl)[^)]*\)""", RegexOption.IGNORE_CASE)
 
     fun normalize(title: String): String {
-        val noExtension = title.replace(Regex("""\.(smc|sfc|fig|zip|png)$""", RegexOption.IGNORE_CASE), "")
+        val noExtension = title.replace(Regex("""\.(smc|sfc|fig|nes|unf|unif|fds|zip|png)$""", RegexOption.IGNORE_CASE), "")
         val noTags = noExtension.replace(tags, " ").replace('_', ' ')
         val latin = Normalizer.normalize(noTags, Normalizer.Form.NFD)
             .replace(Regex("""\p{InCombiningDiacriticalMarks}+"""), "")

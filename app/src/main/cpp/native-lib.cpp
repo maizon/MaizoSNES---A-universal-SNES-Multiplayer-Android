@@ -1155,6 +1155,77 @@ Java_com_maizon_maizosnes_NativeBridge_nativeDiscardAudioQueue(JNIEnv*, jobject)
     g_audioRead.store(head, std::memory_order_release);
 }
 
+/**
+ * Manual, OFFLINE-ONLY NES rollback determinism smoke test.
+ * Serialize initial FCEUmm state, replay identical neutral input frames twice
+ * from the same snapshot, and compare final states byte-for-byte.
+ * Restores the original state even when the comparison fails.
+ *
+ * This never runs for Snes9x, never uses network sockets or Gekko callbacks,
+ * and never runs while a netplay session is active. Its work is capped.
+ * Returns: 0 = stable, -1 = wrong mode, -2 = too large/invalid state,
+ * -3 = serialize failed, -4 = restore/advance failed, -5 = mismatch.
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeNesDeterminismCheck(
+    JNIEnv*, jobject, jint requestedFrames) {
+    if (!g_initialized.load(std::memory_order_acquire) ||
+        !g_gameLoaded.load(std::memory_order_acquire) ||
+        !g_isNes || g_netplayMode.load(std::memory_order_acquire) ||
+        !g_paused.load(std::memory_order_acquire)) return -1;
+
+    stopFrameThread();
+    int result = -1;
+    {
+        std::lock_guard<std::mutex> lock(g_coreMutex);
+        if (g_isNes && g_gameLoaded.load(std::memory_order_acquire) &&
+            !g_netplayMode.load(std::memory_order_acquire) &&
+            g_paused.load(std::memory_order_acquire)) {
+            const size_t bytes = retro_serialize_size();
+            if (bytes == 0 || bytes > 2u * 1024u * 1024u)
+                result = -2;
+            else {
+                std::vector<uint8_t> initial(bytes), first(bytes), second(bytes);
+                if (!retro_serialize(initial.data(), bytes)) result = -3;
+                else {
+                    const uint32_t previousP1 =
+                        g_inputMask.exchange(0, std::memory_order_acq_rel);
+                    const uint32_t previousP2 =
+                        g_player2InputMask.exchange(0, std::memory_order_acq_rel);
+                    const bool previousReplay =
+                        g_rollbackReplaying.exchange(true, std::memory_order_acq_rel);
+                    const int frames = std::max(1, std::min(60,
+                        static_cast<int>(requestedFrames)));
+                    const auto attempt = [&](std::vector<uint8_t>& destination) {
+                        if (!retro_unserialize(initial.data(), bytes)) return false;
+                        for (int i = 0; i < frames; ++i) retro_run();
+                        return retro_serialize(destination.data(), bytes);
+                    };
+                    const bool a = attempt(first);
+                    const bool b = a && attempt(second);
+                    result = !a || !b ? -4 :
+                        (std::memcmp(first.data(), second.data(), bytes) == 0 ? 0 : -5);
+                    // Always restore the game, even if one replay failed.
+                    if (!retro_unserialize(initial.data(), bytes)) result = -4;
+                    g_inputMask.store(previousP1, std::memory_order_release);
+                    g_player2InputMask.store(previousP2, std::memory_order_release);
+                    g_rollbackReplaying.store(previousReplay, std::memory_order_release);
+                    const uint64_t head =
+                        g_audioWrite.load(std::memory_order_acquire);
+                    g_audioRead.store(head, std::memory_order_release);
+                }
+            }
+        }
+    }
+    // The offline frame thread resumes sleeping while paused; the Activity
+    // restores the previous user pause state when the manual test finishes.
+    if (g_gameLoaded.load(std::memory_order_acquire) &&
+        !g_netplayMode.load(std::memory_order_acquire)) startFrameThread();
+    logMessage(result == 0 ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        "NES offline determinism diagnostic returned %d", result);
+    return result;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeShutdown(JNIEnv*, jobject) {
     g_paused.store(true, std::memory_order_release);

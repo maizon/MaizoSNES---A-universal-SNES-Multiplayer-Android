@@ -44,6 +44,8 @@ object NativeBridge {
     /** Copies interleaved stereo PCM16 values into buffer. Returns the number of values written. */
     external fun nativeReadAudio(buffer: ShortArray): Int
     external fun nativeGetAudioSampleRate(): Int
+    /** Manual offline NES smoke test, always restores the original save state. */
+    external fun nativeNesDeterminismCheck(frames: Int): Int
     external fun nativeResetGame(): Int
     external fun nativeSerializeState(): ByteArray?
     external fun nativeUnserializeState(state: ByteArray): Int

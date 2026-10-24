@@ -103,3 +103,36 @@ A conexão só continua enquanto os sockets e a sessão nativa seguem vivos.
 7. Antes de enviar relatório, retire chaves, IPs públicos e dados privados. Anote Android, modelos, arquiteturas, conexão LAN ou online e tempo exato de travada.
 
 Veja docs/BACKGROUND.md para limites Android. O código não fornece reconexão transparente quando o sistema mata o processo, nem ressincronização cruzada de saves após desync grave.
+
+
+## Console Performance & Stability — validação adicional (2026-10-24)
+
+- [ ] Primeira biblioteca com 500 ROMs legais/homebrew: gerar índice local;
+      reabrir o aplicativo e comparar tempo; apenas ROMs novas/alteradas
+      devem ter cabeçalho relido. Inspecionar ROM renomeada/removida.
+- [ ] No landscape, alternar chips **SNES** e **NES**, favoritos, recentes,
+      busca e modo coleção por gamepad; interface continua acessível em 640×360 dp.
+- [ ] Importar ROMs isoladas e por lotes, sem capas: exibir diálogo de consentimento
+      apenas para capas ausentes. Escolher **AGORA NÃO** e verificar zero tráfego
+      para thumbnails.libretro.com.
+- [ ] Confirmar download manual, indicador `Capas 1/N`, cancelar e retomar;
+      mudar para jogo enquanto baixa — novas buscas devem parar.
+- [ ] Reimportar nomes equivalentes (regiões/revisões) em NES/SNES:
+      reutilizar capa local compartilhada e não fazer novo HTTP; coleções
+      NES e SNES jamais compartilham a mesma chave de arte.
+- [ ] Em NES **offline**, abrir toolbar e **TESTE NES**: pausar, executar dois
+      replays neutros de 36 quadros, comparar estados e restaurar o jogo.
+      Teste inconclusivo não prova bug de GekkoNet; não executá-lo online.
+- [ ] NES UDP LAN, Wi-Fi/4G, 4G/4G (10–20 min) com captura de logcat/tombstone
+      se fechar; teste offline de determinismo positivo NÃO garante cross-ABI
+      nem negociação de rede. Repetir com SNES para detectar regressões.
+- [ ] Testar sair/entrar 30 vezes, áudio alternado, botão HOME e troca de app
+      e retorno. Validar Quick Resume offline e não salvar estado online.
+- [ ] Ativar/desativar HUD FPS e **⚡ RÁPIDO** no menu rápido; não tocar
+      nos protocolos, estados, frequência de CPU ou configurações de servidor.
+- [ ] Se houver crash, guardar código de falha, arquitetura e stack com
+      `adb logcat -b crash -d`; o registro local de interrupção não captura SIGSEGV.
+
+**Limites:** CI cobre a compilação, políticas de cache e regras locais.
+Sem dois dispositivos reais e traces de crash não é possível afirmar
+estabilidade definitiva do NES com GekkoNet.

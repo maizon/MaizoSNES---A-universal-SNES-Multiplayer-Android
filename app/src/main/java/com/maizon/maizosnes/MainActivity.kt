@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
     private val statusMessage = androidx.compose.runtime.mutableStateOf("Preparando Snes9x 1.63…")
     private val romFiles = androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     private val romHeaders = androidx.compose.runtime.mutableStateMapOf<String, SnesRomHeader.Details>()
+    private var libraryJob: Job? = null
+    private var libraryRevision = 0L
+    private val libraryCacheFile by lazy { File(filesDir, "rom_metadata_index.v1") }
     private val favoriteRoms = androidx.compose.runtime.mutableStateOf<Set<String>>(emptySet())
     private val recentRoms = androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     private var patchTarget: File? = null
@@ -77,6 +80,12 @@ class MainActivity : ComponentActivity() {
     private val coverFetchSlots = java.util.concurrent.Semaphore(2)
     private var coverJob: Job? = null
     private var coverDownloadJob: Job? = null
+    private var coverBatchRevision = 0L
+    private val coverDownloadProgress =
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    private val nesDiagnosticMessage =
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    @Volatile private var nesDiagnosticBusy = false
     private val pendingCoverOffer =
         androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     private var previouslyInterrupted: String? = null
@@ -331,6 +340,8 @@ class MainActivity : ComponentActivity() {
                     settings = appSettings.value,
                     coreOptions = coreSettings.toMap(),
                     performanceText = performanceText.value,
+                    nesDiagnosticMessage = nesDiagnosticMessage.value,
+                    onRunNesDiagnostic = ::runNesDiagnostic,
                     networkDebug = networkDebug.value,
                     playerProfile = playerProfile.value,
                     playerAvatar = playerAvatar.value,
@@ -421,6 +432,8 @@ class MainActivity : ComponentActivity() {
                     onApplyRomPatch = { patchRomLauncher.launch(arrayOf("*/*")) },
                     onScanAllDevice = ::requestGlobalRomScan,
                     onReloadCovers = { downloadMissingCovers(romFiles.value) },
+                    coverDownloadProgress = coverDownloadProgress.value,
+                    onCancelCoverDownload = { cancelCoverDownloads() },
                     onCoverNeeded = ::requestVisibleCover,
                     onPickCustomCover = ::chooseUserCover,
                     onResetCustomCover = ::resetUserCover,
@@ -497,10 +510,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Imported ROMs prompt once per batch; never downloads on their own. */
+    /** Imported ROMs prompt once per batch, only when artwork is missing.
+     *  Disk existence probes do not block Compose or make any HTTP requests.
+     */
     private fun offerImportedCovers(names: List<String>) {
-        if (appSettings.value.automaticCovers && names.isNotEmpty())
-            pendingCoverOffer.value = names.distinct()
+        if (!appSettings.value.automaticCovers || names.isEmpty()) return
+        lifecycleScope.launch {
+            val missing = withContext(Dispatchers.IO) {
+                names.distinct().filter { name ->
+                    val file = File(romDirectory, name)
+                    file.isFile && !CoverArt.hasCached(this@MainActivity, file)
+                }
+            }
+            if (missing.isNotEmpty() && !destroyingActivity)
+                pendingCoverOffer.value = missing
+        }
+    }
+
+    private fun cancelCoverDownloads(report: Boolean = true) {
+        ++coverBatchRevision
+        coverDownloadJob?.cancel()
+        coverDownloadJob = null
+        coverDownloadProgress.value = null
+        if (report) statusMessage.value = "Busca de capas cancelada; cache preservado."
     }
 
     /** Serial explicit downloads; never run while a game/netplay is active. */
@@ -510,41 +542,67 @@ class MainActivity : ComponentActivity() {
             statusMessage.value = "Busque capas pela biblioteca, fora de uma partida."
             return
         }
-        coverDownloadJob?.cancel()
+        cancelCoverDownloads(report = false)
         coverJob?.cancel()
-        val choices = names.distinct().filter { it in romFiles.value }
+        val choices = names.distinct().filter {
+            val file = File(romDirectory, it)
+            file.isFile && RomSystem.supported(it)
+        }
         if (choices.isEmpty()) return
+        val revision = ++coverBatchRevision
         coverDownloadJob = lifecycleScope.launch {
             var cached = 0
             var downloaded = 0
             var unavailable = 0
-            for (name in choices) {
-                if (!isActive || !CoverFetchPolicy.networkAllowed(true,
-                        activeScreen.value == AppScreen.GAME, netplaySession != null)) break
-                val file = File(romDirectory, name)
-                if (!file.isFile || name in coverBitmaps) { cached++; continue }
-                var attempts = 0
-                while (name in loadingCovers && attempts++ < 10 && isActive) delay(60)
-                if (!loadingCovers.add(name)) { unavailable++; continue }
-                try {
-                    val existed = withContext(Dispatchers.IO) {
-                        CoverArt.hasCached(this@MainActivity, file)
+            try {
+                choices.forEachIndexed { index, name ->
+                    if (!isActive || !CoverFetchPolicy.networkAllowed(true,
+                            activeScreen.value == AppScreen.GAME, netplaySession != null))
+                        return@launch
+                    coverDownloadProgress.value = "Capas ${index + 1}/${choices.size} • " +
+                        name.take(38)
+                    val file = File(romDirectory, name)
+                    if (!file.isFile || name in coverBitmaps) {
+                        cached++
+                        return@forEachIndexed
                     }
-                    val image = withContext(Dispatchers.IO) {
-                        runCatching { CoverArt.load(this@MainActivity, file,
-                            allowNetwork = true) }.getOrNull()
+                    var attempts = 0
+                    while (name in loadingCovers && attempts++ < 10 && isActive) delay(60)
+                    if (!loadingCovers.add(name)) {
+                        unavailable++
+                        return@forEachIndexed
                     }
-                    if (image != null) {
-                        missingCovers.remove(name)
-                        coverBitmaps[name] = image
-                        if (coverBitmaps.size > 48)
-                            coverBitmaps.keys.firstOrNull { it != name }?.let(coverBitmaps::remove)
-                        if (existed) cached++ else downloaded++
-                    } else { missingCovers.add(name); unavailable++ }
-                } finally { loadingCovers.remove(name) }
+                    try {
+                        val existed = withContext(Dispatchers.IO) {
+                            CoverArt.hasCached(this@MainActivity, file)
+                        }
+                        val image = withContext(Dispatchers.IO) {
+                            CoverArt.load(this@MainActivity, file, allowNetwork = true)
+                        }
+                        if (image != null) {
+                            missingCovers.remove(name)
+                            coverBitmaps[name] = image
+                            if (coverBitmaps.size > 40)
+                                coverBitmaps.keys.firstOrNull { it != name }
+                                    ?.let(coverBitmaps::remove)
+                            if (existed) cached++ else downloaded++
+                        } else {
+                            missingCovers.add(name)
+                            unavailable++
+                        }
+                    } catch (error: Exception) {
+                        unavailable++
+                    } finally { loadingCovers.remove(name) }
+                }
+                if (revision == coverBatchRevision)
+                    statusMessage.value = "Capas: $downloaded nova(s), " +
+                        "$cached em cache, $unavailable não encontradas."
+            } finally {
+                if (revision == coverBatchRevision) {
+                    coverDownloadJob = null
+                    coverDownloadProgress.value = null
+                }
             }
-            statusMessage.value = "Capas: $downloaded nova(s), $cached em cache, " +
-                "$unavailable não encontradas."
         }
     }
 
@@ -693,6 +751,45 @@ class MainActivity : ComponentActivity() {
         else "Não foi possível restaurar a última partida (" + result + ")."
     }
 
+    /**
+     * User-triggered offline FCEUmm stress smoke test, never a network option.
+     * The native test serializes a snapshot, replays neutral frames twice,
+     * compares resulting states and restores the original state.
+     */
+    private fun runNesDiagnostic() {
+        val game = currentRomFile.value
+        if (!hasLoadedRom || game == null || !RomSystem.isNes(game.name) ||
+            netplaySession != null || remoteClient != null || nesDiagnosticBusy) {
+            nesDiagnosticMessage.value = "Carregue NES offline, sem multiplayer, para testar."
+            return
+        }
+        nesDiagnosticBusy = true
+        val wasPaused = userPaused
+        userPaused = true
+        syncPlaybackState()
+        nesDiagnosticMessage.value = "NES: verificando 36 quadros em duas execuções…"
+        lifecycleScope.launch {
+            try {
+                val outcome = withContext(Dispatchers.Default) {
+                    NativeBridge.nativeNesDeterminismCheck(36)
+                }
+                val report = NesDiagnosticReport.describe(outcome)
+                nesDiagnosticMessage.value = report
+                statusMessage.value = report
+            } catch (error: Exception) {
+                nesDiagnosticMessage.value = "Teste NES interrompido: " +
+                    (error.message ?: "erro do núcleo")
+                statusMessage.value = nesDiagnosticMessage.value.orEmpty()
+            } finally {
+                nesDiagnosticBusy = false
+                if (!destroyingActivity) {
+                    userPaused = wasPaused
+                    syncPlaybackState()
+                }
+            }
+        }
+    }
+
     private fun startPerformanceSampler() {
         perfJob?.cancel()
         perfJob = lifecycleScope.launch {
@@ -700,7 +797,8 @@ class MainActivity : ComponentActivity() {
             var previousAt = System.nanoTime()
             while (isActive) {
                 delay(1000)
-                if (!hasLoadedRom) {
+                if (!hasLoadedRom || !appSettings.value.performanceHud) {
+                    // Do not poll JNI or perform metrics formatting when hidden.
                     previous = null
                     continue
                 }
@@ -1224,16 +1322,29 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshLibrary() {
-        romFiles.value = romDirectory.listFiles()
-            ?.filter { it.isFile && it.extension.lowercase() in RomSystem.acceptedExtensions }
-            ?.sortedBy { it.name.lowercase() }
-            ?.map { it.name }
-            ?: emptyList()
-        romHeaders.clear()
-        romFiles.value.forEach { name ->
-            romHeaders[name] = RomSystem.details(File(romDirectory, name))
+        // Header probing is I/O, not presentation. Only changed ROMs get
+        // inspected; the bounded metadata index survives app restarts.
+        val revision = ++libraryRevision
+        libraryJob?.cancel()
+        libraryJob = lifecycleScope.launch {
+            try {
+                val scan = withContext(Dispatchers.IO) {
+                    RomMetadataIndex.scan(romDirectory, libraryCacheFile)
+                }
+                if (revision != libraryRevision || !isActive) return@launch
+                val present = scan.names.toHashSet()
+                romFiles.value = scan.names
+                romHeaders.clear()
+                romHeaders.putAll(scan.details)
+                coverBitmaps.keys.filterNot { it in present }.forEach(coverBitmaps::remove)
+                missingCovers.retainAll(present)
+                refreshCovers() // only decodes disk cache, never accesses network
+            } catch (error: Exception) {
+                if (revision == libraryRevision && isActive)
+                    statusMessage.value = "Não foi possível atualizar biblioteca: " +
+                        (error.message ?: "falha de armazenamento")
+            }
         }
-        refreshCovers()
     }
 
     private fun renameRom(oldName: String, requestedName: String) {
@@ -1272,7 +1383,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openRom(name: String) {
-        coverDownloadJob?.cancel() // never compete for bandwidth during gameplay
+        cancelCoverDownloads(report = false)
+        if (nesDiagnosticBusy) {
+            statusMessage.value = "O teste NES está terminando; não troque a ROM agora."
+            return
+        }
         if (remoteHost != null) stopRemoteHost()
         if (classicLanAnnouncement != null) stopClassicRoom()
         if (netplaySession != null) {
@@ -1302,6 +1417,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadRomFile(file: File) {
+        nesDiagnosticMessage.value = null
         gameMenuOpen.value = false
         lifecycleScope.launch {
             userPaused = true
@@ -1980,6 +2096,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun exitGameplay() {
+        if (nesDiagnosticBusy) {
+            statusMessage.value = "Conclua o diagnóstico NES antes de fechar o jogo."
+            return
+        }
         if (remoteClient != null) { exitRemoteClient(); return }
         stopRemoteHost()
         stopClassicRoom()
@@ -1992,6 +2112,7 @@ class MainActivity : ComponentActivity() {
         netplaySession?.stop()
         userPaused = true
         paused.value = true
+        nesDiagnosticMessage.value = null
         activeScreen.value = AppScreen.LIBRARY
         appSettings.value = readSettings("profile_global_")
         runCatching {
@@ -2006,6 +2127,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setGameMenuOpen(open: Boolean) {
+        if (nesDiagnosticBusy) return
         if (activeScreen.value != AppScreen.GAME || gameMenuOpen.value == open) return
         gameMenuOpen.value = open
         if (netplaySession == null) {
@@ -2022,6 +2144,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun togglePause() {
+        if (nesDiagnosticBusy) {
+            statusMessage.value = "Teste do núcleo NES em andamento."
+            return
+        }
         if (!hasLoadedRom) return
         if (netplaySession != null) {
             statusMessage.value = "Pausa individual não é permitida durante a sincronização."
@@ -2033,7 +2159,10 @@ class MainActivity : ComponentActivity() {
         statusMessage.value = if (userPaused) "Jogo pausado." else "Jogo retomado."
     }
 
-    private fun profilePrefix(file: File?): String = "profile_" + (file?.nameWithoutExtension ?: "global") + "_"
+    private fun profilePrefix(file: File?): String =
+        "profile_" + (if (file != null && RomSystem.isNes(file.name)) "nes_" else "") +
+            (file?.nameWithoutExtension ?: "global") + "_"
+
 
     private fun readSettings(prefix: String): AppSettings {
         // A game profile inherits global settings until the player customizes it.
@@ -2094,6 +2223,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun persistSettings(next: AppSettings) {
+        if (nesDiagnosticBusy) {
+            statusMessage.value = "Aguarde o teste NES terminar antes de mudar configurações."
+            return
+        }
         val backendChanged = appSettings.value.renderBackend != next.renderBackend
         val audioBufferChanged = appSettings.value.audioBufferMs != next.audioBufferMs
         if (backendChanged) {
@@ -2588,6 +2721,11 @@ class MainActivity : ComponentActivity() {
         relayRoomId: String? = null, relayServerHost: String? = null,
         relayTls: Boolean = false, wssEndpoint: String? = null,
         profileNames: Boolean = false, acceptedSocket: Socket? = null) {
+        if (nesDiagnosticBusy) {
+            acceptedSocket?.close()
+            lanStatus.value = "Diagnóstico NES em andamento; abra a sala depois dele."
+            return
+        }
         if (netplaySession != null) { acceptedSocket?.close(); return }
         // All legacy one-to-one network transports are mutually exclusive
         // with the local multitap room; release its ports before MZNP.
@@ -2616,7 +2754,7 @@ class MainActivity : ComponentActivity() {
             lanStatus.value = "Informe endereço e porta válidos (1024–65535)."
             return
         }
-        coverDownloadJob?.cancel()
+        cancelCoverDownloads(report = false)
         CrashJournal.mark(this, if (RomSystem.isNes(currentRomFile.value?.name.orEmpty()))
             "NES/FCEUmm preparando multiplayer" else "SNES preparando multiplayer")
         userPaused = true
@@ -2969,7 +3107,8 @@ class MainActivity : ComponentActivity() {
         remoteHost?.close()
         remoteHost = null
         coverJob?.cancel()
-        coverDownloadJob?.cancel()
+        cancelCoverDownloads(report = false)
+        libraryJob?.cancel()
         perfJob?.cancel()
         val activeNetplay = netplaySession
         activeNetplay?.stop()
@@ -2983,7 +3122,7 @@ class MainActivity : ComponentActivity() {
         surfaceAttached = false
         audioOutput?.stop()
         audioOutput = null
-        if (workersStopped) {
+        if (workersStopped && !nesDiagnosticBusy) {
             runCatching { NativeBridge.nativeShutdown() }
             CrashJournal.clean(this)
         } else {

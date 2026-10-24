@@ -14,9 +14,14 @@ internal object LibraryUiRules {
 
     fun order(names: List<String>, titles: Map<String, String>,
               recent: List<String>, mode: String): List<String> = when (mode) {
-        "Recentes" -> names.sortedWith(compareBy<String> {
-            recent.indexOf(it).let { pos -> if (pos < 0) Int.MAX_VALUE else pos }
-        }.thenBy { titles[it]?.lowercase() ?: it.lowercase() })
+        "Recentes" -> {
+            // Never search the entire recent list for every library item.
+            // A single rank map makes sorting scalable to large libraries.
+            val ranks = recent.withIndex().associate { it.value to it.index }
+            names.sortedWith(compareBy<String> {
+                ranks[it] ?: Int.MAX_VALUE
+            }.thenBy { titles[it]?.lowercase() ?: it.lowercase() })
+        }
         "Arquivo" -> names.sortedBy { it.lowercase() }
         else -> names.sortedBy { (titles[it] ?: it).lowercase() }
     }
