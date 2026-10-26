@@ -354,6 +354,8 @@ internal fun MaizoEmulatorApp(
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     netcodeMode: NetcodeMode,
     onNetcodeModeChanged: (NetcodeMode) -> Unit,
+    gekkoLowEndEnabled: Boolean,
+    onGekkoLowEndChanged: (Boolean) -> Unit,
     backgroundNetplayEnabled: Boolean,
     onBackgroundNetplayChanged: (Boolean) -> Unit,
     iceServerOverrides: String,
@@ -784,6 +786,7 @@ internal fun MaizoEmulatorApp(
                 connectionMode, onConnectionModeChanged,
                 netplayLatencyMode, onNetplayLatencyModeChanged,
                 netcodeMode, onNetcodeModeChanged,
+                gekkoLowEndEnabled, onGekkoLowEndChanged,
                 backgroundNetplayEnabled, onBackgroundNetplayChanged,
                 iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce,
                 savedConnectionHost, savedConnectionPort, onSaveConnectionTarget,
@@ -1565,6 +1568,8 @@ private fun MultiplayerScreen(
     onNetplayLatencyModeChanged: (NetplayLatencyMode) -> Unit,
     netcodeMode: NetcodeMode,
     onNetcodeModeChanged: (NetcodeMode) -> Unit,
+    gekkoLowEndEnabled: Boolean,
+    onGekkoLowEndChanged: (Boolean) -> Unit,
     backgroundNetplayEnabled: Boolean,
     onBackgroundNetplayChanged: (Boolean) -> Unit,
     iceServerOverrides: String,
@@ -2344,7 +2349,9 @@ private fun MultiplayerScreen(
                 Row(Modifier.fillMaxWidth().padding(15.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("MOTOR  •  " + netcodeMode.label,
+                        Text("MOTOR  •  " +
+                            (if (gekkoLowEndEnabled) "GekkoNet Lowend (UDP)"
+                             else netcodeMode.label),
                             fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text("GekkoNet, latência, ICE/TURN e segundo plano",
                             color = Muted, fontSize = 10.sp)
@@ -2410,6 +2417,44 @@ private fun MultiplayerScreen(
                     iceTestStatus, onTestIce, !active)
                 if (active) Text("O buffer não pode ser alterado no meio da sessão.",
                     color = Color(0xFFFFBD85), fontSize = 10.sp)
+            }
+        }
+
+        // Always visible at the bottom of the Multiplayer tab, independent
+        // of the advanced settings drawer. User-defined saved engine/latency
+        // choices stay intact; OFF resumes the exact legacy path.
+        Surface(
+            color = if (gekkoLowEndEnabled) Color(0xFF153934) else NeoGlass,
+            shape = RoundedCornerShape(17.dp),
+            modifier = Modifier.fillMaxWidth().padFocusRing()
+                .border(1.dp, if (gekkoLowEndEnabled) Mint.copy(alpha = 0.6f)
+                    else NeoOutline, RoundedCornerShape(17.dp))
+        ) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("⚡ GekkoNet Lowend",
+                        color = if (gekkoLowEndEnabled) Mint else Color.White,
+                        fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(if (gekkoLowEndEnabled)
+                        "ATIVO • Menos cópias de save/load no Gekko, " +
+                        "atraso adaptativo e vídeo mais leve sob carga."
+                    else "DESLIGADO • Multiplayer original, sem alterações.",
+                        color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                    Text(
+                        if (active) "Finalize a sessão para alterar o perfil."
+                        else "Aplicado localmente na próxima conexão. " +
+                            "Ao desligar, restaura suas opções anteriores. " +
+                            "Não obriga o outro jogador a atualizar.",
+                        color = if (active) Color(0xFFFFBD85) else Mint,
+                        fontSize = 10.sp, lineHeight = 14.sp)
+                }
+                Spacer(Modifier.width(9.dp))
+                Switch(
+                    checked = gekkoLowEndEnabled,
+                    onCheckedChange = { onGekkoLowEndChanged(it) },
+                    enabled = !active)
             }
         }
 

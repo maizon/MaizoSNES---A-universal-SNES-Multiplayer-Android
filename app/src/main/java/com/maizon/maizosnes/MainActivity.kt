@@ -96,6 +96,8 @@ class MainActivity : ComponentActivity() {
     private val connectionMode = androidx.compose.runtime.mutableStateOf(NetworkMode.AUTO)
     private val netplayLatencyMode = androidx.compose.runtime.mutableStateOf(NetplayLatencyMode.BALANCED)
     private val netcodeMode = androidx.compose.runtime.mutableStateOf(NetcodeMode.ROLLBACK)
+    // Local-only performance preset. OFF always restores previous settings.
+    private val gekkoLowEnd = androidx.compose.runtime.mutableStateOf(false)
     private val savedHost = androidx.compose.runtime.mutableStateOf("")
     private val savedPort = androidx.compose.runtime.mutableStateOf(55435)
     private val relayAddress = androidx.compose.runtime.mutableStateOf("")
@@ -300,6 +302,7 @@ class MainActivity : ComponentActivity() {
         netcodeMode.value = runCatching {
             NetcodeMode.valueOf(prefs.getString("netcode_mode", NetcodeMode.ROLLBACK.name)!!)
         }.getOrDefault(NetcodeMode.ROLLBACK)
+        gekkoLowEnd.value = prefs.getBoolean("gekkonet_lowend_enabled", false)
         keepMultiplayerInBackground.value =
             prefs.getBoolean("netplay_background_enabled", true)
         relayAddress.value = prefs.getString("relay_server_url", "") ?: ""
@@ -363,6 +366,8 @@ class MainActivity : ComponentActivity() {
                     onNetplayLatencyModeChanged = ::changeNetplayLatencyMode,
                     netcodeMode = netcodeMode.value,
                     onNetcodeModeChanged = ::changeNetcodeMode,
+                    gekkoLowEndEnabled = gekkoLowEnd.value,
+                    onGekkoLowEndChanged = ::changeGekkoLowEnd,
                     backgroundNetplayEnabled = keepMultiplayerInBackground.value,
                     onBackgroundNetplayChanged = ::changeBackgroundNetplay,
                     iceServerOverrides = iceServerOverrides.value,
@@ -869,6 +874,16 @@ class MainActivity : ComponentActivity() {
         netcodeMode.value = next
         prefs.edit().putString("netcode_mode", next.name).apply()
         lanStatus.value = next.label
+    }
+
+    private fun changeGekkoLowEnd(enabled: Boolean) {
+        if (netplaySession != null) {
+            lanStatus.value = "Finalize a partida antes de alterar GekkoNet Lowend."
+            return
+        }
+        gekkoLowEnd.value = enabled
+        prefs.edit().putBoolean("gekkonet_lowend_enabled", enabled).apply()
+        lanStatus.value = GekkoLowEndPolicy.message(enabled)
     }
 
     private fun changeNetplayLatencyMode(next: NetplayLatencyMode) {
@@ -2919,7 +2934,8 @@ class MainActivity : ComponentActivity() {
         lastRollbackCounter = 0L
         networkDebug.value = NetworkDebugState(
             active = true,
-            mode = "Negociando " + netcodeMode.value.label,
+            mode = "Negociando " + (if (gekkoLowEnd.value)
+                "GekkoNet Lowend" else netcodeMode.value.label),
             transport = when {
                 wssEndpoint != null -> "TCP via Railway (WSS)"
                 relayRoomId != null -> if (relayTls) "TCP TLS relay" else "TCP relay"
@@ -2966,7 +2982,9 @@ class MainActivity : ComponentActivity() {
                 }
             },
             mode = connectionMode.value,
-            netcodeMode = netcodeMode.value,
+            netcodeMode = GekkoLowEndPolicy.effectiveNetcode(
+                netcodeMode.value, gekkoLowEnd.value),
+            lowEndMode = gekkoLowEnd.value,
             webrtcContext = applicationContext,
             customIceServers = iceServerOverrides.value,
             latencyMode = netplayLatencyMode.value,
@@ -3145,6 +3163,9 @@ class MainActivity : ComponentActivity() {
                     / (1024 * 1024)))
             appendLine("Data: " + java.util.Date())
             appendLine("Motor: " + debug.mode)
+            appendLine("GekkoNet Lowend configurado: " + gekkoLowEnd.value)
+            appendLine("Preservação de snapshots: formato v1 idêntico, " +
+                "ByteBuffer direto apenas em sessões Lowend.")
             appendLine("Transporte: " + debug.transport)
             appendLine("Estado: " + debug.state)
             appendLine("ICE: " + debug.iceState)

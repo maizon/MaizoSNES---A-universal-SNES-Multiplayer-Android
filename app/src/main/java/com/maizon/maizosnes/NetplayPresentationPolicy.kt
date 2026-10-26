@@ -6,7 +6,9 @@ package com.maizon.maizosnes
  * after repeated evidence that local netplay tick time exceeds the budget.
  * Native emulation, audio, inputs and rollback remain at full cadence.
  */
-internal class NetplayPresentationPolicy {
+internal class NetplayPresentationPolicy(
+    private val lowEnd: Boolean = false
+) {
     private var overloaded = 0
     private var recovered = 0
     private var stride = 1
@@ -15,14 +17,14 @@ internal class NetplayPresentationPolicy {
               frameBudgetMs: Double = 16.67): Int {
         if (!tickMs.isFinite() || !frameBudgetMs.isFinite() ||
             frameBudgetMs <= 0.0 || tickMs <= 0.0) return stride
-        if (tickMs >= frameBudgetMs * 0.88) {
+        if (tickMs >= frameBudgetMs * (if (lowEnd) 0.82 else 0.88)) {
             overloaded++
             recovered = 0
-            if (overloaded >= 3) stride = 2
+            if (overloaded >= (if (lowEnd) 2 else 3)) stride = 2
         } else if (tickMs <= frameBudgetMs * 0.66) {
             recovered++
             overloaded = 0
-            if (recovered >= 5) stride = 1
+            if (recovered >= (if (lowEnd) 6 else 5)) stride = 1
         } else {
             overloaded = 0
             recovered = 0

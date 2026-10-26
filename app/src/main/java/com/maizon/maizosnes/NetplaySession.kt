@@ -65,7 +65,9 @@ internal class NetplaySession(
     // Test seam: two loopback peers can exercise native-bind retries and
     // bilateral fallback without loading a commercial ROM or native libraries.
     private val directDriver: DirectRollbackDriver = NativeDirectRollbackDriver,
-    private val ownerName: String = ""
+    private val ownerName: String = "",
+    /** Local-only opt-in, never announced as a wire-protocol capability. */
+    private val lowEndMode: Boolean = false
 ) {
     companion object {
         private const val MAGIC = 0x4D5A4E50 // MZNP
@@ -490,7 +492,8 @@ internal class NetplaySession(
         val savedAt = System.nanoTime()
         val restored = loadState(saved) == 0
         val elapsedMs = (System.nanoTime() - start) / 1e6
-        if (!restored || saved.size != snapshot.size || elapsedMs > 10.0) {
+        if (!restored || saved.size != snapshot.size ||
+            elapsedMs > (if (lowEndMode) 18.0 else 10.0)) {
             onStatus("Rollback remoto inviável (save/load " +
                 String.format(java.util.Locale.US, "%.1f", elapsedMs) +
                 " ms). Usando Lockstep via Railway.")
@@ -501,15 +504,14 @@ internal class NetplaySession(
             context, endpoint, roomId, host, onStatus,
             customIce = customIceServers) ?: return false
         rtc.use { port ->
-            val delayFrames = when (latencyMode) {
-                NetplayLatencyMode.RESPONSIVE -> 0
-                NetplayLatencyMode.BALANCED -> 1
-                NetplayLatencyMode.STABLE -> 3
-            }
-            val adaptiveDelay = RollbackDelayController(latencyMode)
-            val limitedSaving = elapsedMs > 8.0
-            val presentation = NetplayPresentationPolicy()
+            val delayFrames = GekkoLowEndPolicy.initialLocalDelay(
+                latencyMode, lowEndMode)
+            val adaptiveDelay = RollbackDelayController(latencyMode, lowEndMode)
+            val limitedSaving = GekkoLowEndPolicy.preferLimitedSaving(
+                elapsedMs, lowEndMode)
+            val presentation = NetplayPresentationPolicy(lowEndMode)
             GekkoNative.nativeConfigureLimitedSaving(limitedSaving)
+            GekkoNative.nativeConfigureFastSnapshots(lowEndMode)
             val active = GekkoNative.nativeStartRtc(
                 if (host) 0 else 1, snapshot.size, 10, delayFrames, port)
             if (!active) {
@@ -518,10 +520,20 @@ internal class NetplaySession(
             }
             var rtcSessionStarted = false
             var averageTickMs = 0.0
+            var lowEndStatsTicks = 0L
+            var cachedNativeStats = IntArray(6)
             try {
-                val callbacks = object : RollbackCallbacks {
+                val callbacks = object : FastRollbackCallbacks {
                     override fun save(): ByteArray =
-                        saveState() ?: error("Snes9x serialize falhou")
+                        saveState() ?: error("Libretro não serializou durante rollback")
+                    override fun saveDirect(target: java.nio.ByteBuffer): Int =
+                        NativeBridge.nativeSerializeStateIntoDirect(target)
+                    override fun loadDirect(
+                        source: java.nio.ByteBuffer, length: Int
+                    ): Boolean {
+                        NativeBridge.nativeSetRollbackReplaying(true)
+                        return NativeBridge.nativeUnserializeStateFromDirect(source, length)
+                    }
                     override fun load(bytes: ByteArray): Boolean {
                         NativeBridge.nativeSetRollbackReplaying(true)
                         return loadState(bytes) == 0
@@ -537,6 +549,7 @@ internal class NetplaySession(
                 var metricsAt = 0L
                 var worstTick = 0L
                 var stallCount = 0L
+                var deadline = System.nanoTime()
                 while (!closed.get()) {
                     val tickStart = System.nanoTime()
                     val executed = GekkoNative.nativeTick(localInput(), callbacks)
@@ -550,7 +563,11 @@ internal class NetplaySession(
                         }
                         error("Gekko RTC perdeu sincronização ($executed)")
                     }
-                    val stats = GekkoNative.nativeStats()
+                    // Lowend saves three out of four JNI int[] allocations
+                    // after connection. Poll each tick during handshake.
+                    val stats = if (lowEndMode && connected &&
+                        ++lowEndStatsTicks % 4L != 0L) cachedNativeStats
+                    else GekkoNative.nativeStats().also { cachedNativeStats = it }
                     if (stats.size >= 6 && stats[4] == 1 && !connected) {
                         connected = true
                         rtcSessionStarted = true
@@ -599,7 +616,14 @@ internal class NetplaySession(
                         onStatus("Aviso: GekkoNet WebRTC parou " +
                             (tickNs / 1_000_000L) + " ms; pico " + stallCount)
                     }
-                    val sleep = period - tickNs
+                    val sleep = if (lowEndMode) {
+                        // Stable monotonic cadence instead of accumulating
+                        // tick-to-tick scheduling error on slow Android SoCs.
+                        deadline += period
+                        val now = System.nanoTime()
+                        if (deadline < now - period * 2) deadline = now
+                        deadline - now
+                    } else period - tickNs
                     if (sleep > 0L) java.util.concurrent.locks.LockSupport.parkNanos(sleep)
                 }
                 return true
@@ -643,9 +667,9 @@ internal class NetplaySession(
         val nesSafe = rom?.let { RomSystem.isNes(it.name) } != true ||
             NesRollbackSafety.isSafe(synchronizedState, saveState, loadState)
         val address = connection.inetAddress as? Inet4Address
-        val readyForUdp = stateLoaded && nesSafe && synchronizedState != null &&
-            synchronizedState.size in 32..RollbackFeasibility.MAX_STATE_BYTES &&
-            saveLoadMs <= 24.0 && address != null && !closed.get()
+        val readyForUdp = GekkoLowEndPolicy.readyForUdp(
+            stateLoaded, nesSafe, synchronizedState?.size ?: 0,
+            saveLoadMs, address != null, closed.get(), lowEndMode)
         // Both sides must agree to skip UDP before entering the unchanged TCP
         // frame-pipelining path. A slow Snes9x may still use Lockstep.
         output.writeBoolean(readyForUdp)
@@ -660,12 +684,21 @@ internal class NetplaySession(
         val state = synchronizedState!!
         val ip = address!!.hostAddress
         val period = framePeriodNs().coerceIn(10_000_000L, 50_000_000L)
-        val controller = RollbackDelayController(latencyMode)
-        val limitedSaving = saveLoadMs > 8.0
-        val presentation = NetplayPresentationPolicy()
-        val callbacks = object : RollbackCallbacks {
+        val controller = RollbackDelayController(latencyMode, lowEndMode)
+        val limitedSaving = GekkoLowEndPolicy.preferLimitedSaving(
+            saveLoadMs, lowEndMode)
+        val presentation = NetplayPresentationPolicy(lowEndMode)
+        val callbacks = object : FastRollbackCallbacks {
             override fun save(): ByteArray =
-                saveState() ?: error("Snes9x não serializou durante rollback")
+                saveState() ?: error("Libretro não serializou durante rollback")
+            override fun saveDirect(target: java.nio.ByteBuffer): Int =
+                NativeBridge.nativeSerializeStateIntoDirect(target)
+            override fun loadDirect(
+                source: java.nio.ByteBuffer, length: Int
+            ): Boolean {
+                directDriver.setReplay(true)
+                return NativeBridge.nativeUnserializeStateFromDirect(source, length)
+            }
             override fun load(bytes: ByteArray): Boolean {
                 directDriver.setReplay(true)
                 return loadState(bytes) == 0
@@ -698,6 +731,7 @@ internal class NetplaySession(
                 }
                 started = if (candidateValid) runCatching {
                     directDriver.configureLimitedSaving(limitedSaving)
+                    directDriver.configureFastSnapshots(lowEndMode)
                     directDriver.start(port, ip, peerPort,
                         if (host) 0 else 1, state.size, 6, controller.delay)
                 }.getOrDefault(false) else false

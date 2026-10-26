@@ -21,6 +21,10 @@ int64_t rollbackCount = 0, advances = 0;
 bool connected = false;
 bool aborted = false;
 std::atomic<bool> requestedLimitedSaving{false};
+// Only used when the user explicitly enables GekkoNet Lowend.
+// All legacy JNI ByteArray callbacks remain byte-for-byte unchanged by default.
+std::atomic<bool> requestedFastSnapshots{false};
+bool activeFastSnapshots = false;
 JavaVM* rtcVm = nullptr;
 jobject rtcPort = nullptr; // global ref, only while active
 std::vector<GekkoNetResult*> rtcResults;
@@ -120,6 +124,7 @@ void stopUnsafe() {
     localHandle = remoteHandle = -1;
     connected = false;
     stateCapacity = 0;
+    activeFastSnapshots = false;
 }
 bool javaException(JNIEnv* env) {
     if (!env->ExceptionCheck()) return false;
@@ -133,6 +138,12 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_maizon_maizosnes_GekkoNative_nativeConfigureLimitedSaving(
     JNIEnv*, jobject, jboolean enabled) {
     requestedLimitedSaving.store(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_maizon_maizosnes_GekkoNative_nativeConfigureFastSnapshots(
+    JNIEnv*, jobject, jboolean enabled) {
+    requestedFastSnapshots.store(enabled == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -169,6 +180,7 @@ Java_com_maizon_maizosnes_GekkoNative_nativeStart(
     // full saving; Limited Saving is chosen only for expensive Snes9x
     // serialization before creating a session.
     const bool limited = requestedLimitedSaving.exchange(false);
+    activeFastSnapshots = requestedFastSnapshots.exchange(false);
     config.desync_detection = !limited;
     config.limited_saving = limited;
     gekko_start(session, &config);
@@ -243,6 +255,26 @@ Java_com_maizon_maizosnes_GekkoNative_nativeTick(
         env->DeleteLocalRef(cls);
         return -2;
     }
+    jmethodID saveDirect = nullptr;
+    jmethodID loadDirect = nullptr;
+    bool fast = activeFastSnapshots;
+    if (fast) {
+        saveDirect = env->GetMethodID(cls, "saveDirect",
+            "(Ljava/nio/ByteBuffer;)I");
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            fast = false; // Callback is from older code; keep slow safe path.
+        }
+        if (fast) {
+            loadDirect = env->GetMethodID(cls, "loadDirect",
+                "(Ljava/nio/ByteBuffer;I)Z");
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                fast = false;
+            }
+        }
+        if (!fast) activeFastSnapshots = false;
+    }
     uint32_t local = static_cast<uint32_t>(inputMask) & 0xffffu;
     gekko_add_local_input(session, localHandle, &local);
     gekko_network_poll(session);
@@ -265,6 +297,30 @@ Java_com_maizon_maizosnes_GekkoNative_nativeTick(
         GekkoGameEvent* ev = updates[i];
         switch (ev->type) {
         case GekkoSaveEvent: {
+            if (fast) {
+                auto* buffer = ev->data.save.state;
+                if (!buffer || stateCapacity == 0) { aborted = true; break; }
+                jobject target = env->NewDirectByteBuffer(buffer, stateCapacity);
+                if (!target || javaException(env)) {
+                    aborted = true;
+                    if (target) env->DeleteLocalRef(target);
+                    break;
+                }
+                const jint len = env->CallIntMethod(callbacks, saveDirect, target);
+                const bool failure = javaException(env) || len <= 0 ||
+                    static_cast<unsigned int>(len) > stateCapacity;
+                if (!failure) {
+                    *ev->data.save.state_len = static_cast<unsigned int>(len);
+                    *ev->data.save.checksum =
+                        fnv1a(ev->data.save.state, static_cast<unsigned int>(len));
+                }
+                env->DeleteLocalRef(target);
+                if (!failure) break;
+                // The lowend-only snapshot routine rejected the buffer/core.
+                // Retry the unchanged allocation path on this same event.
+                fast = false;
+                activeFastSnapshots = false;
+            }
             jbyteArray bytes = static_cast<jbyteArray>(env->CallObjectMethod(callbacks, save));
             if (javaException(env) || !bytes) { aborted = true; break; }
             const jsize len = env->GetArrayLength(bytes);
@@ -287,6 +343,28 @@ Java_com_maizon_maizosnes_GekkoNative_nativeTick(
         case GekkoLoadEvent: {
             const auto len = ev->data.load.state_len;
             if (!len || len > stateCapacity) { aborted = true; break; }
+            if (fast) {
+                if (!ev->data.load.state) { aborted = true; break; }
+                jobject source = env->NewDirectByteBuffer(
+                    ev->data.load.state, static_cast<jlong>(len));
+                if (!source || javaException(env)) {
+                    aborted = true;
+                    if (source) env->DeleteLocalRef(source);
+                    break;
+                }
+                const jboolean restored = env->CallBooleanMethod(
+                    callbacks, loadDirect, source, static_cast<jint>(len));
+                const bool failure = javaException(env) || restored != JNI_TRUE;
+                env->DeleteLocalRef(source);
+                if (!failure) {
+                    ++rollbackCount;
+                    break;
+                }
+                // Retain compatibility with old snapshots and the original
+                // JNI ByteArray path if a native DirectBuffer restore fails.
+                fast = false;
+                activeFastSnapshots = false;
+            }
             jbyteArray bytes = env->NewByteArray(static_cast<jsize>(len));
             if (!bytes) { aborted = true; break; }
             env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(len),

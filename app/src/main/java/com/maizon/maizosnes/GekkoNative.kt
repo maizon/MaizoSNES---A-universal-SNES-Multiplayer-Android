@@ -6,6 +6,8 @@ internal object GekkoNative {
     external fun nativeApiVersion(): Int
     /** Applies to the next GekkoNet session, not to running games. */
     external fun nativeConfigureLimitedSaving(enabled: Boolean)
+    /** Lowend ON applies to the next session; OFF keeps legacy ByteArray path. */
+    external fun nativeConfigureFastSnapshots(enabled: Boolean)
     external fun nativeStart(localPort: Int, address: String, remotePort: Int,
         localPlayer: Int, stateBytes: Int, prediction: Int, delay: Int): Boolean
     external fun nativeTick(input: Int, callbacks: RollbackCallbacks): Int
@@ -21,4 +23,13 @@ internal interface RollbackCallbacks {
     fun save(): ByteArray
     fun load(bytes: ByteArray): Boolean
     fun step(p1: Int, p2: Int, resimulation: Boolean): Boolean
+}
+
+/**
+ * Extra callback methods resolved ONLY after enabling the Lowend preset.
+ * GekkoNet owns the direct ByteBuffer and it is valid only until return.
+ */
+internal interface FastRollbackCallbacks : RollbackCallbacks {
+    fun saveDirect(target: java.nio.ByteBuffer): Int
+    fun loadDirect(source: java.nio.ByteBuffer, length: Int): Boolean
 }

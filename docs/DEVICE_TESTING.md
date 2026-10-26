@@ -172,3 +172,12 @@ estabilidade definitiva do NES com GekkoNet.
 
 **Observação:** CI não substitui testes de LAN em dois aparelhos,
 nem garante funcionamento de controles USB/Bluetooth de todos os fabricantes.
+
+
+## GekkoNet Lowend (perfil opcional)
+
+Ver `docs/GEKKONET_LOWEND.md`. Conferir comportamento padrão OFF, toggle
+no rodapé da aba Multiplayer, restore das opções antigas e sessão ativa
+bloqueando mudança de modo. Validar que apenas um peer pode ativar,
+pois nenhum protocolo/snapshot foi alterado. O caminho direto ainda
+necessita teste de performance e estabilidade em ARMv7/ARM64 físicos.

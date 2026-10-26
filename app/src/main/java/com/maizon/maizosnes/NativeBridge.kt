@@ -47,6 +47,11 @@ object NativeBridge {
     /** Manual offline NES smoke test, always restores the original save state. */
     external fun nativeNesDeterminismCheck(frames: Int): Int
     external fun nativeResetGame(): Int
+    /** Lowend-only: no ByteArray creation; destination is a Gekko native buffer. */
+    external fun nativeSerializeStateIntoDirect(target: java.nio.ByteBuffer): Int
+    /** Lowend-only: reads the unchanged v1 snapshot container in-place. */
+    external fun nativeUnserializeStateFromDirect(
+        source: java.nio.ByteBuffer, length: Int): Boolean
     external fun nativeSerializeState(): ByteArray?
     external fun nativeUnserializeState(state: ByteArray): Int
     external fun nativeShutdown()

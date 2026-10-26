@@ -6,6 +6,8 @@ package com.maizon.maizosnes
  */
 internal interface DirectRollbackDriver {
     fun configureLimitedSaving(enabled: Boolean)
+    /** Optional seam, default no-op so existing fake drivers and tests work. */
+    fun configureFastSnapshots(enabled: Boolean) { }
     fun start(localPort: Int, remoteIp: String, remotePort: Int,
               player: Int, stateBytes: Int, prediction: Int, delay: Int): Boolean
     fun tick(localInput: Int, callbacks: RollbackCallbacks): Int
@@ -19,6 +21,8 @@ internal interface DirectRollbackDriver {
 internal object NativeDirectRollbackDriver : DirectRollbackDriver {
     override fun configureLimitedSaving(enabled: Boolean) =
         GekkoNative.nativeConfigureLimitedSaving(enabled)
+    override fun configureFastSnapshots(enabled: Boolean) =
+        GekkoNative.nativeConfigureFastSnapshots(enabled)
     override fun start(localPort: Int, remoteIp: String, remotePort: Int,
                        player: Int, stateBytes: Int, prediction: Int, delay: Int) =
         GekkoNative.nativeStart(localPort, remoteIp, remotePort,

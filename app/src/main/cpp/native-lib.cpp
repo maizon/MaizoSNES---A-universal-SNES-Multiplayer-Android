@@ -1036,6 +1036,70 @@ Java_com_maizon_maizosnes_NativeBridge_nativeResetGame(JNIEnv*, jobject) {
     return 0;
 }
 
+/*
+ * GekkoNet Lowend: write/read the EXISTING v1 MZSSTATE container directly
+ * in Gekko's preallocated native state buffer. Nothing is sent differently
+ * over the network and offline save-state APIs remain exactly unchanged.
+ * The ByteBuffer is owned by gekko_bridge, used synchronously only, and must
+ * never escape the callback. Invalid or undersized buffers fail closed.
+ */
+extern "C" JNIEXPORT jint JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeSerializeStateIntoDirect(
+    JNIEnv* env, jobject, jobject destination) {
+    if (!destination) return -1;
+    auto* bytes = static_cast<uint8_t*>(env->GetDirectBufferAddress(destination));
+    const jlong capacity = env->GetDirectBufferCapacity(destination);
+    if (!bytes || capacity <= static_cast<jlong>(kStateHeaderSize) ||
+        !g_initialized.load(std::memory_order_acquire)) return -1;
+
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire) || !g_netplayMode.load(
+            std::memory_order_acquire) || g_romFingerprint == 0) return -2;
+    const size_t size = retro_serialize_size();
+    if (!size || size > kMaxStateBytes ||
+        size + kStateHeaderSize > static_cast<size_t>(capacity)) return -3;
+    if (!retro_serialize(bytes + kStateHeaderSize, size)) return -4;
+
+    // Header must be byte-identical to nativeSerializeState() for the
+    // checksum, save/load fallback and cross-version state representation.
+    std::memcpy(bytes, kStateMagic, sizeof(kStateMagic));
+    writeU32LE(bytes + 8, kStateFormatVersion);
+    writeU64LE(bytes + 12, g_romFingerprint);
+    writeU64LE(bytes + 20, static_cast<uint64_t>(size));
+    return static_cast<jint>(size + kStateHeaderSize);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_maizon_maizosnes_NativeBridge_nativeUnserializeStateFromDirect(
+    JNIEnv* env, jobject, jobject source, jint length) {
+    if (!source || length <= static_cast<jint>(kStateHeaderSize) ||
+        !g_initialized.load(std::memory_order_acquire)) return JNI_FALSE;
+    const auto* bytes = static_cast<const uint8_t*>(
+        env->GetDirectBufferAddress(source));
+    const jlong capacity = env->GetDirectBufferCapacity(source);
+    if (!bytes || capacity < length ||
+        static_cast<size_t>(length) > kStateHeaderSize + kMaxStateBytes)
+        return JNI_FALSE;
+    const size_t payload = static_cast<size_t>(length) - kStateHeaderSize;
+    if (std::memcmp(bytes, kStateMagic, sizeof(kStateMagic)) != 0 ||
+        readU32LE(bytes + 8) != kStateFormatVersion ||
+        readU64LE(bytes + 20) != static_cast<uint64_t>(payload))
+        return JNI_FALSE;
+
+    const uint64_t savedFingerprint = readU64LE(bytes + 12);
+    std::lock_guard<std::mutex> lock(g_coreMutex);
+    if (!g_gameLoaded.load(std::memory_order_acquire) ||
+        !g_netplayMode.load(std::memory_order_acquire) ||
+        savedFingerprint != g_romFingerprint ||
+        !retro_unserialize(bytes + kStateHeaderSize, payload))
+        return JNI_FALSE;
+
+    // Mirror the legacy load behavior: stale speculative PCM is discarded.
+    const uint64_t latestWrite = g_audioWrite.load(std::memory_order_acquire);
+    g_audioRead.store(latestWrite, std::memory_order_release);
+    return JNI_TRUE;
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_maizon_maizosnes_NativeBridge_nativeSerializeState(JNIEnv* env, jobject) {
     std::vector<uint8_t> stateBytes;

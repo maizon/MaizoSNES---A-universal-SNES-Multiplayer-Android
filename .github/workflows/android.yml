@@ -92,6 +92,15 @@ jobs:
           grep -Eq 'lib/arm64-v8a/libfceumm_libretro[.]so$' /tmp/apk-contents.txt
           grep -Eq 'lib/armeabi-v7a/libfceumm_libretro[.]so$' /tmp/apk-contents.txt
           grep -Eq 'assets/licenses/fceumm-gpl2[.]txt$' /tmp/apk-contents.txt
+          # Lowend JNI fast path must be exported by both ABI builds.
+          NM="${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for ABI in arm64-v8a armeabi-v7a; do
+            unzip -p "$APK" "lib/$ABI/libnative-lib.so" > "/tmp/lowend-core-$ABI.so"
+            unzip -p "$APK" "lib/$ABI/libgekko_bridge.so" > "/tmp/lowend-gekkonet-$ABI.so"
+            "$NM" -D "/tmp/lowend-core-$ABI.so" | grep -q 'nativeSerializeStateIntoDirect'
+            "$NM" -D "/tmp/lowend-core-$ABI.so" | grep -q 'nativeUnserializeStateFromDirect'
+            "$NM" -D "/tmp/lowend-gekkonet-$ABI.so" | grep -q 'nativeConfigureFastSnapshots'
+          done
           grep -Eq 'assets/licenses/snes_ntsc-license[.]txt$' /tmp/apk-contents.txt
           if grep -Eq 'lib/arm64-v8a/libc\+\+_shared\.so$' /tmp/apk-contents.txt; then
             echo "Unexpected shared C++ runtime; expected c++_static." >&2
