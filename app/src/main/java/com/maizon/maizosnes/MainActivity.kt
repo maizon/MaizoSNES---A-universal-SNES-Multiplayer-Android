@@ -146,6 +146,8 @@ class MainActivity : ComponentActivity() {
     private val localPlayer2Enabled = androidx.compose.runtime.mutableStateOf(false)
     private val gamepadKeyMasks = ConcurrentHashMap<Int, Int>()
     private val gamepadAxisMasks = ConcurrentHashMap<Int, Int>()
+    private val physicalPads = androidx.compose.runtime.mutableStateOf(PhysicalPadUiState())
+    private var swallowedPhysicalKeyUp: Pair<Int, Int>? = null
     private var lastUiDirection = 0
     private var lastUiDirectionAt = 0L
     private var netplaySession: NetplaySession? = null
@@ -314,6 +316,12 @@ class MainActivity : ComponentActivity() {
             NativeBridge.nativeSetGpuEnabled(appSettings.value.renderBackend == RenderBackend.GLES)
         }
         quickResumeEnabled.value = prefs.getBoolean("quick_resume_enabled", true)
+        physicalPads.value = PhysicalPadUiState(
+            p1Descriptor = prefs.getString("physical_p1_descriptor", "").orEmpty(),
+            p2Descriptor = prefs.getString("physical_p2_descriptor", "").orEmpty(),
+            p1Bindings = PhysicalPadMapping.decode(prefs.getString("physical_p1_bindings", null)),
+            p2Bindings = PhysicalPadMapping.decode(prefs.getString("physical_p2_bindings", null)))
+        refreshPhysicalPads()
         refreshCovers()
         startPerformanceSampler()
         val localIp = getLocalIpv4()
@@ -413,6 +421,8 @@ class MainActivity : ComponentActivity() {
                     onRefreshCheats = { searchCheats(refresh = true) },
                     localIpAddress = localIp,
                     multiplayerActive = netplaySession != null,
+                    lanRoomActive = remoteHost != null || classicLanAnnouncement != null,
+                    onCloseLanRoom = ::closeLanRoom,
                     remoteHostView = remoteHostView.value,
                     remoteClientView = remoteClientView.value,
                     onStartRemoteHost = { setRemoteLanEnabled(true) },
@@ -440,6 +450,13 @@ class MainActivity : ComponentActivity() {
                     hasQuickResume = ::hasQuickResume,
                     onQuickResume = ::resumeLastGame,
                     quickResumeEnabled = quickResumeEnabled.value,
+                    physicalPadState = physicalPads.value,
+                    onRefreshPhysicalPads = ::refreshPhysicalPads,
+                    onAssignPhysicalPad = ::assignPhysicalPad,
+                    onCapturePhysicalPad = ::beginPhysicalPadCapture,
+                    onCancelPhysicalCapture = ::cancelPhysicalCapture,
+                    onResetPhysicalPad = ::resetPhysicalPad,
+                    onCapturePhysicalKey = ::handlePhysicalPadCapture,
                     onQuickResumeEnabledChanged = {
                         quickResumeEnabled.value = it
                         prefs.edit().putBoolean("quick_resume_enabled", it).apply()
@@ -1479,7 +1496,8 @@ class MainActivity : ComponentActivity() {
                 statusMessage.value = "ROM carregada: " + file.name
                 restoreQuickResumeIfRequested(file)
                 syncPlaybackState()
-                if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
+                // Import/opening a game must NOT silently create a LAN room.
+                // Rooms are opened explicitly from Multiplayer or the in-game host menu.
                 if (RomSystem.isNes(file.name)) {
                     cheatStatus.value = "FCEUmm: cheats NES devem usar códigos compatíveis."
                 } else searchCheats()
@@ -1816,7 +1834,7 @@ class MainActivity : ComponentActivity() {
         if (!remoteLanEnabled.value || remoteHost != null) return
         if (classicLanAnnouncement != null) stopClassicRoom()
         if (!hasLoadedRom || currentRomFile.value == null || remoteClient != null ||
-            activeScreen.value != AppScreen.GAME || netplaySession != null) return
+            netplaySession != null) return
         val file = currentRomFile.value ?: return
         var host: RemoteLanHost? = null
         var listener: LanGameJoinListener? = null
@@ -1879,7 +1897,7 @@ class MainActivity : ComponentActivity() {
     private fun startClassicRoom() {
         if (classicLanAnnouncement != null || remoteHost != null ||
             remoteClient != null || netplaySession != null ||
-            activeScreen.value != AppScreen.GAME || !hasLoadedRom) return
+            !hasLoadedRom) return
         val rom = currentRomFile.value ?: return
         var listener: LanGameJoinListener? = null
         var announcement: LanDiscovery.Announcement? = null
@@ -1919,14 +1937,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setRemoteLanEnabled(enabled: Boolean) {
+        val hadRoom = remoteHost != null || classicLanAnnouncement != null
         remoteLanEnabled.value = enabled
         prefs.edit().putBoolean("remote_lan_enabled", enabled).apply()
-        if (enabled) {
-            stopClassicRoom()
-            startRemoteHost()
-        } else {
+        // Changing a preference must not open a room unexpectedly.
+        if (hadRoom) {
             stopRemoteHost()
-            startClassicRoom()
+            stopClassicRoom()
+            if (enabled) startRemoteHost() else startClassicRoom()
         }
     }
 
@@ -1938,8 +1956,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleAcceptedLanGame(socket: Socket) {
         if (netplaySession != null || !hasLoadedRom ||
-            (remoteHost == null && classicLanAnnouncement == null) ||
-            activeScreen.value != AppScreen.GAME) {
+            (remoteHost == null && classicLanAnnouncement == null)) {
             socket.close()
             return
         }
@@ -2080,9 +2097,8 @@ class MainActivity : ComponentActivity() {
         activeScreen.value = AppScreen.GAME
         enterImmersiveGameplay()
         syncPlaybackState()
-        if (netplaySession == null && remoteClient == null) {
-            if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
-        }
+        // Do not implicitly advertise a multiplayer room by merely resuming
+        // offline gameplay. The user must choose Create LAN or Remote Host.
     }
 
     private fun enterImmersiveGameplay() {
@@ -2429,6 +2445,121 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Device descriptors survive Android reboot/deviceId changes. */
+    private fun refreshPhysicalPads() {
+        val devices = gamepadIds().mapNotNull { id ->
+            val device = InputDevice.getDevice(id) ?: return@mapNotNull null
+            ConnectedPhysicalPad(id, device.descriptor.orEmpty(),
+                device.name?.take(85).orEmpty().ifBlank { "Controle Android #$id" })
+        }
+        if (physicalPads.value.devices != devices)
+            physicalPads.value = physicalPads.value.copy(devices = devices)
+    }
+
+    private fun assignPhysicalPad(player: Int, descriptor: String) {
+        if (player !in 1..2) return
+        val current = physicalPads.value
+        if (descriptor.isNotEmpty() &&
+            current.devices.none { it.descriptor == descriptor }) return
+        val p1 = if (player == 1) descriptor else
+            if (descriptor.isNotBlank() && current.p1Descriptor == descriptor) "" else current.p1Descriptor
+        val p2 = if (player == 2) descriptor else
+            if (descriptor.isNotBlank() && current.p2Descriptor == descriptor) "" else current.p2Descriptor
+        physicalPads.value = current.copy(p1Descriptor = p1, p2Descriptor = p2)
+        prefs.edit().putString("physical_p1_descriptor", p1)
+            .putString("physical_p2_descriptor", p2).apply()
+        gamepadKeyMasks.clear()
+        gamepadAxisMasks.clear()
+        publishInputs()
+    }
+
+    private fun beginPhysicalPadCapture(player: Int, bit: Int) {
+        if (player !in 1..2 || bit !in 0..15) return
+        refreshPhysicalPads()
+        physicalPads.value = physicalPads.value.copy(
+            capturingPlayer = player, capturingBit = bit)
+        statusMessage.value = "P$player: pressione agora o botão físico desejado."
+    }
+
+    private fun cancelPhysicalCapture() {
+        physicalPads.value = physicalPads.value.copy(capturingPlayer = 0,
+            capturingBit = -1)
+    }
+
+    private fun resetPhysicalPad(player: Int) {
+        if (player !in 1..2) return
+        cancelPhysicalCapture()
+        val current = physicalPads.value
+        physicalPads.value = if (player == 1)
+            current.copy(p1Bindings = PhysicalPadMapping.defaults)
+        else current.copy(p2Bindings = PhysicalPadMapping.defaults)
+        prefs.edit().putString("physical_p${player}_bindings",
+            PhysicalPadMapping.encode(PhysicalPadMapping.defaults)).apply()
+        gamepadKeyMasks.clear()
+        gamepadAxisMasks.clear()
+        publishInputs()
+        statusMessage.value = "P$player: mapeamento padrão restaurado."
+    }
+
+    /** Shared by Activity and Compose Dialog's separate Android window. */
+    private fun handlePhysicalPadCapture(keyCode: Int, deviceId: Int, action: Int): Boolean {
+        val pad = deviceId in gamepadIds()
+        val previous = swallowedPhysicalKeyUp
+        if (action == KeyEvent.ACTION_UP && previous == (deviceId to keyCode)) {
+            swallowedPhysicalKeyUp = null
+            return true
+        }
+        val capture = physicalPads.value
+        if (!pad || capture.capturingPlayer !in 1..2 ||
+            capture.capturingBit !in 0..15) return false
+        if (action == KeyEvent.ACTION_DOWN) {
+            if (!PhysicalPadMapping.mayBind(keyCode)) {
+                statusMessage.value = "Tecla reservada pelo Android/Guide. Escolha outro botão."
+                return true
+            }
+            val player = capture.capturingPlayer
+            val mapping = if (player == 1) capture.p1Bindings else capture.p2Bindings
+            val mapped = PhysicalPadMapping.rebind(mapping, capture.capturingBit, keyCode)
+            physicalPads.value = if (player == 1) capture.copy(
+                p1Bindings = mapped, capturingPlayer = 0, capturingBit = -1)
+            else capture.copy(
+                p2Bindings = mapped, capturingPlayer = 0, capturingBit = -1)
+            prefs.edit().putString("physical_p${player}_bindings",
+                PhysicalPadMapping.encode(mapped)).apply()
+            swallowedPhysicalKeyUp = deviceId to keyCode
+            gamepadKeyMasks.clear()
+            gamepadAxisMasks.clear()
+            publishInputs()
+            statusMessage.value = "P$player: botão configurado e salvo."
+        }
+        return true
+    }
+
+    /** User-assigned P1/P2 first, then deterministic auto-detected devices. */
+    private fun orderedGamepadIds(): List<Int> {
+        val ids = gamepadIds()
+        val state = physicalPads.value
+        val p1 = ids.firstOrNull {
+            state.p1Descriptor.isNotEmpty() &&
+                InputDevice.getDevice(it)?.descriptor == state.p1Descriptor
+        } ?: ids.firstOrNull {
+            state.p2Descriptor.isEmpty() ||
+                InputDevice.getDevice(it)?.descriptor != state.p2Descriptor
+        } ?: ids.firstOrNull()
+        val p2 = ids.firstOrNull {
+            it != p1 && state.p2Descriptor.isNotEmpty() &&
+                InputDevice.getDevice(it)?.descriptor == state.p2Descriptor
+        } ?: ids.firstOrNull { it != p1 }
+        return (listOfNotNull(p1, p2) + ids.filter { it != p1 && it != p2 })
+    }
+
+    private fun physicalBindingForDevice(deviceId: Int): Map<Int, Int> {
+        val devices = orderedGamepadIds()
+        val p2 = devices.getOrNull(1) == deviceId ||
+            (devices.size == 1 && localPlayer2Enabled.value)
+        return if (p2) physicalPads.value.p2Bindings else physicalPads.value.p1Bindings
+    }
+
     private fun snesButtonForKey(keyCode: Int): Int? = when (keyCode) {
         KeyEvent.KEYCODE_DPAD_UP -> 4
         KeyEvent.KEYCODE_DPAD_DOWN -> 5
@@ -2467,6 +2598,8 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val pad = event.deviceId in gamepadIds()
+        if (pad && handlePhysicalPadCapture(event.keyCode, event.deviceId, event.action))
+            return true
         val playing = activeScreen.value == AppScreen.GAME
 
         // Only central PS/Xbox MODE/Guide enters the frontend menu when Android
@@ -2498,7 +2631,11 @@ class MainActivity : ComponentActivity() {
             }
             return super.dispatchKeyEvent(event)
         }
-        val bit = snesButtonForKey(event.keyCode) ?: return super.dispatchKeyEvent(event)
+        val bit = if (pad)
+            PhysicalPadMapping.bitForKey(physicalBindingForDevice(event.deviceId),
+                event.keyCode)
+        else snesButtonForKey(event.keyCode)
+        if (bit == null) return super.dispatchKeyEvent(event)
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP)
             return super.dispatchKeyEvent(event)
         if (pad) {
@@ -2560,14 +2697,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun currentLocalInput(): Int {
-        val first = gamepadIds().firstOrNull()
+        val first = orderedGamepadIds().firstOrNull()
         return pressedInputs.get() or (if (first == null) 0 else
             (gamepadKeyMasks[first] ?: 0) or (gamepadAxisMasks[first] ?: 0))
     }
 
     private fun publishInputs() {
         if (remoteClient != null) {
-            val pads = gamepadIds()
+            val pads = orderedGamepadIds()
             val mask = pressedInputs.get() or pads.fold(0) { value, id ->
                 value or (gamepadKeyMasks[id] ?: 0) or (gamepadAxisMasks[id] ?: 0)
             }
@@ -2575,7 +2712,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (netplaySession != null) return // Network thread applies per-frame P1/P2.
-        val ids = gamepadIds()
+        val ids = orderedGamepadIds()
         val first = ids.firstOrNull()
         val second = ids.getOrNull(1)
         // Touch + one gamepad: the gamepad becomes player 2.
@@ -2619,10 +2756,28 @@ class MainActivity : ComponentActivity() {
         else "Modo local de dois jogadores desativado."
     }
 
+    private fun closeLanRoom() {
+        stopRemoteHost()
+        stopClassicRoom()
+        lanStatus.value = "Sala LAN fechada. Crie outra quando desejar."
+    }
+
     private fun hostMultiplayer(port: Int) {
-        if (netplaySession != null || !hasLoadedRom) return
+        if (netplaySession != null) {
+            lanStatus.value = "Encerre primeiro a sessão atual."
+            return
+        }
+        if (!hasLoadedRom || currentRomFile.value == null) {
+            lanStatus.value = "Abra uma ROM na biblioteca antes de criar a sala LAN."
+            return
+        }
         if (port == 55435) {
-            continueGame() // The game keeps running until someone joins.
+            if (remoteHost != null || classicLanAnnouncement != null) {
+                lanStatus.value = "Sala LAN já está aberta e aguardando convidado."
+                return
+            }
+            // Stay in MULTIPLAYER. The host listener and UDP discovery begin
+            // immediately; only a successfully connected peer opens GAME.
             if (remoteLanEnabled.value) startRemoteHost() else startClassicRoom()
         } else startNetplay(null, port) // Existing MZNP custom-port session.
     }
@@ -3019,7 +3174,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopMultiplayer() {
-        if (netplaySession == null) return
+        if (netplaySession == null) {
+            if (remoteHost != null || classicLanAnnouncement != null) closeLanRoom()
+            return
+        }
         lanStatus.value = "Cancelando sessão e liberando sala…"
         autoNetworkStatus.value = lanStatus.value
         pendingRomApproval.getAndSet(null)?.offer(false)
@@ -3090,6 +3248,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshPhysicalPads()
         activityResumed = true
         syncPlaybackState()
     }

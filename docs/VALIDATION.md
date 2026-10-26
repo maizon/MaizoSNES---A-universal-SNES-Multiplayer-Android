@@ -196,3 +196,39 @@ A versão anterior permanece ponto de rollback até validação de hardware.
 **Limites:** CI cobre a compilação, políticas de cache e regras locais.
 Sem dois dispositivos reais e traces de crash não é possível afirmar
 estabilidade definitiva do NES com GekkoNet.
+
+
+## Hotfix LAN e gamepads físicos — 2026-10-26
+
+- [ ] Abra a aba **Multiplayer** no Android **landscape** e em portrait; o app
+      não deve fechar quando nenhum `FocusRequester` está registrado.
+- [ ] Abra SNES e NES offline, entre na aba Multiplayer e pressione
+      **CRIAR SALA LAN SEM INTERNET**. A tela deve permanecer no lobby,
+      com **● SALA LAN ABERTA**, instruções e **FECHAR SALA LAN**.
+- [ ] Confirme pelo segundo aparelho que a sala aparece na descoberta
+      Wi-Fi e que a porta TCP 55435 aceita a conexão.
+- [ ] Aceite a conexão P2 e a transferência de ROM apenas quando autorizada.
+      A tela do jogo deve abrir **somente após conexão confirmada**.
+- [ ] Teste **FECHAR SALA LAN** e criação novamente sem reiniciar o app.
+- [ ] Teste modo LAN automático, IP manual e ambiente com porta ocupada.
+      O botão não deve abrir gameplay em caso de erro.
+- [ ] Abra Configurações → Controles → **CONTROLES FÍSICOS P1/P2**.
+      Conecte dois USB/Bluetooth, vincule cada um ao jogador correto.
+      Remapeie B/A/Y/X, D-pad, Start/Select e L/R separadamente.
+- [ ] Verifique que o controle P2 **não aciona P1** quando o P2 local
+      estiver habilitado, e vice-versa. Com um controle e touch, P2
+      utiliza o gamepad e P1 utiliza touch.
+- [ ] Feche/reabra o app: remapeamentos e escolha de dispositivo persistem.
+      Troque IDs de dispositivos ao reconectar: os perfis seguem o
+      identificador físico (descriptor) quando disponível.
+- [ ] Remapeie uma tecla já usada por outro botão; as duas atribuições
+      devem trocar de posição, sem duplicar entradas.
+- [ ] Botão central Guide/PS/Xbox permanece reservado ao menu.
+      Com remapeamento padrão, START continua START do jogo.
+- [ ] Repita SNES e NES multiplayer existente (LAN/4G/Wi-Fi),
+      ROM autorizada, estado/saves e mudança de aplicativo.
+- [ ] Se houver crash, capture `adb logcat -b crash -d` e remova
+      nomes pessoais, endereços e identificadores antes de compartilhar.
+
+**Observação:** CI não substitui testes de LAN em dois aparelhos,
+nem garante funcionamento de controles USB/Bluetooth de todos os fabricantes.

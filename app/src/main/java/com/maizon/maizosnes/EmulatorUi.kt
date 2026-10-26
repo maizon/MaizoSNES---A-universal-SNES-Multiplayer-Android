@@ -205,10 +205,14 @@ private fun Modifier.padFocusRing(): Modifier = composed {
 /** Compose Dialog is a separate Android window (not dispatched via Activity).
  * Convert pad A to ENTER on that window and pad B to Back.
  */
-private fun Modifier.dialogGamepadKeys(onBack: () -> Unit): Modifier = composed {
+private fun Modifier.dialogGamepadKeys(
+    onCaptureKey: ((android.view.KeyEvent) -> Boolean)? = null,
+    onBack: () -> Unit
+): Modifier = composed {
     val view = LocalView.current
     this.onPreviewKeyEvent { key ->
         val raw = key.nativeKeyEvent
+        if (onCaptureKey?.invoke(raw) == true) return@onPreviewKeyEvent true
         when (raw.keyCode) {
             android.view.KeyEvent.KEYCODE_BUTTON_MODE, GamepadKeyRouting.OPTIONAL_GUIDE_BUTTON,
             android.view.KeyEvent.KEYCODE_BUTTON_B -> {
@@ -402,6 +406,8 @@ internal fun MaizoEmulatorApp(
     onReceiveRomAllowedChanged: (Boolean) -> Unit,
     localIpAddress: String,
     multiplayerActive: Boolean,
+    lanRoomActive: Boolean,
+    onCloseLanRoom: () -> Unit,
     remoteHostView: RemoteHostView,
     remoteClientView: RemoteClientView?,
     onStartRemoteHost: () -> Unit,
@@ -430,6 +436,13 @@ internal fun MaizoEmulatorApp(
     onQuickResume: (String) -> Unit,
     quickResumeEnabled: Boolean,
     onQuickResumeEnabledChanged: (Boolean) -> Unit,
+    physicalPadState: PhysicalPadUiState,
+    onRefreshPhysicalPads: () -> Unit,
+    onAssignPhysicalPad: (Int, String) -> Unit,
+    onCapturePhysicalPad: (Int, Int) -> Unit,
+    onCancelPhysicalCapture: () -> Unit,
+    onResetPhysicalPad: (Int) -> Unit,
+    onCapturePhysicalKey: (Int, Int, Int) -> Boolean,
     onOpenInstagram: () -> Unit,
     onOpenRom: (String) -> Unit,
     onContinueGame: () -> Unit,
@@ -543,7 +556,14 @@ internal fun MaizoEmulatorApp(
                         modifier = Modifier
                             .fillMaxWidth(if (wideDialog) 0.84f else 0.95f)
                             .fillMaxHeight(if (wideDialog) 0.92f else 0.94f)
-                            .dialogGamepadKeys { onGameMenuChanged(false) },
+                            .dialogGamepadKeys(
+                                onBack = { onGameMenuChanged(false) },
+                                onCaptureKey = { raw ->
+                                    // Consume both DOWN and UP even when DOWN has
+                                    // just finished capture, or B/A could activate
+                                    // the focused dialog button unexpectedly.
+                                    onCapturePhysicalKey(raw.keyCode, raw.deviceId, raw.action)
+                                }),
                         shape = RoundedCornerShape(23.dp),
                         color = Panel,
                         tonalElevation = 12.dp
@@ -650,6 +670,15 @@ internal fun MaizoEmulatorApp(
                                 devShareEnabled, onDevUnlock, onDevShareChanged,
                                 iceServerOverrides, onIceOverridesChanged,
                                 iceTestStatus, onTestIce,
+                                physicalPadState = physicalPadState,
+                                onRefreshPhysicalPads = onRefreshPhysicalPads,
+                                onAssignPhysicalPad = onAssignPhysicalPad,
+                                onCapturePhysicalPad = onCapturePhysicalPad,
+                                onCancelPhysicalCapture = onCancelPhysicalCapture,
+                                onResetPhysicalPad = onResetPhysicalPad,
+                                onCapturePhysicalKey = onCapturePhysicalKey,
+                                localPlayer2 = localMultiplayer,
+                                onLocalPlayer2Changed = onLocalMultiplayerChanged,
                                 quickResumeEnabled = quickResumeEnabled,
                                 onQuickResumeEnabledChanged = onQuickResumeEnabledChanged,
                                 containerModifier = Modifier.weight(1f)
@@ -751,6 +780,7 @@ internal fun MaizoEmulatorApp(
             AppScreen.MULTIPLAYER -> MultiplayerScreen(
                 Modifier.fillMaxSize(), currentRomName, localRomHashPrefix, multiplayerReady,
                 multiplayerStatus, localIpAddress, multiplayerActive, localMultiplayer,
+                lanRoomActive, onCloseLanRoom,
                 connectionMode, onConnectionModeChanged,
                 netplayLatencyMode, onNetplayLatencyModeChanged,
                 netcodeMode, onNetcodeModeChanged,
@@ -794,6 +824,15 @@ internal fun MaizoEmulatorApp(
                     onSelectTouchPreset, connectionMode, onConnectionModeChanged,
                     devUnlocked, devShareEnabled, onDevUnlock, onDevShareChanged,
                     iceServerOverrides, onIceOverridesChanged, iceTestStatus, onTestIce,
+                    physicalPadState = physicalPadState,
+                    onRefreshPhysicalPads = onRefreshPhysicalPads,
+                    onAssignPhysicalPad = onAssignPhysicalPad,
+                    onCapturePhysicalPad = onCapturePhysicalPad,
+                    onCancelPhysicalCapture = onCancelPhysicalCapture,
+                    onResetPhysicalPad = onResetPhysicalPad,
+                    onCapturePhysicalKey = onCapturePhysicalKey,
+                    localPlayer2 = localMultiplayer,
+                    onLocalPlayer2Changed = onLocalMultiplayerChanged,
                     quickResumeEnabled = quickResumeEnabled,
                     onQuickResumeEnabledChanged = onQuickResumeEnabledChanged)
             }
@@ -1518,6 +1557,8 @@ private fun MultiplayerScreen(
     localIpAddress: String,
     active: Boolean,
     localMultiplayer: Boolean,
+    lanRoomActive: Boolean,
+    onCloseLanRoom: () -> Unit,
     connectionMode: NetworkMode,
     onConnectionModeChanged: (NetworkMode) -> Unit,
     netplayLatencyMode: NetplayLatencyMode,
@@ -1596,7 +1637,12 @@ private fun MultiplayerScreen(
     var portText by remember(connectionMode) { mutableStateOf(savedConnectionPort.toString()) }
     val port = portText.toIntOrNull()
     val firstModeFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { firstModeFocus.requestFocus() }
+    // In landscape the mode chips use a different branch WITHOUT the
+    // focusRequester modifier. requestFocus() on an unattached requester
+    // throws IllegalStateException and used to crash the Multiplayer tab.
+    LaunchedEffect(compactLobby) {
+        if (!compactLobby) firstModeFocus.requestFocus()
+    }
     LaunchedEffect(connectionMode) {
         if (connectionMode == NetworkMode.LAN_AUTO ||
             connectionMode == NetworkMode.AUTO) onScanLan()
@@ -2041,9 +2087,29 @@ private fun MultiplayerScreen(
                 }
                 if ((connectionMode == NetworkMode.AUTO ||
                         connectionMode == NetworkMode.LAN_AUTO) && !active) {
-                    OutlinedButton(onClick = { onHost(55435) },
-                        enabled = ready, modifier = Modifier.fillMaxWidth()) {
-                        Text("CRIAR SALA LAN SEM INTERNET")
+                    if (lanRoomActive) {
+                        Surface(color = Color(0xFF173A39),
+                            shape = RoundedCornerShape(12.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("● SALA LAN ABERTA", color = Mint,
+                                    fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Aguardando outro jogador pela rede Wi-Fi. " +
+                                    "Você permanece nesta tela; a partida abre " +
+                                    "quando a conexão do convidado for confirmada.",
+                                    color = Color.White, fontSize = 11.sp)
+                                Text(status, color = Mint, fontSize = 11.sp)
+                                OutlinedButton(onClick = onCloseLanRoom,
+                                    modifier = Modifier.fillMaxWidth()) {
+                                    Text("FECHAR SALA LAN")
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedButton(onClick = { onHost(55435) },
+                            enabled = ready, modifier = Modifier.fillMaxWidth()) {
+                            Text("CRIAR SALA LAN SEM INTERNET")
+                        }
                     }
                 }
                 if (visibleLanRooms.isEmpty()) {
@@ -2240,8 +2306,22 @@ private fun MultiplayerScreen(
                         Text("ENCERRAR SESSÃO")
                     }
                 } else {
+                    if (lanRoomActive) {
+                        Surface(color = Color(0xFF173A39), shape = RoundedCornerShape(12.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(11.dp)) {
+                                Text("● SALA LAN ABERTA • AGUARDANDO JOGADOR",
+                                    color = Mint, fontSize = 11.sp)
+                                Text(status, color = Color.White, fontSize = 10.sp)
+                                OutlinedButton(onClick = onCloseLanRoom,
+                                    modifier = Modifier.fillMaxWidth()) {
+                                    Text("FECHAR SALA LAN")
+                                }
+                            }
+                        }
+                    }
                     Button(onClick = { port?.let(onHost) },
-                        enabled = ready && port != null && port in 1024..65535,
+                        enabled = !lanRoomActive && ready && port != null &&
+                            port in 1024..65535,
                         modifier = Modifier.fillMaxWidth()) { Text("CRIAR SALA • JOGADOR 1") }
                     OutlinedButton(onClick = { if (port != null) onJoin(remoteHost.trim(), port) },
                         enabled = (ready || receiveRomAllowed) &&
@@ -3378,6 +3458,97 @@ private fun TouchButton(
     }
 }
 
+
+/** Optional per-player USB/Bluetooth mapping, independent of touch profiles. */
+@Composable
+private fun PhysicalPadSettingsPanel(
+    state: PhysicalPadUiState,
+    localPlayer2: Boolean,
+    onLocalPlayer2Changed: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
+    onAssign: (Int, String) -> Unit,
+    onCapture: (Int, Int) -> Unit,
+    onCancelCapture: () -> Unit,
+    onReset: (Int) -> Unit
+) {
+    var selectedPlayer by rememberSaveable { mutableStateOf(1) }
+    SettingSectionTitle("CONTROLES FÍSICOS P1 / P2",
+        "Remapeie botões USB/Bluetooth separadamente. O botão Guide/PS/Xbox " +
+            "continua reservado ao menu; Start e Select continuam dentro do jogo.")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        listOf(1, 2).forEach { player ->
+            androidx.compose.material3.FilterChip(
+                selected = selectedPlayer == player,
+                onClick = { selectedPlayer = player },
+                label = { Text("JOGADOR $player") },
+                modifier = Modifier.padFocusRing())
+        }
+        TextButton(onClick = onRefresh) { Text("ATUALIZAR", fontSize = 10.sp) }
+    }
+    ToggleSettingRow(
+        "Ativar P2 local",
+        "Com dois controles, o primeiro usa P1 e o segundo P2. " +
+            "Com um controle, touch usa P1 e controle usa P2.",
+        localPlayer2, onLocalPlayer2Changed)
+    val selected = if (selectedPlayer == 1) state.p1Descriptor else state.p2Descriptor
+    val devices = state.devices
+    Text("CONTROLE FÍSICO ATRIBUÍDO", color = Mint,
+        fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    ChoiceRow("Automático (recomendado)",
+        "Mantém a ordem dos controles USB/Bluetooth conectados.",
+        selected.isBlank()) { onAssign(selectedPlayer, "") }
+    devices.forEach { device ->
+        ChoiceRow(device.name + " • #" + device.id,
+            "Controle vinculado ao jogador $selectedPlayer.",
+            selected.isNotBlank() && selected == device.descriptor) {
+            onAssign(selectedPlayer, device.descriptor)
+        }
+    }
+    if (devices.isEmpty()) Text("Nenhum controle USB/Bluetooth conectado. " +
+        "Conecte um e toque ATUALIZAR.", color = Muted, fontSize = 11.sp)
+    if (state.capturingPlayer == selectedPlayer) {
+        Surface(color = Color(0xFF193B39), shape = RoundedCornerShape(13.dp)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                Text("● AGUARDANDO BOTÃO FÍSICO • P$selectedPlayer",
+                    color = Mint, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text("Pressione o botão no controle conectado. " +
+                    "Guide/Home e Voltar são protegidos.",
+                    color = Color.White, fontSize = 11.sp)
+                OutlinedButton(onClick = onCancelCapture,
+                    modifier = Modifier.fillMaxWidth()) { Text("CANCELAR REMAPEAMENTO") }
+            }
+        }
+    }
+    val current = if (selectedPlayer == 1) state.p1Bindings else state.p2Bindings
+    PhysicalPadMapping.buttons.forEach { (bit, label) ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("P$selectedPlayer • $label",
+                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                val keyName = current[bit]?.let { android.view.KeyEvent.keyCodeToString(it) }
+                    ?.removePrefix("KEYCODE_") ?: "SEM TECLA"
+                Text(keyName, fontSize = 10.sp, color = Muted, maxLines = 1)
+            }
+            OutlinedButton(onClick = { onCapture(selectedPlayer, bit) },
+                enabled = state.capturingPlayer == 0 ||
+                    state.capturingPlayer == selectedPlayer,
+                modifier = Modifier.padFocusRing()) {
+                Text(if (state.capturingPlayer == selectedPlayer &&
+                    state.capturingBit == bit) "AGUARDANDO…" else "ALTERAR",
+                    fontSize = 10.sp)
+            }
+        }
+    }
+    OutlinedButton(onClick = { onReset(selectedPlayer) },
+        modifier = Modifier.fillMaxWidth()) {
+        Text("RESTAURAR BOTÕES PADRÃO P$selectedPlayer")
+    }
+    Text("O analógico mantém seu direcional nativo; as entradas digitais e " +
+        "os botões podem ser remapeados. Preferências P1/P2 ficam salvas no aparelho.",
+        fontSize = 10.sp, color = Muted)
+}
+
 @Composable
 private fun EmulatorSettings(
     settings: AppSettings,
@@ -3408,6 +3579,15 @@ private fun EmulatorSettings(
     onIceOverridesChanged: (String) -> Unit,
     iceTestStatus: String,
     onTestIce: () -> Unit,
+    physicalPadState: PhysicalPadUiState = PhysicalPadUiState(),
+    onRefreshPhysicalPads: () -> Unit = {},
+    onAssignPhysicalPad: (Int, String) -> Unit = { _, _ -> },
+    onCapturePhysicalPad: (Int, Int) -> Unit = { _, _ -> },
+    onCancelPhysicalCapture: () -> Unit = {},
+    onResetPhysicalPad: (Int) -> Unit = {},
+    onCapturePhysicalKey: (Int, Int, Int) -> Boolean = { _, _, _ -> false },
+    localPlayer2: Boolean = false,
+    onLocalPlayer2Changed: (Boolean) -> Unit = {},
     quickResumeEnabled: Boolean = true,
     onQuickResumeEnabledChanged: (Boolean) -> Unit = {},
     containerModifier: Modifier = Modifier
@@ -3421,7 +3601,12 @@ private fun EmulatorSettings(
     var confirmBackup by remember { mutableStateOf<String?>(null) }
     var cheatFilter by remember { mutableStateOf("") }
     val categories = listOf("Vídeo", "Áudio", "Controles", "Cheats", "Rede", "Núcleo", "Estados", "DEV")
-    Column(containerModifier.fillMaxWidth()) {
+    Column(containerModifier.fillMaxWidth().onPreviewKeyEvent { key ->
+        if (physicalPadState.capturingPlayer in 1..2) {
+            val raw = key.nativeKeyEvent
+            onCapturePhysicalKey(raw.keyCode, raw.deviceId, raw.action)
+        } else false
+    }) {
         if (inGame) {
             Row(Modifier.fillMaxWidth().padding(bottom = 9.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -3611,6 +3796,15 @@ private fun EmulatorSettings(
                     }
                 }
                 "Controles" -> {
+                    PhysicalPadSettingsPanel(
+                        state = physicalPadState,
+                        localPlayer2 = localPlayer2,
+                        onLocalPlayer2Changed = onLocalPlayer2Changed,
+                        onRefresh = onRefreshPhysicalPads,
+                        onAssign = onAssignPhysicalPad,
+                        onCapture = onCapturePhysicalPad,
+                        onCancelCapture = onCancelPhysicalCapture,
+                        onReset = onResetPhysicalPad)
                     ToggleSettingRow("Controles na tela", "Exibe os comandos sobrepostos ao vídeo.", settings.touch.enabled) {
                         onSettingsChanged(settings.copy(touch = settings.touch.copy(enabled = it)))
                     }
@@ -4006,7 +4200,7 @@ private fun NetplayDebugDialog(
         String.format(java.util.Locale.US, "%.1f", v)
     AlertDialog(
         onDismissRequest = dismiss,
-        modifier = Modifier.dialogGamepadKeys(dismiss),
+        modifier = Modifier.dialogGamepadKeys(onBack = dismiss),
         title = { Text("STATUS DE CONEXÃO • DEBUG", color = Mint) },
         text = {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
